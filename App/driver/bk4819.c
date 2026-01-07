@@ -695,7 +695,7 @@ void BK4819_SetFilterBandwidth(const BK4819_FilterBandwidth_t Bandwidth, const b
 			}
 			break;
 
-		case BK4819_FILTER_BANDWIDTH_TIGHT: // 1.7kHz
+		case BK4819_FILTER_BW_TIGHT: // 1.7kHz
 				val = (0u << 12) |     //  0 RF filter bandwidth
 				  (0u <<  9) |	   //  0 RF filter bandwidth when signal is weak
 				  (0u <<  6) |     // *1 AFTxLPF2 filter Band Width

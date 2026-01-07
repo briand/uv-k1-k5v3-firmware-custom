@@ -303,6 +303,7 @@ void RADIO_ConfigureChannel(const unsigned int VFO, const unsigned int configure
         if (tmp >= MODULATION_UKNOWN)
             tmp = MODULATION_FM;
         pVfo->Modulation = tmp;
+		RADIO_SetModulation(tmp);
 
         tmp = data[6];
         if (tmp >= STEP_N_ELEM)
@@ -771,6 +772,7 @@ void RADIO_SetupRegisters(bool switchToForeground)
             case BK4819_FILTER_BW_WIDE:
             case BK4819_FILTER_BW_NARROW:
             case BK4819_FILTER_BW_NARROWER:
+		case BK4819_FILTER_BW_TIGHT:
                 #ifdef ENABLE_AM_FIX
     //              BK4819_SetFilterBandwidth(Bandwidth, gRxVfo->Modulation == MODULATION_AM && gSetting_AM_fix);
                     BK4819_SetFilterBandwidth(Bandwidth, true);
@@ -1002,6 +1004,9 @@ void RADIO_SetTxParameters(void)
 
     BK4819_ToggleGpioOut(BK4819_GPIO0_PIN28_RX_ENABLE, false);
 
+	// briand
+	RADIO_SetModulation(gTxVfo->Modulation);
+
     switch (Bandwidth)
     {
         default:
@@ -1027,17 +1032,29 @@ void RADIO_SetTxParameters(void)
 
     BK4819_PrepareTransmit();
 
-	SYSTEM_DelayMs(5);   /// briand - 10);
+	#ifdef ENABLE_CW_MODULATOR
+		SYSTEM_DelayMs(1);
+	#else
+		SYSTEM_DelayMs(10);
+	#endif
 
     BK4819_PickRXFilterPathBasedOnFrequency(gCurrentVfo->pTX->Frequency);
 
     BK4819_ToggleGpioOut(BK4819_GPIO1_PIN29_PA_ENABLE, true);
 
-    SYSTEM_DelayMs(5);
+	#ifdef ENABLE_CW_MODULATOR
+		SYSTEM_DelayMs(1);
+	#else
+	    SYSTEM_DelayMs(5);
+	#endif
 
     BK4819_SetupPowerAmplifier(gCurrentVfo->TXP_CalculatedSetting, gCurrentVfo->pTX->Frequency);
 
-    SYSTEM_DelayMs(10);
+	#ifdef ENABLE_CW_MODULATOR
+		SYSTEM_DelayMs(1);
+	#else
+	    SYSTEM_DelayMs(10);
+	#endif
 
     switch (gCurrentVfo->pTX->CodeType)
     {
@@ -1359,3 +1376,47 @@ void RADIO_PrepareCssTX(void)
         RADIO_SendCssTail();
     RADIO_SetupRegisters(true);
 }
+
+#ifdef ENABLE_CW_MODULATOR
+
+void RADIO_CW_BeginResume(void)
+{
+	// Setup and begin CW transmission, either first time or resuming after suspend
+
+	BK4819_SetupPowerAmplifier(gCurrentVfo->TXP_CalculatedSetting, gCurrentVfo->pTX->Frequency);
+
+	// Don't send AF to RF during CW
+	BK4819_EnterTxMute();
+
+	// Enable Tone1 with gain 20, Tone2 disabled
+	BK4819_WriteRegister(BK4819_REG_70,
+		BK4819_REG_70_ENABLE_TONE1 |
+		(20u << BK4819_REG_70_SHIFT_TONE1_TUNING_GAIN));
+
+	// Set Tone1 frequency to 700 Hz
+	BK4819_SetScrambleFrequencyControlWord(700);
+
+	// Setup the Tx/Rx blocks for CW transmission
+	BK4819_EnableTXLink();
+
+	// Use AF ALAM mode for CW as a sidetone
+	BK4819_SetAF(BK4819_AF_ALAM);
+
+	// Turn on the red LED
+	BK4819_ToggleGpioOut(BK4819_GPIO5_PIN1_RED, true);
+}
+
+void RADIO_CW_Suspend(void)
+{
+	// Suspend CW transmission - "QSK" key up, be ready to start RF again quickly - don't actually exit TX mode
+
+	// Set PA bias to 0
+	BK4819_SetupPowerAmplifier(0, 0);
+
+	// Set TONE1 to 0 Hz
+	BK4819_SetScrambleFrequencyControlWord(0);
+
+	// Turn off the red LED
+	BK4819_ToggleGpioOut(BK4819_GPIO5_PIN1_RED, false);
+}
+#endif

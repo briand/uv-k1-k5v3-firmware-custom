@@ -656,6 +656,11 @@ static void CheckRadioInterrupts(void)
     if (SCANNER_IsScanning())
         return;
 
+	#ifdef ENABLE_CW_MODULATOR
+		if (gCurrentFunction == FUNCTION_TRANSMIT && gTxVfo->Modulation == MODULATION_CW)
+			return;
+	#endif
+
     while (BK4819_ReadRegister(BK4819_REG_0C) & 1u) { // BK chip interrupt request
         // clear interrupts
         BK4819_WriteRegister(BK4819_REG_02, 0);
@@ -808,6 +813,12 @@ void APP_EndTransmission(void)
     RADIO_SendEndOfTransmission();
 
     gFlagEndTransmission = true;
+
+#ifdef ENABLE_CW_MODULATOR
+	// Clear CW state when ending transmission entirely
+	gCW_State = CW_INACTIVE;
+	gCW_SuspendCountdown_10ms = 0;
+#endif
 
     if (gMonitor) {
          //turn the monitor back on
@@ -1390,7 +1401,11 @@ void APP_TimeSlice10ms(void)
     if (gCurrentFunction != FUNCTION_POWER_SAVE || !gRxIdleMode)
         CheckRadioInterrupts();
 
-    if (gCurrentFunction == FUNCTION_TRANSMIT)
+    if (gCurrentFunction == FUNCTION_TRANSMIT 
+#ifdef ENABLE_CW_MODULATOR
+		&& gCurrentVfo->Modulation != MODULATION_CW
+#endif
+	)
     {   // transmitting
 #ifdef ENABLE_AUDIO_BAR
         if (gSetting_mic_bar && (gFlashLightBlinkCounter % (150 / 10)) == 0) // once every 150ms

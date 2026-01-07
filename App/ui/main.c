@@ -1421,7 +1421,11 @@ void UI_DisplayMain(void)
         const bool rx = FUNCTION_IsRx();
 
 #ifdef ENABLE_AUDIO_BAR
-        if (gSetting_mic_bar && gCurrentFunction == FUNCTION_TRANSMIT) {
+        if (gSetting_mic_bar && gCurrentFunction == FUNCTION_TRANSMIT 
+#ifdef ENABLE_CW_MODULATOR
+			&& gCurrentVfo->Modulation != MODULATION_CW
+#endif
+		) {	
             center_line = CENTER_LINE_AUDIO_BAR;
             UI_DisplayAudioBar();
         }

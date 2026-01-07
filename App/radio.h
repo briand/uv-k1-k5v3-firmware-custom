@@ -56,9 +56,6 @@ enum VfoState_t
 };
 typedef enum VfoState_t VfoState_t;
 
-// briand debug
-#define ENABLE_CW_MODULATOR 1
-
 typedef enum {
     MODULATION_FM,
     MODULATION_AM,
@@ -177,5 +174,10 @@ void     RADIO_PrepareTX(void);
 void     RADIO_SendCssTail(void);
 void     RADIO_PrepareCssTX(void);
 void     RADIO_SendEndOfTransmission(void);
+
+#ifdef ENABLE_CW_MODULATOR
+void     RADIO_CW_Suspend(void);
+void     RADIO_CW_BeginResume(void);
+#endif
 
 #endif

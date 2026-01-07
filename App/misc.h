@@ -464,4 +464,16 @@ void FUNCTION_NOP();
 
 static inline bool SerialConfigInProgress() { return gSerialConfigCountDown_500ms != 0; }
 
+#ifdef ENABLE_CW_MODULATOR
+	typedef enum {
+		CW_INACTIVE = 0,
+		CW_TRANSMITTING,
+		CW_SUSPENDED,
+	} CW_State_t;
+
+	extern volatile CW_State_t            gCW_State;
+	extern volatile uint16_t     gCW_SuspendCountdown_10ms;
+	extern const uint16_t        cw_suspend_count_10ms;
+#endif
+
 #endif
