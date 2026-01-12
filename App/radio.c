@@ -303,7 +303,6 @@ void RADIO_ConfigureChannel(const unsigned int VFO, const unsigned int configure
         if (tmp >= MODULATION_UKNOWN)
             tmp = MODULATION_FM;
         pVfo->Modulation = tmp;
-		RADIO_SetModulation(tmp);
 
         tmp = data[6];
         if (tmp >= STEP_N_ELEM)
@@ -493,7 +492,11 @@ void RADIO_ConfigureSquelchAndOutputPower(VFO_Info_t *pInfo)
     // 0x1E60 : 0x1E00
     uint32_t Base = (Band < BAND4_174MHz) ? 0x010060 : 0x010000;
 
-    if (gEeprom.SQUELCH_LEVEL == 0)
+    if (gEeprom.SQUELCH_LEVEL == 0
+	#ifdef ENABLE_CW_MODULATOR
+		|| pInfo->Modulation == MODULATION_CW
+	#endif
+	)
     {   // squelch == 0 (off)
         pInfo->SquelchOpenRSSIThresh    = 0;     // 0 ~ 255
         pInfo->SquelchOpenNoiseThresh   = 127;   // 127 ~ 0
@@ -810,7 +813,11 @@ void RADIO_SetupRegisters(bool switchToForeground)
         else
             Frequency = NoaaFrequencyTable[gNoaaChannel];
     #else
-        Frequency = gRxVfo->pRX->Frequency;
+        Frequency = gRxVfo->pRX->Frequency
+	#if ENABLE_CW_MODULATOR
+		- (gTxVfo->Modulation == MODULATION_CW ? 70 : 0) // CW BFO offset (10s of hz)
+	#endif
+	;
     #endif
     BK4819_SetFrequency(Frequency);
 
@@ -1005,7 +1012,7 @@ void RADIO_SetTxParameters(void)
     BK4819_ToggleGpioOut(BK4819_GPIO0_PIN28_RX_ENABLE, false);
 
 	// briand
-	RADIO_SetModulation(gTxVfo->Modulation);
+	RADIO_SetModulation(gCurrentVfo->Modulation);
 
     switch (Bandwidth)
     {
@@ -1151,13 +1158,11 @@ void RADIO_SetModulation(ModulationMode_t modulation)
         
     BK4819_SetRegValue(afDacGainRegSpec, 0xF);
 	BK4819_WriteRegister(
-		BK4819_REG_3D,
+		BK4819_REG_3D, (modulation == MODULATION_USB
 	#ifdef ENABLE_CW_MODULATOR
-		(modulation == MODULATION_USB || modulation == MODULATION_CW) ? 0 : 0x2AAB
-	#else
-		(modulation == MODULATION_USB) ? 0 : 0x2AAB
+		 || modulation == MODULATION_CW
 	#endif
-	    );
+		) ? 0 : 0x2AAB);
 	
     BK4819_SetRegValue(afcDisableRegSpec, modulation != MODULATION_FM);
     //RADIO_SetupAGC(modulation == MODULATION_AM, false);
@@ -1393,14 +1398,14 @@ void RADIO_CW_BeginResume(void)
 		BK4819_REG_70_ENABLE_TONE1 |
 		(20u << BK4819_REG_70_SHIFT_TONE1_TUNING_GAIN));
 
-	// Set Tone1 frequency to 700 Hz
-	BK4819_SetScrambleFrequencyControlWord(700);
-
-	// Setup the Tx/Rx blocks for CW transmission
-	BK4819_EnableTXLink();
+	// Set local AF sidetone freq in Hz
+	BK4819_SetScrambleFrequencyControlWord(450+(gEeprom.CW_TONE_FREQUENCY*10));
 
 	// Use AF ALAM mode for CW as a sidetone
 	BK4819_SetAF(BK4819_AF_ALAM);
+	//BK4819_WriteRegister(0x03, 1 << 9);
+	// Setup the Tx/Rx blocks for CW transmission
+	BK4819_EnableTXLink();
 
 	// Turn on the red LED
 	BK4819_ToggleGpioOut(BK4819_GPIO5_PIN1_RED, true);
@@ -1415,7 +1420,7 @@ void RADIO_CW_Suspend(void)
 
 	// Set TONE1 to 0 Hz
 	BK4819_SetScrambleFrequencyControlWord(0);
-
+	//AUDIO_AudioPathOff();
 	// Turn off the red LED
 	BK4819_ToggleGpioOut(BK4819_GPIO5_PIN1_RED, false);
 }

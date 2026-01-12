@@ -345,6 +345,15 @@ gEeprom.FreqChannel[1]   = IS_FREQ_CHANNEL(Data16[5]) ? Data16[5] : (FREQ_CHANNE
             (uint16_t)Data[5] |
             ((uint16_t)Data[6] << 8);
 
+#ifdef ENABLE_CW_MODULATOR
+	// 0F20..0F22
+	EEPROM_ReadBuffer(0x00A140, Data, 3);
+	gEeprom.CW_TONE_FREQUENCY = (Data[0] & 0x80) == 0 ? (Data[0] & 0xf) * 5 : 5;  // 0 == off, other values represent 50 Hz steps above 450Hz, default 700
+	gEeprom.CW_SIDETONE_LEVEL = (Data[0] & 0x70) == 0 ? 0 : 1; // any high-nibble bit apart from highest being set means on, default on
+	gEeprom.CW_KEY_WPM        = Data[1] < 30 ? Data[1] : 18;
+	gEeprom.CW_KEY_INPUT      = Data[2] < ARRAY_SIZE(gSubMenu_KEY_INPUT) ? Data[2] : 0;
+#endif
+
     // 0F40..0F47
     PY25Q16_ReadBuffer(0x00A150, Data, 8);
     gSetting_F_LOCK            = (Data[0] < F_LOCK_LEN) ? Data[0] : F_LOCK_DEF;
@@ -911,6 +920,18 @@ void SETTINGS_SaveSettings(void)
     // 0f40 - 0f48
 
     memset(SecBuf, 0xff, 8);
+    State = SecBuf;
+
+	State[0] = (gEeprom.CW_TONE_FREQUENCY / 5) | (gEeprom.CW_SIDETONE_LEVEL << 4);
+	State[1] = gEeprom.CW_KEY_WPM;
+	State[2] = gEeprom.CW_KEY_INPUT;
+
+    PY25Q16_WriteBuffer(0x00A140, SecBuf, 0x08, false);
+
+    // ---------------------
+    // 0f40 - 0f48
+
+    memset(SecBuf, 0xff, 8);
 
     // 0x0F40
     State = SecBuf;
@@ -1199,6 +1220,9 @@ State[1] = 0
 #endif
 #ifdef ENABLE_FEAT_F4HWN_RESCUE_OPS
     | (1 << 6)
+#endif
+#ifdef ENABLE_CW_MODULATOR
+	| (1 << 7)
 #endif
 ;
     PY25Q16_WriteBuffer(0x00A158, State, sizeof(State), false);

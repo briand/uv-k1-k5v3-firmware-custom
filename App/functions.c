@@ -244,9 +244,9 @@ void FUNCTION_Transmit()
 void FUNCTION_Transmit_CW()
 {
 	// TODO: briand debug remove
-	BK4819_ToggleGpioOut(BK4819_GPIO5_PIN1_RED, true);
-	BK4819_ToggleGpioOut(BK4819_GPIO5_PIN1_RED, false);
-	BK4819_ToggleGpioOut(BK4819_GPIO5_PIN1_RED, true);
+	// BK4819_ToggleGpioOut(BK4819_GPIO5_PIN1_RED, true);
+	// BK4819_ToggleGpioOut(BK4819_GPIO5_PIN1_RED, false);
+	// BK4819_ToggleGpioOut(BK4819_GPIO5_PIN1_RED, true);
 
 	gUpdateStatus = true;
 
@@ -256,18 +256,20 @@ void FUNCTION_Transmit_CW()
 	BK4819_DisableDTMF();
 
 	// removed all the DTMF calling code, may or may not be needed for CW
-
-
+\
 	RADIO_SetTxParameters();
 
 	// turn the RED LED on
 	BK4819_ToggleGpioOut(BK4819_GPIO5_PIN1_RED, true);
 
 	BK4819_DisableScramble();
-
 	if (gSetting_backlight_on_tx_rx & BACKLIGHT_ON_TR_TX) {
 		BACKLIGHT_TurnOn();
 	}
+	
+	if(gEeprom.CW_SIDETONE_LEVEL)
+		AUDIO_AudioPathOn();
+		
 	RADIO_CW_BeginResume();
 
 	// Mark CW TX in progress and clear suspend counter

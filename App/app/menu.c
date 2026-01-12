@@ -384,7 +384,27 @@ int MENU_GetLimits(uint8_t menu_id, int32_t *pMin, int32_t *pMax)
             //*pMin = 0;
             *pMax = gSubMenu_SIDEFUNCTIONS_size-1;
             break;
+#ifdef ENABLE_CW_MODULATOR
+		case MENU_CW_FREQ:
+			*pMin = 0;
+			*pMax = 7; // off, and 500 Hz to 800 Hz in 50 Hz steps
+			break;
 
+		case MENU_CW_SIDETONE_LEVEL:
+			*pMin = 0;
+			*pMax = 1;
+			break;
+
+		case MENU_CW_KEY_WPM:
+			*pMin = 10;
+			*pMax = 30;
+			break;
+
+		case MENU_CW_KEY_INPUT:
+			*pMin = 0;
+			*pMax = ARRAY_SIZE(gSubMenu_KEY_INPUT) - 1; 
+			break;
+#endif
 #ifdef ENABLE_FEAT_F4HWN_SLEEP
         case MENU_SET_OFF:
             *pMax = 120;
@@ -990,6 +1010,24 @@ void MENU_AcceptSetting(void)
             gRequestSaveChannel       = 1;
             return;
 #endif
+#ifdef ENABLE_CW_MODULATOR
+		case MENU_CW_KEY_WPM:
+			gEeprom.CW_KEY_WPM = gSubMenuSelection + 12;
+			break;
+
+		case MENU_CW_FREQ:
+			gEeprom.CW_TONE_FREQUENCY = gSubMenuSelection * 5;
+			break;
+
+		case MENU_CW_SIDETONE_LEVEL:
+			gEeprom.CW_SIDETONE_LEVEL = gSubMenuSelection;
+			break;
+
+		case MENU_CW_KEY_INPUT:
+			gEeprom.CW_KEY_INPUT = gSubMenuSelection;
+			break;
+#endif
+
     }
 
     gRequestSaveSettings = true;
@@ -1441,10 +1479,24 @@ void MENU_ShowCurrentSetting(void)
             gSubMenuSelection = gTxVfo->TX_LOCK;
             break;
 #endif
+	#ifdef ENABLE_CW_MODULATOR
+		case MENU_CW_KEY_WPM:
+			gSubMenuSelection = gEeprom.CW_KEY_WPM;
+			break;	
+		case MENU_CW_FREQ:
+			gSubMenuSelection = gEeprom.CW_TONE_FREQUENCY / 5;
+			break;
+		case MENU_CW_SIDETONE_LEVEL:
+			gSubMenuSelection = gEeprom.CW_SIDETONE_LEVEL;
+			break;
+		case MENU_CW_KEY_INPUT:
+			gSubMenuSelection = gEeprom.CW_KEY_INPUT;
+			break;
+	#endif
 
         default:
             return;
-    }
+	}
 }
 
 static void MENU_Key_0_to_9(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)

@@ -303,6 +303,13 @@ typedef struct {
     uint8_t               S0_LEVEL;
     uint8_t               S9_LEVEL;
 #endif
+#ifdef ENABLE_CW_MODULATOR
+	uint8_t			  	  CW_TONE_FREQUENCY; 	// in 50 Hz steps, 0 = off, 1 = 500Hz, 2 = 550Hz, etc
+	uint8_t               CW_SIDETONE_LEVEL;	// CW sidetone on/off (volume later?)
+	uint8_t               CW_KEY_WPM;			// actual WPM
+	uint8_t               CW_KEY_INPUT; 		// key input mode, see gSubMenu_KEY_INPUT
+#endif
+
 } EEPROM_Config_t;
 
 extern EEPROM_Config_t gEeprom;
