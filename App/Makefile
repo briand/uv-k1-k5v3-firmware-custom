@@ -107,7 +107,9 @@ OBJS += driver/systick.o
 ifeq ($(ENABLE_UART),1)
 	OBJS += driver/uart.o
 endif
-
+ifeq ($(ENABLE_CW_MODULATOR),1)
+	OBJS += driver/timer.o
+endif
 # Main
 OBJS += app/action.o
 ifeq ($(ENABLE_AIRCOPY),1)
