@@ -248,6 +248,10 @@ void FUNCTION_Transmit_CW()
 	// BK4819_ToggleGpioOut(BK4819_GPIO5_PIN1_RED, false);
 	// BK4819_ToggleGpioOut(BK4819_GPIO5_PIN1_RED, true);
 
+	// Mark CW TX in progress and clear suspend counter
+	gCW_State = CW_TRANSMITTING;
+	gCW_SuspendCountdown_10ms = 0;
+	
 	gUpdateStatus = true;
 
 	GUI_DisplayScreen();
@@ -259,23 +263,27 @@ void FUNCTION_Transmit_CW()
 \
 	RADIO_SetTxParameters();
 
-	// turn the RED LED on
-	BK4819_ToggleGpioOut(BK4819_GPIO5_PIN1_RED, true);
+	// turn the Green LED off
+	BK4819_ToggleGpioOut(BK4819_GPIO6_PIN2_GREEN, false);
 
 	BK4819_DisableScramble();
 	if (gSetting_backlight_on_tx_rx & BACKLIGHT_ON_TR_TX) {
 		BACKLIGHT_TurnOn();
 	}
 	
+	// Hear the sidetone?
 	if(gEeprom.CW_SIDETONE_LEVEL)
 		AUDIO_AudioPathOn();
-		
-	RADIO_CW_BeginResume();
 
-	// Mark CW TX in progress and clear suspend counter
-	gCW_State = CW_TRANSMITTING;
-	gCW_SuspendCountdown_10ms = 0;
+	// Don't send AF to RF during CW
+	BK4819_EnterTxMute();
+	BK4819_SetScrambleFrequencyControlWord(500+(gEeprom.CW_TONE_FREQUENCY*10));
+	BK4819_WriteRegister(BK4819_REG_70,
+		BK4819_REG_70_ENABLE_TONE1 |
+		(20u << BK4819_REG_70_SHIFT_TONE1_TUNING_GAIN));
+	BK4819_SetAF(BK4819_AF_ALAM);
 
+	//RADIO_CW_BeginResume();
 }
 #endif
 
@@ -304,7 +312,7 @@ void FUNCTION_Select(FUNCTION_Type_t Function)
 
         case FUNCTION_TRANSMIT:
 				#ifdef ENABLE_CW_MODULATOR
-				if (gCurrentVfo->Modulation == MODULATION_CW)
+				if (gTxVfo->Modulation == MODULATION_CW)
 					FUNCTION_Transmit_CW();
 				else
 				#endif

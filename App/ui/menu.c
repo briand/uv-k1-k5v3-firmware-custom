@@ -1125,10 +1125,7 @@ void UI_DisplayMenu(void)
 
 #ifdef ENABLE_CW_MODULATOR
 		case MENU_CW_FREQ:
-			if(gSubMenuSelection == 0)
-				strcpy(String, "Off");
-			else 
-				sprintf(String, "%dHz", 450 + gSubMenuSelection * 50);
+			sprintf(String, "%d Hz", 500 + gSubMenuSelection * 50);
 			break;
 
 		case MENU_CW_SIDETONE_LEVEL:
