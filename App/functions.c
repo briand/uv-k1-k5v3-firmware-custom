@@ -283,7 +283,7 @@ void FUNCTION_Transmit_CW()
 		(20u << BK4819_REG_70_SHIFT_TONE1_TUNING_GAIN));
 	BK4819_SetAF(BK4819_AF_ALAM);
 
-	//RADIO_CW_BeginResume();
+	RADIO_CW_BeginResume();
 }
 #endif
 

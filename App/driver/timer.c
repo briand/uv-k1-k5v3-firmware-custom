@@ -19,16 +19,16 @@ void TIM0_SET_PSC(uint16_t prescaler) {
     TIMERBASE0_DIV |= prescaler;
 }
 
-void TIM0_SET_ARR(uint16_t Arr) {
+void TIM0_SET_ARR(uint16_t targetval) {
     // Clear the LOW_LOAD field and set the auto-reload value (16-bit register)
     TIMERBASE0_LOW_LOAD &= ~(0xFFFF); // Clear field contents via AND
-    TIMERBASE0_LOW_LOAD |= Arr;
+    TIMERBASE0_LOW_LOAD |= targetval;
 }
 
-void TIM0_INIT(uint16_t prescaler, uint16_t Arr, bool enableInterrupt)
+void TIM0_INIT(uint16_t prescaler, uint16_t targetval, bool enableInterrupt)
 {
     TIM0_SET_PSC(prescaler);
-    TIM0_SET_ARR(Arr);
+    TIM0_SET_ARR(targetval);
 
     TIMERBASE0_IF |= (1 << 1) | (1 << 0); // Write 1 to clear: clear timer interrupt status
 

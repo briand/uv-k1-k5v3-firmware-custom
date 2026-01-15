@@ -7,15 +7,6 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-// Keyer modes
-typedef enum {
-    CW_KEYER_MODE_OFF = 0,
-    CW_KEYER_MODE_IAMBIC_A,
-    CW_KEYER_MODE_IAMBIC_B,
-    CW_KEYER_MODE_IAMBIC_A_REVERSED,
-    CW_KEYER_MODE_IAMBIC_B_REVERSED,
-} CW_KeyerMode_t;
-
 // Keyer FSM states
 typedef enum {
     CWK_STATE_IDLE = 0,
@@ -24,16 +15,14 @@ typedef enum {
     CWK_STATE_INTER_ELEMENT_GAP,
 } CW_KeyerFSMState_t;
 
-// Current keyer mode (menu-controlled elsewhere)
-extern volatile CW_KeyerMode_t     gCW_KeyerMode;
 // Current FSM state (for visibility/debugging)
 extern volatile CW_KeyerFSMState_t gCW_KeyerFSMState;
 
-// Actions emitted by the keyer FSM; treated as a bitmask
+// Actions emitted by the keyer FSM; mutually exclusive carrier state transitions
 typedef enum {
-    CW_ACTION_NONE     = 0,
-    CW_ACTION_KEY_DOWN = 1u << 0,  // begin RF keying
-    CW_ACTION_KEY_UP   = 1u << 1,  // end RF keying
+    CW_ACTION_NONE        = 0,  // no change needed, carrier already off
+    CW_ACTION_CARRIER_ON  = 1,  // carrier should be/stay on (press/hold PTT)
+    CW_ACTION_CARRIER_OFF = 2,  // carrier should turn off (release PTT)
 } CW_Action_t;
 
 // Periodic handler: drive CW state machine and return actions to apply

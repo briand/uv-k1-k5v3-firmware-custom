@@ -164,8 +164,9 @@ enum
 #ifdef ENABLE_CW_MODULATOR
 	MENU_CW_FREQ,
 	MENU_CW_SIDETONE_LEVEL,
-	MENU_CW_KEY_INPUT,
-	MENU_CW_KEY_WPM
+	MENU_CW_KEYER_MODE,
+	MENU_CW_KEY_WPM,
+	MENU_CW_KEY_INPUT
 #endif
 };
 
@@ -229,7 +230,8 @@ typedef struct {char* name; uint8_t id;} t_sidefunction;
 extern const uint8_t         gSubMenu_SIDEFUNCTIONS_size;
 extern const t_sidefunction gSubMenu_SIDEFUNCTIONS[];
 extern const char		gSubmenu_SIDETONE[9][6];
-extern const char*        gSubMenu_KEY_INPUT[6];
+extern const char*        gSubMenu_CW_KEY_BUTTON[3];
+extern const char*        gSubMenu_CW_KEY_PORT[3];
 				         
 extern bool              gIsInSubMenu;
                          

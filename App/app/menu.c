@@ -19,6 +19,7 @@
 #if !defined(ENABLE_OVERLAY)
     #include "py32f0xx.h"
 #endif
+#include "app/cwkeyer.h"
 #include "app/dtmf.h"
 #include "app/generic.h"
 #include "app/menu.h"
@@ -395,14 +396,19 @@ int MENU_GetLimits(uint8_t menu_id, int32_t *pMin, int32_t *pMax)
 			*pMax = 1;
 			break;
 
+		case MENU_CW_KEYER_MODE:
+			*pMin = 0;
+			*pMax = 1;
+			break;
+
 		case MENU_CW_KEY_WPM:
-			*pMin = 10;
-			*pMax = 30;
+			*pMin = 13;
+			*pMax = 28;
 			break;
 
 		case MENU_CW_KEY_INPUT:
 			*pMin = 0;
-			*pMax = ARRAY_SIZE(gSubMenu_KEY_INPUT) - 1; 
+			*pMax = 6;
 			break;
 #endif
 #ifdef ENABLE_FEAT_F4HWN_SLEEP
@@ -1013,6 +1019,7 @@ void MENU_AcceptSetting(void)
 #ifdef ENABLE_CW_MODULATOR
 		case MENU_CW_KEY_WPM:
 			gEeprom.CW_KEY_WPM = gSubMenuSelection + 12;
+			CW_KeyerReconfigure();
 			break;
 
 		case MENU_CW_FREQ:
@@ -1023,8 +1030,14 @@ void MENU_AcceptSetting(void)
 			gEeprom.CW_SIDETONE_LEVEL = gSubMenuSelection;
 			break;
 
+		case MENU_CW_KEYER_MODE:
+			gEeprom.CW_KEYER_MODE = gSubMenuSelection;
+			CW_KeyerReconfigure();
+			break;
+
 		case MENU_CW_KEY_INPUT:
 			gEeprom.CW_KEY_INPUT = gSubMenuSelection;
+			CW_KeyerReconfigure();
 			break;
 #endif
 
@@ -1488,6 +1501,9 @@ void MENU_ShowCurrentSetting(void)
 			break;
 		case MENU_CW_SIDETONE_LEVEL:
 			gSubMenuSelection = gEeprom.CW_SIDETONE_LEVEL;
+			break;
+		case MENU_CW_KEYER_MODE:
+			gSubMenuSelection = gEeprom.CW_KEYER_MODE;
 			break;
 		case MENU_CW_KEY_INPUT:
 			gSubMenuSelection = gEeprom.CW_KEY_INPUT;

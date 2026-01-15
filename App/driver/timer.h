@@ -21,6 +21,6 @@
 extern uint8_t TIM0_CNT;
 
 void TIM0_SET_PSC(uint16_t prescaler);
-void TIM0_SET_ARR(uint16_t Arr);
-void TIM0_INIT(uint16_t prescaler, uint16_t Arr, bool enableInterrupt);
+void TIM0_SET_ARR(uint16_t targetval);
+void TIM0_INIT(uint16_t prescaler, uint16_t targetval, bool enableInterrupt);
 #endif

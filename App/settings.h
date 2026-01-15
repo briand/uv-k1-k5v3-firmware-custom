@@ -38,6 +38,25 @@ enum POWER_OnDisplayMode_t {
 };
 typedef enum POWER_OnDisplayMode_t POWER_OnDisplayMode_t;
 
+#ifdef ENABLE_CW_MODULATOR
+enum CW_KeyInputType_t {
+	CW_KEY_INPUT_HANDKEY = 0,        // PTT handkey only, no keyer
+	CW_KEY_INPUT_BUTTONS_NORMAL,     // PTT dah/SD1 dit
+	CW_KEY_INPUT_BUTTONS_REVERSED,   // PTT dit/SD1 dah
+	CW_KEY_INPUT_PORT_NORMAL,        // tip dah/sleeve dit
+	CW_KEY_INPUT_PORT_REVERSED,      // tip dit/sleeve dah
+	CW_KEY_INPUT_BOTH_NORMAL,        // PTT+tip dah/SD1+sleeve dit
+	CW_KEY_INPUT_BOTH_REVERSED       // PTT+tip dit/SD1+sleeve dah
+};
+typedef enum CW_KeyInputType_t CW_KeyInputType_t;
+
+enum CW_IambicMode_t {
+	CW_IAMBIC_MODE_A = 0,
+	CW_IAMBIC_MODE_B
+};
+typedef enum CW_IambicMode_t CW_IambicMode_t;
+#endif
+
 enum TxLockModes_t {
     F_LOCK_DEF, //all default frequencies + configurable
     F_LOCK_FCC,
@@ -306,8 +325,9 @@ typedef struct {
 #ifdef ENABLE_CW_MODULATOR
 	uint8_t			  	  CW_TONE_FREQUENCY; 	// in 50 Hz steps, 0 = off, 1 = 500Hz, 2 = 550Hz, etc
 	uint8_t               CW_SIDETONE_LEVEL;	// CW sidetone on/off (volume later?)
+	CW_IambicMode_t       CW_KEYER_MODE;		// Iambic A or B (keyer disabled when CW_KEY_INPUT == HANDKEY)
 	uint8_t               CW_KEY_WPM;			// actual WPM
-	uint8_t               CW_KEY_INPUT; 		// key input mode, see gSubMenu_KEY_INPUT
+	CW_KeyInputType_t     CW_KEY_INPUT;			// Combined button/port input selection
 #endif
 
 } EEPROM_Config_t;

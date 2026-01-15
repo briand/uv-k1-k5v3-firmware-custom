@@ -18,6 +18,7 @@
 #include <string.h>
 
 #include "am_fix.h"
+#include "app/cwkeyer.h"
 #include "app/dtmf.h"
 #ifdef ENABLE_FMRADIO
     #include "app/fm.h"
@@ -742,6 +743,13 @@ void RADIO_SelectVfos(void)
 
     gTxVfo = &gEeprom.VfoInfo[gEeprom.TX_VFO];
     gRxVfo = &gEeprom.VfoInfo[gEeprom.RX_VFO];
+
+#ifdef ENABLE_CW_MODULATOR
+	if(gTxVfo->Modulation==MODULATION_CW)
+	{
+		CW_KeyerReconfigure();
+	}
+#endif
 
     RADIO_SelectCurrentVfo();
 }
