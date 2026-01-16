@@ -1017,7 +1017,8 @@ void APP_Update(void)
         HandleFunction();
 
 #ifdef ENABLE_CW_MODULATOR
-	if (gTxVfo->Modulation == MODULATION_CW && gEeprom.CW_KEY_INPUT != CW_KEY_INPUT_HANDKEY) {
+	if (gTxVfo->Modulation == MODULATION_CW && gEeprom.CW_KEY_INPUT != CW_KEY_INPUT_HANDKEY) 
+	{
 		CW_Action_t act = CW_HandleState();
 		// add a new action from the FSM: CW begin - when we were totally idle and now a key down event happened
 		// here, take that action to call ProcessKey(PTT, true, false)
@@ -1025,8 +1026,22 @@ void APP_Update(void)
 		// here, take that action to call ProcessKey(PTT, false, false
 		// the actions below should only be called when we're already in TX mode and keys change.
 
-		if (act == CW_ACTION_CARRIER_ON)  RADIO_CW_BeginResume();
-		if (act == CW_ACTION_CARRIER_OFF) RADIO_CW_Suspend();
+		if (act == CW_ACTION_CARRIER_ON)  
+		{
+			if(gCW_State != CW_INACTIVE)
+			{	FUNCTION_Transmit_CW();
+				gCurrentFunction = FUNCTION_TRANSMIT;
+			}
+			else
+			{
+				RADIO_CW_BeginResume();
+			}
+		}
+		if (act == CW_ACTION_CARRIER_OFF) {
+			RADIO_CW_Suspend();
+			// let the process keys function handle the timeout to end transmission
+	
+		}
 	}
 #endif
 

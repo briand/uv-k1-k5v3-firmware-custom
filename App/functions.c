@@ -260,7 +260,7 @@ void FUNCTION_Transmit_CW()
 	BK4819_DisableDTMF();
 
 	// removed all the DTMF calling code, may or may not be needed for CW
-\
+
 	RADIO_SetTxParameters();
 
 	// turn the Green LED off
@@ -271,10 +271,6 @@ void FUNCTION_Transmit_CW()
 		BACKLIGHT_TurnOn();
 	}
 	
-	// Hear the sidetone?
-	if(gEeprom.CW_SIDETONE_LEVEL)
-		AUDIO_AudioPathOn();
-
 	// Don't send AF to RF during CW
 	BK4819_EnterTxMute();
 	BK4819_SetScrambleFrequencyControlWord(500+(gEeprom.CW_TONE_FREQUENCY*10));

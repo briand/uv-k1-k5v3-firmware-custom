@@ -314,7 +314,8 @@ CW_Action_t CW_HandleState(void)
             gCW_KeyerFSMState = CWK_STATE_INTER_ELEMENT_GAP;
         } else {
             // Continue holding PTT during active element
-            actions = CW_ACTION_CARRIER_ON;
+            // lets try without - use CARRIER_ON as a transitional state only
+            //actions = CW_ACTION_CARRIER_ON;
         }
         break; }
 

@@ -38,5 +38,7 @@ extern FUNCTION_Type_t       gCurrentFunction;
 void FUNCTION_Init(void);
 void FUNCTION_Select(FUNCTION_Type_t Function);
 bool FUNCTION_IsRx();
-
+#ifdef ENABLE_CW_MODULATOR
+void FUNCTION_Transmit_CW(void);
+#endif
 #endif
