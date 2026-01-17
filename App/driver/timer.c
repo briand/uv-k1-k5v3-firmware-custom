@@ -2,6 +2,7 @@
 // Originally created by RUPC on 2024/1/8.
 //
 #include "bsp/dp32g030/timer.h"
+#include "bsp/dp32g030/syscon.h"
 #include "ARMCM0.h"
 #include <stdbool.h>
 
@@ -27,6 +28,9 @@ void TIM0_SET_ARR(uint16_t targetval) {
 
 void TIM0_INIT(uint16_t prescaler, uint16_t targetval, bool enableInterrupt)
 {
+    // Enable TIMERBASE0 clock gate
+    SYSCON_DEV_CLK_GATE |= SYSCON_DEV_CLK_GATE_TIMER_BASE0_BITS_ENABLE;
+    
     TIM0_SET_PSC(prescaler);
     TIM0_SET_ARR(targetval);
 

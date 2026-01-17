@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <string.h>
 
 #include "app/cwkeyer.h"
 #include "settings.h"
@@ -13,12 +14,15 @@
 #include "driver/systick.h"
 #include "driver/timer.h"
 #include "driver/i2c.h"
+#include "driver/uart.h"
+#include "external/printf/printf.h"
 
-// Timer scale: 50 kHz tick → 20 µs per tick
-// 16-bit counter rolls over at 1310 ms, enough for largest inter-word space
-#define TICKS_PER_MS      50U
-#define TICKS_PER_MINUTE  (60000U * TICKS_PER_MS)
-#define DITS_PER_WORD     50U
+// Timer scale: 10 kHz tick → 100 µs per tick
+// 16-bit counter rolls over at 6553 ms
+#define DITS_PER_WORD 50
+#define TICKS_PER_MS 10
+#define TICKS_PER_MINUTE (60 * 1000 * TICKS_PER_MS)  // 600,000
+
 
 // Sampling threshold (in timer ticks) for key scans; set by init
 static uint32_t s_sample_thresh = TICKS_PER_MS; // ~1 ms
@@ -38,6 +42,7 @@ static bool           s_pending_alternate = false; // alternate element queude
 static bool           s_both_held_during_elem = false; // iambic-A detection
 static bool           s_reverse_keys = false; // normalized mapping flag
 static bool           s_last_dit = false, s_last_dah = false; // last sampled paddles
+static bool           s_last_handkey_ptt = false; // last PTT state for handkey mode
 
 // Reconfigure requested (apply at idle or after gap)
 static volatile bool s_cfg_dirty = false;
@@ -124,6 +129,10 @@ static void CW_ReadKeys(CW_Input *in)
 {
     bool hw_dit = false;
     bool hw_dah = false;
+    static int times_called = 0;
+    if(++times_called % 1000 == 0) {
+        UART_Send("Reading keys\r\n", 14);
+    }
     
     // Read inputs based on configured mode
     switch (gEeprom.CW_KEY_INPUT) {
@@ -200,9 +209,9 @@ static void CW_ConfigurePortPins(bool enable_port)
 // Initialize keyer from gEeprom settings
 static void CW_KeyerInit()
 {
-    // Configure timer for 50 kHz tick (48 MHz / 960)
-    // TIMERBASE0_LOW_CNT is 16-bit and rolls over at 0xFFFF (~1310 ms)
-    TIM0_INIT(960U - 1U, 0xffff, false);
+    // Configure timer for 10 kHz tick (48 MHz / 4800)
+    // TIMERBASE0_LOW_CNT is 16-bit and rolls over at 0xFFFF (~6553 ms)
+    TIM0_INIT(4800U - 1U, 0xffff, false);
 
     const uint32_t wpm = gEeprom.CW_KEY_WPM;
     const uint32_t dit_ticks = TICKS_PER_MINUTE / (wpm * DITS_PER_WORD);
@@ -237,41 +246,78 @@ static void CW_KeyerInit()
 
     gCW_KeyerFSMState = CWK_STATE_IDLE;
     s_cfg_dirty = false;
+    UART_Send("keyer init done\r\n", 17);
 }
 
 void CW_KeyerReconfigure(void)
 {
     s_cfg_dirty = true;
+    UART_Send("keyer marked for reconfig\r\n", 27);
+}
+
+CW_Action_t ptt_action(void)
+{
+    CW_Action_t action = CW_ACTION_NONE;
+
+    // Read PTT button (PC5) - active low
+    bool ptt = !(GPIOC->DATA & (1U << GPIOC_PIN_PTT));
+
+    if (ptt && !s_last_handkey_ptt) {
+        // PTT pressed
+        action = CW_ACTION_CARRIER_ON;
+        UART_Send("handkey PTT on\r\n", 17);
+    } else if (!ptt && s_last_handkey_ptt) {
+        // PTT released
+        action = CW_ACTION_CARRIER_OFF;
+        UART_Send("handkey PTT off\r\n", 18);
+    }
+
+    s_last_handkey_ptt = ptt;
+    return action;
 }
 
 CW_Action_t CW_HandleState(void)
 {
-    CW_Action_t actions = CW_ACTION_NONE;
+    CW_Action_t action = CW_ACTION_NONE;
+    static uint32_t skip_count = 0;
+    static uint32_t state_count = 0;
+    static uint32_t idle_count = 0;
 
     // Check if keyer is enabled (any mode other than HANDKEY)
     if (gEeprom.CW_KEY_INPUT == CW_KEY_INPUT_HANDKEY) {
-        gCW_KeyerFSMState = CWK_STATE_IDLE;
-        return actions;
+        return ptt_action();
     }
+            if(state_count++ % 5000 == 0) {
+            char buf[40];
+            sprintf_(buf, "keyer not SK cnt=%u\r\n", (uint16_t)TIMERBASE0_LOW_CNT);
+            UART_Send(buf, strlen(buf));
+            }
 
     // Check dirty flag at idle - reconfigure if needed
     if (s_cfg_dirty && gCW_KeyerFSMState == CWK_STATE_IDLE) {
         CW_KeyerInit();
-        return actions;
     }
 
     const uint16_t cur_cnt = (uint16_t)TIMERBASE0_LOW_CNT;
     const uint16_t delta_since_last = cw_delta_counts(s_last_cnt, cur_cnt);
     if (delta_since_last < s_sample_thresh) {
-        return actions;
+        return action;
     }
     s_last_cnt = cur_cnt;
 
     CW_Input in;
     CW_ReadKeys(&in);
+    if(++skip_count % 1000 == 0) {
+        char buf[80];
+        sprintf_(buf, "dit=%d dah=%d dr=%d df=%d hr=%d hf=%d\r\n",
+                in.dit, in.dah, in.dit_rise, in.dit_fall, in.dah_rise, in.dah_fall);
+        UART_Send(buf, strlen(buf));
+    }
 
     switch (gCW_KeyerFSMState) {
     case CWK_STATE_IDLE:
+        if (idle_count++ % 3000 == 0)
+            UART_Send("keyer is idle\r\n", 15);
         if (in.dit || in.dah) {
             if (in.dit && in.dah) {
                 // Both pressed: start with dit (normal) or dah (reversed)
@@ -285,12 +331,17 @@ CW_Action_t CW_HandleState(void)
             s_pending_alternate = false;
             s_elem_start_cnt = cur_cnt;
             gCW_KeyerFSMState = s_active_is_dit ? CWK_STATE_ACTIVE_DIT : CWK_STATE_ACTIVE_DAH;
-            actions = CW_ACTION_CARRIER_ON;
+            UART_LogSend("keyer going active\r\n", 20);
+            action = CW_ACTION_CARRIER_ON;
         }
         break;
 
     case CWK_STATE_ACTIVE_DIT:
-    case CWK_STATE_ACTIVE_DAH: {
+        UART_LogSend("dit\r\n", 5);
+        [[fallthrough]];
+    case CWK_STATE_ACTIVE_DAH: 
+    {
+        UART_LogSend("dah - keyer is active\r\n", 18);
         const uint16_t target = (gCW_KeyerFSMState == CWK_STATE_ACTIVE_DIT) ? s_dit_cnt : s_dah_cnt;
         const uint16_t elapsed_elem = cw_delta_counts(s_elem_start_cnt, cur_cnt);
 
@@ -309,15 +360,12 @@ CW_Action_t CW_HandleState(void)
         }
 
         if (elapsed_elem >= target) {
-            actions = CW_ACTION_CARRIER_OFF;
+            action = CW_ACTION_CARRIER_OFF;
             s_elem_start_cnt = cur_cnt;
             gCW_KeyerFSMState = CWK_STATE_INTER_ELEMENT_GAP;
-        } else {
-            // Continue holding PTT during active element
-            // lets try without - use CARRIER_ON as a transitional state only
-            //actions = CW_ACTION_CARRIER_ON;
         }
-        break; }
+        break; 
+    }
 
     case CWK_STATE_INTER_ELEMENT_GAP: {
         const uint16_t elapsed_gap = cw_delta_counts(s_elem_start_cnt, cur_cnt);
@@ -325,7 +373,7 @@ CW_Action_t CW_HandleState(void)
         // Check dirty flag during inter-element gap
         if (s_cfg_dirty) {
             CW_KeyerInit();
-            return actions;
+            return action;
         }
         
         if (elapsed_gap >= s_gap_cnt) {
@@ -360,7 +408,7 @@ CW_Action_t CW_HandleState(void)
             if (have_next) {
                 gCW_KeyerFSMState = next_is_dit ? CWK_STATE_ACTIVE_DIT : CWK_STATE_ACTIVE_DAH;
                 s_active_is_dit   = next_is_dit;
-                actions = CW_ACTION_CARRIER_ON;
+                action = CW_ACTION_CARRIER_ON;
             } else {
                 gCW_KeyerFSMState = CWK_STATE_IDLE;
                 // Already in NONE state, carrier was turned off at end of last element
@@ -373,5 +421,5 @@ CW_Action_t CW_HandleState(void)
         break;
     }
 
-    return actions;
+    return action;
 }

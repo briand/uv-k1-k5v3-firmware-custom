@@ -1022,8 +1022,9 @@ void RADIO_SetTxParameters(void)
 
     BK4819_ToggleGpioOut(BK4819_GPIO0_PIN28_RX_ENABLE, false);
 
-	// briand
-	RADIO_SetModulation(gCurrentVfo->Modulation);
+	#ifdef ENABLE_CW_MODULATOR
+	RADIO_SetModulation(gTxVfo->Modulation);
+	#endif
 
     switch (Bandwidth)
     {
@@ -1094,7 +1095,7 @@ void RADIO_SetTxParameters(void)
 
 void RADIO_SetModulation(ModulationMode_t modulation)
 {
-    BK4819_AF_Type_t mod;
+	BK4819_AF_Type_t mod;
     switch(modulation) {
         default:
         case MODULATION_FM:
@@ -1109,10 +1110,9 @@ void RADIO_SetModulation(ModulationMode_t modulation)
 
 #ifdef ENABLE_CW_MODULATOR
 		case MODULATION_CW:
-			// Use USB/baseband2 demod path for CW
+#endif	
 			mod = BK4819_AF_BASEBAND2;
 			break;
-#endif
 
 #ifdef ENABLE_BYP_RAW_DEMODULATORS
         case MODULATION_BYP:
@@ -1397,6 +1397,7 @@ void RADIO_PrepareCssTX(void)
 
 void RADIO_CW_BeginResume(void)
 {
+	gCW_State = CW_TRANSMITTING;
 	// Setup and begin CW transmission, either first time or resuming after suspend
 	BK4819_SetupPowerAmplifier(gCurrentVfo->TXP_CalculatedSetting, gCurrentVfo->pTX->Frequency);
 
