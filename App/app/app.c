@@ -1034,11 +1034,13 @@ void APP_Update(void)
 			gPttIsPressed = true;
 			gDebounceCounter = 0;
 			gCW_SuspendCountdown_10ms = 0;
+			gTxTimerCountdown_500ms = 0;
 
 			if(gCW_State == CW_INACTIVE)
 			{	
 				UART_LogSend("CW Transmit Start\n", 18);
 				gUpdateDisplay = true;
+				gUpdateStatus  = true;  // maybe?
 				FUNCTION_Transmit_CW();
 				gPttIsPressed = true;
 				gCurrentFunction = FUNCTION_TRANSMIT;

@@ -393,7 +393,7 @@ int MENU_GetLimits(uint8_t menu_id, int32_t *pMin, int32_t *pMax)
 
 		case MENU_CW_SIDETONE_LEVEL:
 			*pMin = 0;
-			*pMax = 1;
+			*pMax = 6;  // 0=off, 1-6 are volume levels
 			break;
 
 		case MENU_CW_KEYER_MODE:
@@ -1023,11 +1023,13 @@ void MENU_AcceptSetting(void)
 			break;
 
 		case MENU_CW_FREQ:
+			// 50 hz steps from 500 Hz to 800 Hz
 			gEeprom.CW_TONE_FREQUENCY = gSubMenuSelection * 5;
 			break;
 
 		case MENU_CW_SIDETONE_LEVEL:
-			gEeprom.CW_SIDETONE_LEVEL = gSubMenuSelection;
+			// Convert menu value (0-6) to scaled value (0-126)
+			gEeprom.CW_SIDETONE_LEVEL = gSubMenuSelection * 21;
 			break;
 
 		case MENU_CW_KEYER_MODE:
@@ -1500,7 +1502,8 @@ void MENU_ShowCurrentSetting(void)
 			gSubMenuSelection = gEeprom.CW_TONE_FREQUENCY / 5;
 			break;
 		case MENU_CW_SIDETONE_LEVEL:
-			gSubMenuSelection = gEeprom.CW_SIDETONE_LEVEL;
+			// Convert scaled value (0, 18, 36, 54, 72, 90, 108) back to menu value (0-6)
+			gSubMenuSelection = gEeprom.CW_SIDETONE_LEVEL / 18;
 			break;
 		case MENU_CW_KEYER_MODE:
 			gSubMenuSelection = gEeprom.CW_KEYER_MODE;

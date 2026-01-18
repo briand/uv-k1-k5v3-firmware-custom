@@ -259,7 +259,7 @@ void FUNCTION_Transmit_CW()
 	// if DTMF is enabled when TX'ing, it changes the TX audio filtering !! .. 1of11
 	BK4819_DisableDTMF();
 
-	// removed all the DTMF calling code, may or may not be needed for CW
+	// removed all the DTMF calling code, not needed for CW
 
 	RADIO_SetTxParameters();
 
@@ -272,8 +272,7 @@ void FUNCTION_Transmit_CW()
 	}
 	
 	// Don't send AF to RF during CW
-	BK4819_EnterTxMute();
-	BK4819_SetScrambleFrequencyControlWord(500+(gEeprom.CW_TONE_FREQUENCY*10));
+	BK4819_EnterTxMute();	
 	BK4819_WriteRegister(BK4819_REG_70,
 		BK4819_REG_70_ENABLE_TONE1 |
 		(gEeprom.CW_SIDETONE_LEVEL << BK4819_REG_70_SHIFT_TONE1_TUNING_GAIN));

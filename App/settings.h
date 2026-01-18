@@ -324,7 +324,7 @@ typedef struct {
 #endif
 #ifdef ENABLE_CW_MODULATOR
 	uint8_t			  	  CW_TONE_FREQUENCY; 	// in 50 Hz steps, 0 = off, 1 = 500Hz, 2 = 550Hz, etc
-	uint8_t               CW_SIDETONE_LEVEL;	// CW sidetone on/off (volume later?)
+	uint8_t               CW_SIDETONE_LEVEL;	// CW sidetone level: 0=off, 1-6 scaled volume levels
 	CW_IambicMode_t       CW_KEYER_MODE;		// Iambic A or B (keyer disabled when CW_KEY_INPUT == HANDKEY)
 	uint8_t               CW_KEY_WPM;			// actual WPM
 	CW_KeyInputType_t     CW_KEY_INPUT;			// Combined button/port input selection
