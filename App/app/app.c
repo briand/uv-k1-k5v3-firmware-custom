@@ -1022,41 +1022,43 @@ void APP_Update(void)
 // 	static uint32_t local_counter = 0;
 	if (gTxVfo->Modulation == MODULATION_CW) 
 	{
-		CW_Action_t act = CW_HandleState();
-		// add a new action from the FSM: CW begin - when we were totally idle and now a key down event happened
-		// here, take that action to call ProcessKey(PTT, true, false)
-		// add another action from the FSM: CW end - when we were transmitting and now a key up event happened
-		// here, take that action to call ProcessKey(PTT, false, false
-		// the actions below should only be called when we're already in TX mode and keys change.
-
-		if (act == CW_ACTION_CARRIER_ON)  
+		switch(CW_HandleState())
 		{
-			gPttIsPressed = true;
-			gDebounceCounter = 0;
-			gCW_SuspendCountdown_10ms = 0;
-			gTxTimerCountdown_500ms = 0;
-
-			if(gCW_State == CW_INACTIVE)
-			{	
-				UART_LogSend("CW Transmit Start\n", 18);
-				gUpdateDisplay = true;
-				gUpdateStatus  = true;  // maybe?
-				FUNCTION_Transmit_CW();
+			case CW_ACTION_CARRIER_HOLD:
 				gPttIsPressed = true;
-				gCurrentFunction = FUNCTION_TRANSMIT;
-			}
-			else
-			{
-				UART_LogSend("CW Resume\n", 10);
-				RADIO_CW_BeginResume();
-			}
-		}
-		if (act == CW_ACTION_CARRIER_OFF) {
+				gDebounceCounter = 0;
+				gCW_SuspendCountdown_10ms = 0;
+				[[fallthrough]];
+			case CW_ACTION_CARRIER_ON:
+				gTxTimerCountdown_500ms = 0;
 
-	UART_Send("CW Suspend\n", 11);
-			RADIO_CW_Suspend();
-			// let the process keys function handle the timeout to end transmission
-	
+				if(gCW_State == CW_INACTIVE)
+				{	
+					UART_LogSend("CW Start\n", 9);
+					// gUpdateDisplay = true;
+					// gUpdateStatus  = true;  // maybe?
+					// FUNCTION_Transmit_CW();
+					// gPttIsPressed = true;
+					// gCurrentFunction = FUNCTION_TRANSMIT;
+					RADIO_PrepareTX();
+				}
+				else
+				{
+					UART_LogSend("CW Resume\n", 10);
+					RADIO_CW_BeginResume();
+				}
+			break;
+
+			case CW_ACTION_CARRIER_OFF:
+
+				UART_LogSend("CW Suspend\n", 11);
+				RADIO_CW_Suspend();
+				// let the process keys function handle the timeout to end transmission
+			break;
+
+			case CW_ACTION_NONE:
+			default:
+			break;
 		}
 	}
 	// else 

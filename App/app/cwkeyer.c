@@ -30,12 +30,18 @@
 #define TICKS_PER_MS 10
 #define TICKS_PER_MINUTE (60 * 1000 * TICKS_PER_MS)  // 600,000
 
-
 // Sampling threshold (in timer ticks) for key scans; set by init
 static uint32_t s_sample_thresh = TICKS_PER_MS; // ~1 ms
 
-// Externs required by header
-volatile CW_KeyerFSMState_t gCW_KeyerFSMState = CWK_STATE_IDLE;
+// Keyer FSM states
+typedef enum {
+    CWK_STATE_IDLE = 0,
+    CWK_STATE_ACTIVE_DIT,
+    CWK_STATE_ACTIVE_DAH,
+    CWK_STATE_INTER_ELEMENT_GAP,
+} CW_KeyerFSMState_t;
+
+static CW_KeyerFSMState_t s_KeyerFSMState = CWK_STATE_IDLE;
 
 // Internal keyer runtime state
 static bool           s_iambic_b = false;  // true=B, false=A
@@ -52,7 +58,7 @@ static bool           s_last_dit = false, s_last_dah = false; // last sampled pa
 static bool           s_last_handkey_ptt = false; // last PTT state for handkey mode
 
 // Reconfigure requested (apply at idle or after gap)
-static volatile bool s_cfg_dirty = false;
+static volatile bool s_cfg_dirty = true;
 
 // Input struct (normalized paddles + edges)
 typedef struct {
@@ -271,7 +277,7 @@ static void CW_KeyerInit()
     s_last_dit = false;
     s_last_dah = false;
 
-    gCW_KeyerFSMState = CWK_STATE_IDLE;
+    s_KeyerFSMState = CWK_STATE_IDLE;
     s_cfg_dirty = false;
     UART_Send("keyer init done\r\n", 17);
 }
@@ -463,7 +469,7 @@ CW_Action_t CW_HandleState(void)
             }
 
     // Check dirty flag at idle - reconfigure if needed
-    if (s_cfg_dirty && gCW_KeyerFSMState == CWK_STATE_IDLE) {
+    if (s_cfg_dirty && s_KeyerFSMState == CWK_STATE_IDLE) {
         CW_KeyerInit();
     }
 
@@ -484,7 +490,7 @@ CW_Action_t CW_HandleState(void)
         //UART_Send(buf, strlen(buf));
     }
 
-    switch (gCW_KeyerFSMState) {
+    switch (s_KeyerFSMState) {
     case CWK_STATE_IDLE:
         // if (idle_count++ % 3000 == 0)
         //     UART_Send("keyer is idle\r\n", 15);
@@ -500,7 +506,7 @@ CW_Action_t CW_HandleState(void)
 
             s_pending_alternate = false;
             s_elem_start_cnt = cur_cnt;
-            gCW_KeyerFSMState = s_active_is_dit ? CWK_STATE_ACTIVE_DIT : CWK_STATE_ACTIVE_DAH;
+            s_KeyerFSMState = s_active_is_dit ? CWK_STATE_ACTIVE_DIT : CWK_STATE_ACTIVE_DAH;
             UART_LogSend("keyer going active\r\n", 20);
             action = CW_ACTION_CARRIER_ON;
         }
@@ -512,7 +518,7 @@ CW_Action_t CW_HandleState(void)
     case CWK_STATE_ACTIVE_DAH: 
     {
         UART_LogSend("dah - keyer is active\r\n", 18);
-        const uint16_t target = (gCW_KeyerFSMState == CWK_STATE_ACTIVE_DIT) ? s_dit_cnt : s_dah_cnt;
+        const uint16_t target = (s_KeyerFSMState == CWK_STATE_ACTIVE_DIT) ? s_dit_cnt : s_dah_cnt;
         const uint16_t elapsed_elem = timer_jiffies_since(s_elem_start_cnt);
 
         // Iambic alternation detection
@@ -522,9 +528,9 @@ CW_Action_t CW_HandleState(void)
         
         // Iambic B: detect opposite paddle press during element
         if (s_iambic_b) {
-            if (gCW_KeyerFSMState == CWK_STATE_ACTIVE_DIT && in.dah) {
+            if (s_KeyerFSMState == CWK_STATE_ACTIVE_DIT && in.dah) {
                 s_pending_alternate = true;
-            } else if (gCW_KeyerFSMState == CWK_STATE_ACTIVE_DAH && in.dit) {
+            } else if (s_KeyerFSMState == CWK_STATE_ACTIVE_DAH && in.dit) {
                 s_pending_alternate = true;
             }
         }
@@ -532,7 +538,10 @@ CW_Action_t CW_HandleState(void)
         if (elapsed_elem >= target) {
             action = CW_ACTION_CARRIER_OFF;
             s_elem_start_cnt = cur_cnt;
-            gCW_KeyerFSMState = CWK_STATE_INTER_ELEMENT_GAP;
+            s_KeyerFSMState = CWK_STATE_INTER_ELEMENT_GAP;
+        } else {
+            // Carrier is on and should remain on during element
+            action = CW_ACTION_CARRIER_HOLD;
         }
         break; 
     }
@@ -576,18 +585,18 @@ CW_Action_t CW_HandleState(void)
             s_elem_start_cnt = cur_cnt;
 
             if (have_next) {
-                gCW_KeyerFSMState = next_is_dit ? CWK_STATE_ACTIVE_DIT : CWK_STATE_ACTIVE_DAH;
+                s_KeyerFSMState = next_is_dit ? CWK_STATE_ACTIVE_DIT : CWK_STATE_ACTIVE_DAH;
                 s_active_is_dit   = next_is_dit;
                 action = CW_ACTION_CARRIER_ON;
             } else {
-                gCW_KeyerFSMState = CWK_STATE_IDLE;
+                s_KeyerFSMState = CWK_STATE_IDLE;
                 // Already in NONE state, carrier was turned off at end of last element
             }
         }
         break; }
 
     default:
-        gCW_KeyerFSMState = CWK_STATE_IDLE;
+        s_KeyerFSMState = CWK_STATE_IDLE;
         break;
     }
 

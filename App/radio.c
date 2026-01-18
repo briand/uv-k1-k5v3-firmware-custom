@@ -1411,10 +1411,10 @@ void RADIO_CW_BeginResume(void)
 	BK4819_ToggleGpioOut(BK4819_GPIO5_PIN1_RED, true);
 }
 
+// Suspend CW transmission - "QSK" key up, be ready to start RF again quickly - don't actually exit TX mode
 void RADIO_CW_Suspend(void)
 {
 	gCW_State = CW_SUSPENDED;
-	// Suspend CW transmission - "QSK" key up, be ready to start RF again quickly - don't actually exit TX mode
 
 	// Set PA bias to 0
 	BK4819_SetupPowerAmplifier(0, 0);
@@ -1422,7 +1422,7 @@ void RADIO_CW_Suspend(void)
 	// 0 gain on tone1
 	//BK4819_WriteRegister(BK4819_REG_70,	BK4819_REG_70_ENABLE_TONE1 );
 
-	// Set TONE1 to 0 Hz
+	// Set TONE1 to 0 Hz - this works better than gain to disable sidetone
 	BK4819_SetScrambleFrequencyControlWord(0);
 	
 	// Turn off the red LED
