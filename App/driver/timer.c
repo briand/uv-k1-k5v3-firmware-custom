@@ -14,45 +14,81 @@ __attribute__((weak)) void HandlerTIMER_BASE0()
     TIM0_CNT++;
 }
 
-void TIM0_SET_PSC(uint16_t prescaler) {
+static void TIM0_SET_PSC(uint16_t prescaler) {
     // Clear the DIV field and set the prescaler (16-bit register)
     TIMERBASE0_DIV &= ~(0xFFFF); // Clear DIV field contents via AND
     TIMERBASE0_DIV |= prescaler;
 }
 
-void TIM0_SET_ARR(uint16_t targetval) {
+static void TIM0_SET_ARR(uint16_t targetval) {
     // Clear the LOW_LOAD field and set the auto-reload value (16-bit register)
     TIMERBASE0_LOW_LOAD &= ~(0xFFFF); // Clear field contents via AND
     TIMERBASE0_LOW_LOAD |= targetval;
 }
 
-void TIM0_INIT(uint16_t prescaler, uint16_t targetval, bool enableInterrupt)
+void TIM0_INIT(void)
 {
     // Enable TIMERBASE0 clock gate
     SYSCON_DEV_CLK_GATE |= SYSCON_DEV_CLK_GATE_TIMER_BASE0_BITS_ENABLE;
     
-    TIM0_SET_PSC(prescaler);
-    TIM0_SET_ARR(targetval);
+    // Configure for 10 kHz tick (48 MHz / 4800)
+    // 16-bit counter rolls over at 0xFFFF (~6553 ms)
+    TIM0_SET_PSC(4800U - 1U);
+    TIM0_SET_ARR(0xFFFFU);
 
     TIMERBASE0_IF |= (1 << 1) | (1 << 0); // Write 1 to clear: clear timer interrupt status
-
-    // Enable Timer0 interrupt (LOW_IE)
-    if (enableInterrupt) {
-        TIMERBASE0_IE |= (1 << 0); // Enable LOW_IE
-    }
-
-    // Enable TIMERBASE0 (LOW_EN)
-    TIMERBASE0_EN |= 0x1; // Enable LOW_EN
+    
+    // Clear and enable high counter for millis tracking
+    TIMERBASE0_HIGH_CNT = 0;
+    TIMERBASE0_EN |= (1 << 1) | (1 << 0); // Enable both HIGH_EN and LOW_EN
 }
 
-// Example configuration (commented out):
-//    TIM0_SET_PSC(480 - 1);           // 48,000,000 / 480 / 100 = 1000
-//    TIM0_SET_ARR(1000);              // 10 ms
-//    TIMERBASE0_IF |= (1 << 1) | (1 << 0); // Write 1 to clear: clear timer interrupt status
-//    TIMERBASE0_IE |= (1 << 1) | (1 << 0); // Enable interrupts for both high and low timers
-//    TIMERBASE0_EN |= (1 << 1) | (1 << 0); // Enable both high and low timers
-//
-//    __enable_irq();
+#ifdef ENABLE_MILLIS
+
+// Returns timer count in 100µs ticks (10kHz)
+// WARNING: Rolls over every ~6.5 seconds (16-bit counter)
+uint16_t timer_jiffies(void)
+{
+    return (uint16_t)TIMERBASE0_LOW_CNT;
+}
+
+// Returns milliseconds since boot
+// WARNING: Rolls over every ~4.9 days (32-bit at 10kHz = 429,496,730ms)
+uint32_t timer_millis(void)
+{
+    // Read high/low counters with rollover protection
+    // Loop until we get a consistent read (high counter didn't change - max 2 loops)
+    uint32_t high, low, high2;
+    do {
+        high = TIMERBASE0_HIGH_CNT;
+        low = TIMERBASE0_LOW_CNT;
+        high2 = TIMERBASE0_HIGH_CNT;
+    } while (high != high2);
+    
+    // Combine into 32-bit count: high counter increments every 65536 low ticks
+    uint32_t total_ticks = (high << 16) | low;
+    
+    // Convert to milliseconds: 10 ticks = 1ms
+    return total_ticks / 10;
+}
+
+// Returns ticks elapsed since previous jiffy value with rollover protection
+// prev: Previous jiffy value from timer_jiffies()
+uint16_t timer_jiffies_since(uint16_t prev)
+{
+    uint16_t cur = (uint16_t)TIMERBASE0_LOW_CNT;
+    return (cur >= prev) ? (uint16_t)(cur - prev) : (uint16_t)(UINT16_MAX - prev + 1U + cur);
+}
+
+// Returns milliseconds elapsed since previous millis value with rollover protection
+// prev: Previous millis value from timer_millis()
+uint32_t timer_millis_since(uint32_t prev)
+{
+    uint32_t cur = timer_millis();
+    return (cur >= prev) ? (cur - prev) : (UINT32_MAX - prev + 1U + cur);
+}
+
+#endif
 
 
 

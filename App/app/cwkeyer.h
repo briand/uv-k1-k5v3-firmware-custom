@@ -31,4 +31,8 @@ CW_Action_t CW_HandleState(void);
 // Optional: request reconfigure at next safe boundary (applied at gap or idle)
 void CW_KeyerReconfigure(void);
 
+// Check keyer inputs before mode change: returns true if inputs valid, false to abort
+// new_mode: The CW_KeyInputType_t mode to validate
+bool CW_CheckKeyerInputs(uint8_t new_mode);
+
 #endif // APP_CWKEYER_H

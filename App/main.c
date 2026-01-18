@@ -42,6 +42,9 @@
 
 #include "app/app.h"
 #include "app/dtmf.h"
+#ifdef ENABLE_CW_MODULATOR
+	#include "app/cwkeyer.h"
+#endif
 
 #include "driver/backlight.h"
 #include "driver/bk4819.h"
@@ -55,6 +58,10 @@
 #ifdef ENABLE_USB
 #include "driver/vcp.h"
 #endif
+#ifdef ENABLE_MILLIS
+	#include "driver/timer.h"
+#endif
+
 #include "helper/battery.h"
 #include "helper/boot.h"
 
@@ -75,8 +82,13 @@ void _putchar(__attribute__((unused)) char c)
 
 void Main(void)
 {
-    SYSTICK_Init();
-    BOARD_Init();
+
+	SYSTICK_Init();
+	BOARD_Init();
+
+#ifdef ENABLE_MILLIS
+	TIM0_INIT();
+#endif
 
     boot_counter_10ms = 250;   // 2.5 sec
 
@@ -193,6 +205,13 @@ void Main(void)
         gKeyReading1 = KEY_INVALID;
         gDebounceCounter = 0;
     }
+
+#ifdef ENABLE_CW_MODULATOR
+	// Check CW keyer inputs at startup - if stuck, fall back to handkey mode
+	if (!CW_CheckKeyerInputs(gEeprom.CW_KEY_INPUT)) {
+		gEeprom.CW_KEY_INPUT = CW_KEY_INPUT_HANDKEY;
+	}
+#endif
 
     if (!gChargingWithTypeC && gBatteryDisplayLevel == 0)
     {

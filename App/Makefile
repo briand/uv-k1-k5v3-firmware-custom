@@ -13,7 +13,7 @@ ENABLE_VOX                    ?= 1
 ENABLE_ALARM                  ?= 0
 ENABLE_TX1750                 ?= 0
 ENABLE_PWRON_PASSWORD         ?= 0
-ENABLE_DTMF_CALLING           ?= 1
+ENABLE_DTMF_CALLING           ?= 0
 ENABLE_FLASHLIGHT             ?= 1
 
 # ---- CUSTOM MODS ----
@@ -41,6 +41,7 @@ ENABLE_BYP_RAW_DEMODULATORS   ?= 0
 ENABLE_BLMIN_TMP_OFF          ?= 0
 ENABLE_SCAN_RANGES            ?= 1
 ENABLE_CW_MODULATOR           ?= 1
+ENABLE_MILLIS                 ?= 1
 
 # ---- DEBUGGING ----
 ENABLE_AM_FIX_SHOW_DATA       ?= 0
@@ -108,8 +109,12 @@ ifeq ($(ENABLE_UART),1)
 	OBJS += driver/uart.o
 endif
 ifeq ($(ENABLE_CW_MODULATOR),1)
-	OBJS += driver/timer.o
+	# CW modulator requires millis timer
+	ENABLE_MILLIS := 1
     OBJS += app/cwkeyer.o
+endif
+ifeq ($(ENABLE_MILLIS),1)
+	OBJS += driver/timer.o
 endif
 # Main
 OBJS += app/action.o
@@ -368,6 +373,9 @@ ifeq ($(ENABLE_SCAN_RANGES),1)
 endif
 ifeq ($(ENABLE_CW_MODULATOR),1)
 	CFLAGS  += -DENABLE_CW_MODULATOR
+endif
+ifeq ($(ENABLE_MILLIS),1)
+	CFLAGS  += -DENABLE_MILLIS
 endif
 ifeq ($(ENABLE_DTMF_CALLING),1)
 	CFLAGS  += -DENABLE_DTMF_CALLING

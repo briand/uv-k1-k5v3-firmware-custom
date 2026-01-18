@@ -6,15 +6,22 @@
 #include <string.h>
 
 #include "app/cwkeyer.h"
+#include "audio.h"
 #include "settings.h"
+#include "bsp/dp32g030/dma.h"
 #include "bsp/dp32g030/timer.h"
 #include "bsp/dp32g030/gpio.h"
 #include "bsp/dp32g030/portcon.h"
+#include "bsp/dp32g030/uart.h"
 #include "driver/gpio.h"
 #include "driver/systick.h"
 #include "driver/timer.h"
+#include "driver/system.h"
 #include "driver/i2c.h"
 #include "driver/uart.h"
+#include "driver/keyboard.h"
+#include "driver/backlight.h"
+#include "ui/welcome.h"
 #include "external/printf/printf.h"
 
 // Timer scale: 10 kHz tick → 100 µs per tick
@@ -47,12 +54,6 @@ static bool           s_last_handkey_ptt = false; // last PTT state for handkey 
 // Reconfigure requested (apply at idle or after gap)
 static volatile bool s_cfg_dirty = false;
 
-// Compute delta with wrap-around protection for a 16-bit up-counter
-static inline uint16_t cw_delta_counts(uint16_t prev, uint16_t cur)
-{
-    return (cur >= prev) ? (uint16_t)(cur - prev) : (uint16_t)(UINT16_MAX - prev + 1U + cur);
-}
-
 // Input struct (normalized paddles + edges)
 typedef struct {
     bool dit;
@@ -63,13 +64,10 @@ typedef struct {
     bool dah_fall;
 } CW_Input;
 
-// Read button inputs (PTT and SIDE1)
-static void CW_ReadButtons(bool *dit_out, bool *dah_out)
+// Read button ring input (SIDE1)
+static void CW_ReadSideButton(bool *ring_out)
 {
-    // Read PTT button (PC5) - active low
-    bool ptt = !(GPIOC->DATA & (1U << GPIOC_PIN_PTT));
-    
-    // Read SIDE1 button (PA3) with de-noise
+    // Read SIDE1 button (PA3) as ring with de-noise
     // Set keyboard matrix pins high
     GPIOA->DATA |= (1U << GPIOA_PIN_KEYBOARD_4) |
                    (1U << GPIOA_PIN_KEYBOARD_5) |
@@ -77,7 +75,7 @@ static void CW_ReadButtons(bool *dit_out, bool *dah_out)
                    (1U << GPIOA_PIN_KEYBOARD_7);
     
     // De-noise SIDE1 (PA3) - active low when pressed
-    bool side1 = false;
+    bool ring = false;
     uint16_t reg = 0, reg2;
     unsigned int i, k;
     
@@ -90,7 +88,7 @@ static void CW_ReadButtons(bool *dit_out, bool *dah_out)
     
     if (i >= 3) {
         // Stable reading achieved
-        side1 = !reg;  // Active low
+        ring = !reg;  // Active low
     }
     
     // Create I2C stop condition since we might have toggled I2C pins
@@ -101,72 +99,82 @@ static void CW_ReadButtons(bool *dit_out, bool *dah_out)
 	GPIO_ClearBit(&GPIOA->DATA, GPIOA_PIN_KEYBOARD_6);
 	GPIO_SetBit(  &GPIOA->DATA, GPIOA_PIN_KEYBOARD_7);
 
-    *dit_out = side1;
-    *dah_out = ptt;
+    *ring_out = ring;
 }
 
-// Read port inputs (PA7 tip and PB15 sleeve)
-static void CW_ReadPort(bool *dit_out, bool *dah_out)
+// Read raw paddle inputs for a specific mode
+// Returns true if mode is valid, false otherwise
+static bool CW_ReadKeysForMode(uint8_t mode, bool *dit_out, bool *dah_out)
 {
-    // PA7 is configured as output, drive low - other side pulls high when open
-    // Read PB15 (sleeve) - active low when paddle closes to ground
-    bool sleeve = !(GPIOB->DATA & (1U << 15));
+    // Read PTT (PC5) as tip - shared across button and port configs
+    bool hw_tip = !(GPIO_CheckBit(&GPIOC->DATA, GPIOC_PIN_PTT));
+    bool hw_ring = false;
     
-    // For tip (PA7), we need to briefly make it an input to read it
-    // This is the "tip" line - when paddle closes, it pulls to ground
-    uint32_t saved_dir = GPIOA->DIR;
-    GPIOA->DIR &= ~GPIO_DIR_7_MASK;  // Temporarily input
-    SYSTICK_DelayUs(1);  // Brief settling time
-    bool tip = !(GPIOA->DATA & (1U << 7));  // Active low
-    GPIOA->DIR = saved_dir;  // Restore output
-    
-    *dit_out = sleeve;
-    *dah_out = tip;
-}
-
-// Read GPIO inputs based on configured mode
-static void CW_ReadKeys(CW_Input *in)
-{
-    bool hw_dit = false;
-    bool hw_dah = false;
-    static int times_called = 0;
-    if(++times_called % 1000 == 0) {
-        UART_Send("Reading keys\r\n", 14);
-    }
-    
-    // Read inputs based on configured mode
-    switch (gEeprom.CW_KEY_INPUT) {
+    switch (mode) {
         case CW_KEY_INPUT_BUTTONS_NORMAL:
         case CW_KEY_INPUT_BUTTONS_REVERSED:
-            CW_ReadButtons(&hw_dit, &hw_dah);
+            CW_ReadSideButton(&hw_ring);
             break;
             
         case CW_KEY_INPUT_PORT_NORMAL:
         case CW_KEY_INPUT_PORT_REVERSED:
-            CW_ReadPort(&hw_dit, &hw_dah);
+            // Read port ring input (PB15)
+            hw_ring = !(GPIO_CheckBit(&GPIOB->DATA, GPIOB_PIN_BK1080));
             break;
             
         case CW_KEY_INPUT_BOTH_NORMAL:
         case CW_KEY_INPUT_BOTH_REVERSED: {
-            bool btn_dit, btn_dah, port_dit, port_dah;
-            CW_ReadButtons(&btn_dit, &btn_dah);
-            CW_ReadPort(&port_dit, &port_dah);
-            // OR both inputs together
-            hw_dit = btn_dit || port_dit;
-            hw_dah = btn_dah || port_dah;
+            bool btn_ring = false;
+            CW_ReadSideButton(&btn_ring);
+
+            // Read port ring input (PB15)
+            // OR both ring inputs together (tip is already read above)
+            hw_ring = btn_ring || !(GPIO_CheckBit(&GPIOB->DATA, GPIOB_PIN_BK1080));
             break;
         }
             
         case CW_KEY_INPUT_HANDKEY:
         default:
             // No keyer input
-            break;
+            return false;
+    }
+    
+    // Determine if keys are reversed for this mode
+    bool reverse = (mode & 1) ? false : true;
+    
+    // Map tip/ring to dit/dah based on mode (reverse swaps them)
+    *dit_out = reverse ? hw_tip : hw_ring;
+    *dah_out = reverse ? hw_ring : hw_tip;
+    
+    // Log key states
+    bool pb15_is_output = (GPIOB->DIR & GPIO_DIR_15_MASK) != 0;
+    char buf[80];
+    sprintf_(buf, "mode=%u tip=%d ring=%d PB15_out=%d -> dit=%d dah=%d\r\n", 
+             mode, hw_tip, hw_ring, pb15_is_output, *dit_out, *dah_out);
+    UART_Send(buf, strlen(buf));
+    
+    return true;
+}
+
+// Read GPIO inputs based on configured mode
+static void CW_ReadKeys(CW_Input *in)
+{
+    static int times_called = 0;
+    if(++times_called % 1000 == 0) {
+        UART_Send("Reading keys\r\n", 14);
+    }
+    
+    bool n_dit = false;
+    bool n_dah = false;
+    
+    // Read inputs using helper function
+    if (!CW_ReadKeysForMode(gEeprom.CW_KEY_INPUT, &n_dit, &n_dah)) {
+        // Handkey mode or invalid - no keyer input
+        n_dit = false;
+        n_dah = false;
     }
 
-    // Normalize mapping (reverse swaps paddles)
-    bool n_dit = s_reverse_keys ? hw_dah : hw_dit;
-    bool n_dah = s_reverse_keys ? hw_dit : hw_dah;
-
+    // Compute edges
     in->dit_rise = (!s_last_dit && n_dit);
     in->dit_fall = (s_last_dit && !n_dit);
     in->dah_rise = (!s_last_dah && n_dah);
@@ -182,36 +190,55 @@ static void CW_ReadKeys(CW_Input *in)
 static void CW_ConfigurePortPins(bool enable_port)
 {
     if (enable_port) {
-        // Configure PA7 as GPIO output (tip - dah/dit depending on reversal)
-        PORTCON_PORTA_SEL0 &= ~PORTCON_PORTA_SEL0_A7_MASK;
-        PORTCON_PORTA_SEL0 |= PORTCON_PORTA_SEL0_A7_BITS_GPIOA7;
-        GPIOA->DIR |= GPIO_DIR_7_BITS_OUTPUT;
-        GPIOA->DATA &= ~(1U << 7); // Set low
+        // Disable UART RX and RX DMA to prevent unwanted DMA transfers while PA8 is GPIO
+        UART1->CTRL &= ~(UART_CTRL_RXEN_MASK | UART_CTRL_RXDMAEN_MASK);
         
-        // Configure PB15 as GPIO input (sleeve - dit/dah depending on reversal)
-        PORTCON_PORTB_SEL1 &= ~PORTCON_PORTB_SEL1_B15_MASK;
-        PORTCON_PORTB_SEL1 |= PORTCON_PORTB_SEL1_B15_BITS_GPIOB15;
-        GPIOB->DIR &= ~GPIO_DIR_15_MASK; // Set as input
+        // Disable DMA Channel 0
+        DMA_CH0->CTR &= ~DMA_CH_CTR_CH_EN_MASK;
+        
+        // Clear any pending UART RX flags
+        UART1->IF = UART_IF_RXTO_BITS_SET | UART_IF_RXFIFO_FULL_BITS_SET;
+        
+        // Configure PA8 (UART RX) as a GPIO low output (sleeve - acts as ground for the paddle port input)
+        PORTCON_PORTA_SEL1 &= ~PORTCON_PORTA_SEL1_A8_MASK;
+        //PORTCON_PORTA_SEL1 |= PORTCON_PORTA_SEL1_A8_BITS_GPIOA8;
+        GPIOA->DIR |= GPIO_DIR_8_BITS_OUTPUT;
+        GPIO_ClearBit(&GPIOA->DATA, GPIOA_PIN_UART_RX); // Set low
+        
+        // Configure PB15 as GPIO input (ring)
+        // Configure PORTCON settings first (while still output from boot)
+        //PORTCON_PORTB_SEL1 &= ~PORTCON_PORTB_SEL1_B15_MASK;
+        //PORTCON_PORTB_SEL1 |= PORTCON_PORTB_SEL1_B15_BITS_GPIOB15;
+        //GPIOB->DIR &= ~GPIO_DIR_15_MASK;
+        
+        GPIOB->DIR &= ~(0 | GPIO_DIR_15_MASK); // PB15 as INPUT
+        PORTCON_PORTB_IE |= PORTCON_PORTB_IE_B15_BITS_ENABLE; // Enable input buffer
+        
     } else {
-        // Configure PA7 back to UART1 TX
-        PORTCON_PORTA_SEL0 &= ~PORTCON_PORTA_SEL0_A7_MASK;
-        PORTCON_PORTA_SEL0 |= PORTCON_PORTA_SEL0_A7_BITS_UART1_TX;
+        // Configure PA8 back to UART1 RX
+        PORTCON_PORTA_SEL1 &= ~PORTCON_PORTA_SEL1_A8_MASK;
+        PORTCON_PORTA_SEL1 |= PORTCON_PORTA_SEL1_A8_BITS_UART1_RX;
         // DIR automatically handled by UART peripheral
         
+        // Re-enable UART RX and RX DMA
+        UART1->CTRL |= UART_CTRL_RXEN_BITS_ENABLE | UART_CTRL_RXDMAEN_BITS_ENABLE;
+        
+        // Re-enable DMA Channel 0
+        DMA_CH0->CTR |= DMA_CH_CTR_CH_EN_BITS_ENABLE;
+        
         // Configure PB15 as GPIO output, set high
+        PORTCON_PORTB_IE &= ~PORTCON_PORTB_IE_B15_MASK; // Disable input buffer
         PORTCON_PORTB_SEL1 &= ~PORTCON_PORTB_SEL1_B15_MASK;
         PORTCON_PORTB_SEL1 |= PORTCON_PORTB_SEL1_B15_BITS_GPIOB15;
-        GPIOB->DIR |= GPIO_DIR_15_BITS_OUTPUT;
-        GPIOB->DATA |= (1U << 15); // Set high
+        GPIO_SetBit(&GPIOB->DATA, GPIOB_PIN_BK1080); // Set PB15 high
+        GPIOB->DIR |= GPIO_DIR_15_BITS_OUTPUT; // Then switch to output
     }
 }
 
 // Initialize keyer from gEeprom settings
 static void CW_KeyerInit()
 {
-    // Configure timer for 10 kHz tick (48 MHz / 4800)
-    // TIMERBASE0_LOW_CNT is 16-bit and rolls over at 0xFFFF (~6553 ms)
-    TIM0_INIT(4800U - 1U, 0xffff, false);
+    // TIMERBASE0_LOW_CNT is 16-bit 10 kHz tick and rolls over at 0xFFFF (~6553 ms)
 
     const uint32_t wpm = gEeprom.CW_KEY_WPM;
     const uint32_t dit_ticks = TICKS_PER_MINUTE / (wpm * DITS_PER_WORD);
@@ -255,6 +282,130 @@ void CW_KeyerReconfigure(void)
     UART_Send("keyer marked for reconfig\r\n", 27);
 }
 
+// Check keyer inputs before mode change
+// Returns true if inputs are valid (released), false to abort mode change
+bool CW_CheckKeyerInputs(uint8_t new_mode)
+{
+    // Handkey mode doesn't need validation
+    if (new_mode == CW_KEY_INPUT_HANDKEY) {
+        return true;
+    }
+    UART_Send("Checking CW keyer inputs\r\n", 26);
+    SYSTEM_DelayMs(10);
+
+    // Determine if we need to configure port pins for this mode
+    bool uses_port = (new_mode == CW_KEY_INPUT_PORT_NORMAL ||
+                      new_mode == CW_KEY_INPUT_PORT_REVERSED ||
+                      new_mode == CW_KEY_INPUT_BOTH_NORMAL ||
+                      new_mode == CW_KEY_INPUT_BOTH_REVERSED);
+    
+    // Temporarily configure port pins if needed
+    if (uses_port) {
+        UART_Send("Configuring port pins for CW keyer check\r\n", 42);
+        CW_ConfigurePortPins(true);
+    }
+    UART_Send("done with config\r\n", 15);
+
+    // Check inputs with 20ms intervals - consider stuck if key stays down for over 10 consecutive checks
+    int stuck_count = 0;
+    bool any_stuck = false;
+    int total_checks = 0;
+    
+    for (int i = 0; i < 20; i++) {  // Check up to 20 times = 400ms max
+        bool dit = false, dah = false;
+        CW_ReadKeysForMode(new_mode, &dit, &dah);
+        total_checks++;
+        
+        if (dit || dah) {
+            stuck_count++;
+            if (stuck_count > 10) {
+                any_stuck = true;
+                break;
+            }
+        } else {
+            stuck_count = 0;  // Reset if keys released
+        }
+        
+        SYSTEM_DelayMs(20);
+    }
+    
+    char buf[60];
+    sprintf_(buf, "total_checks=%d stuck_count=%d stuck=%d\r\n", 
+             total_checks, stuck_count, any_stuck);
+    UART_Send(buf, strlen(buf));
+
+    // Debug: Test PB15 direction changes
+    bool pb15_out = (GPIOB->DIR & GPIO_DIR_15_MASK) != 0;
+    bool pb15_val = GPIO_CheckBit(&GPIOB->DATA, GPIOB_PIN_BK1080);
+    sprintf_(buf, "Before test: PB15_out=%d val=%d\r\n", pb15_out, pb15_val);
+    UART_Send(buf, strlen(buf));
+    
+            GPIOB->DIR |= GPIO_DIR_15_BITS_OUTPUT;
+    GPIO_SetBit(&GPIOB->DATA, GPIOB_PIN_BK1080); // Set PB15 high
+    SYSTEM_DelayMs(10);
+    GPIO_ClearBit(&GPIOB->DATA, GPIOB_PIN_BK1080); // Set PB15 low
+    SYSTEM_DelayMs(10);
+    GPIO_SetBit(&GPIOB->DATA, GPIOB_PIN_BK1080); // Set PB15 high
+    SYSTEM_DelayMs(10);
+    GPIO_ClearBit(&GPIOB->DATA, GPIOB_PIN_BK1080); // Set PB15 low
+    SYSTEM_DelayMs(10);
+    GPIO_SetBit(&GPIOB->DATA, GPIOB_PIN_BK1080); // Set PB15 high
+    SYSTEM_DelayMs(10);
+    
+    pb15_out = (GPIOB->DIR & GPIO_DIR_15_MASK) != 0;
+    sprintf_(buf, "After toggle: PB15_out=%d\r\n", pb15_out);
+    UART_Send(buf, strlen(buf));
+    
+    GPIOB->DIR &= ~GPIO_DIR_15_MASK;
+    pb15_out = (GPIOB->DIR & GPIO_DIR_15_MASK) != 0;
+    pb15_val = GPIO_CheckBit(&GPIOB->DATA, GPIOB_PIN_BK1080);
+    sprintf_(buf, "After set input: PB15_out=%d val=%d\r\n", pb15_out, pb15_val);
+    UART_Send(buf, strlen(buf));
+    
+
+    // If no stuck keys detected, mode is valid
+    if (!any_stuck) {
+        UART_Send("CW keyer inputs valid\r\n", 24);
+        return true;
+    }
+    UART_Send("CW keyer inputs stuck\r\n", 24);
+
+    // Stuck keys detected - warn user and wait up to 1 second
+	AUDIO_PlayBeep(BEEP_880HZ_60MS_TRIPLE_BEEP);
+    UI_DisplayReleaseKeys();
+    BACKLIGHT_TurnOn();
+    
+    bool released = false;
+    
+    for (int i = 0; i < 100; i++) {  // 100 iterations * 10ms = 1 second
+        // Check if EXIT button was pressed
+        KEY_Code_t key = KEYBOARD_Poll();
+        if (key == KEY_EXIT) {
+            // User aborted
+            UART_Send("CW keyer mode change aborted by user\r\n", 39);
+            if (uses_port) {
+                // Restore port pins
+                CW_ConfigurePortPins(false);
+            }
+            return false;
+        }
+        
+        // Check if inputs are now released
+        bool dit = false, dah = false;
+        if (CW_ReadKeysForMode(new_mode, &dit, &dah)) {
+            if (!dit && !dah) {
+                released = true;
+                UART_Send("CW keyer inputs released\r\n", 26);
+                break;
+            }
+        }
+        
+        SYSTEM_DelayMs(10);
+    }
+
+    return released;
+}
+
 CW_Action_t ptt_action(void)
 {
     CW_Action_t action = CW_ACTION_NONE;
@@ -281,7 +432,7 @@ CW_Action_t CW_HandleState(void)
     CW_Action_t action = CW_ACTION_NONE;
     static uint32_t skip_count = 0;
     static uint32_t state_count = 0;
-    static uint32_t idle_count = 0;
+    //static uint32_t idle_count = 0;
 
     // Check if keyer is enabled (any mode other than HANDKEY)
     if (gEeprom.CW_KEY_INPUT == CW_KEY_INPUT_HANDKEY) {
@@ -290,7 +441,7 @@ CW_Action_t CW_HandleState(void)
             if(state_count++ % 5000 == 0) {
             char buf[40];
             sprintf_(buf, "keyer not SK cnt=%u\r\n", (uint16_t)TIMERBASE0_LOW_CNT);
-            UART_Send(buf, strlen(buf));
+            //UART_Send(buf, strlen(buf));
             }
 
     // Check dirty flag at idle - reconfigure if needed
@@ -299,7 +450,7 @@ CW_Action_t CW_HandleState(void)
     }
 
     const uint16_t cur_cnt = (uint16_t)TIMERBASE0_LOW_CNT;
-    const uint16_t delta_since_last = cw_delta_counts(s_last_cnt, cur_cnt);
+    const uint16_t delta_since_last = timer_jiffies_since(s_last_cnt);
     if (delta_since_last < s_sample_thresh) {
         return action;
     }
@@ -308,16 +459,17 @@ CW_Action_t CW_HandleState(void)
     CW_Input in;
     CW_ReadKeys(&in);
     if(++skip_count % 1000 == 0) {
-        char buf[80];
-        sprintf_(buf, "dit=%d dah=%d dr=%d df=%d hr=%d hf=%d\r\n",
-                in.dit, in.dah, in.dit_rise, in.dit_fall, in.dah_rise, in.dah_fall);
-        UART_Send(buf, strlen(buf));
+        bool pb15_is_output = (GPIOB->DIR & (1U << 15)) != 0;
+        char buf[100];
+        sprintf_(buf, "dit=%d dah=%d dr=%d df=%d hr=%d hf=%d PB15_out=%d\r\n",
+                in.dit, in.dah, in.dit_rise, in.dit_fall, in.dah_rise, in.dah_fall, pb15_is_output);
+        //UART_Send(buf, strlen(buf));
     }
 
     switch (gCW_KeyerFSMState) {
     case CWK_STATE_IDLE:
-        if (idle_count++ % 3000 == 0)
-            UART_Send("keyer is idle\r\n", 15);
+        // if (idle_count++ % 3000 == 0)
+        //     UART_Send("keyer is idle\r\n", 15);
         if (in.dit || in.dah) {
             if (in.dit && in.dah) {
                 // Both pressed: start with dit (normal) or dah (reversed)
@@ -343,7 +495,7 @@ CW_Action_t CW_HandleState(void)
     {
         UART_LogSend("dah - keyer is active\r\n", 18);
         const uint16_t target = (gCW_KeyerFSMState == CWK_STATE_ACTIVE_DIT) ? s_dit_cnt : s_dah_cnt;
-        const uint16_t elapsed_elem = cw_delta_counts(s_elem_start_cnt, cur_cnt);
+        const uint16_t elapsed_elem = timer_jiffies_since(s_elem_start_cnt);
 
         // Iambic alternation detection
         if (in.dit && in.dah) {
@@ -368,7 +520,7 @@ CW_Action_t CW_HandleState(void)
     }
 
     case CWK_STATE_INTER_ELEMENT_GAP: {
-        const uint16_t elapsed_gap = cw_delta_counts(s_elem_start_cnt, cur_cnt);
+        const uint16_t elapsed_gap = timer_jiffies_since(s_elem_start_cnt);
         
         // Check dirty flag during inter-element gap
         if (s_cfg_dirty) {

@@ -20,7 +20,24 @@
 
 extern uint8_t TIM0_CNT;
 
-void TIM0_SET_PSC(uint16_t prescaler);
-void TIM0_SET_ARR(uint16_t targetval);
-void TIM0_INIT(uint16_t prescaler, uint16_t targetval, bool enableInterrupt);
+void TIM0_INIT(void);
+
+#ifdef ENABLE_MILLIS
+// Returns timer count in 100µs ticks (10kHz)
+// WARNING: Rolls over every ~6.5 seconds (16-bit counter)
+uint16_t timer_jiffies(void);
+
+// Returns milliseconds since boot
+// WARNING: Rolls over every ~4.9 days (32-bit at 10kHz = 429,496,730ms)
+uint32_t timer_millis(void);
+
+// Returns ticks elapsed since previous jiffy value with rollover protection
+// prev: Previous jiffy value from timer_jiffies()
+uint16_t timer_jiffies_since(uint16_t prev);
+
+// Returns milliseconds elapsed since previous millis value with rollover protection
+// prev: Previous millis value from timer_millis()
+uint32_t timer_millis_since(uint32_t prev);
+#endif
+
 #endif
