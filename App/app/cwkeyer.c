@@ -151,7 +151,7 @@ static bool CW_ReadKeysForMode(uint8_t mode, bool *dit_out, bool *dah_out)
     char buf[80];
     sprintf_(buf, "mode=%u tip=%d ring=%d PB15_out=%d -> dit=%d dah=%d\r\n", 
              mode, hw_tip, hw_ring, pb15_is_output, *dit_out, *dah_out);
-    UART_Send(buf, strlen(buf));
+    //UART_Send(buf, strlen(buf));
     
     return true;
 }
@@ -161,7 +161,7 @@ static void CW_ReadKeys(CW_Input *in)
 {
     static int times_called = 0;
     if(++times_called % 1000 == 0) {
-        UART_Send("Reading keys\r\n", 14);
+        //UART_Send("Reading keys\r\n", 14);
     }
     
     bool n_dit = false;
@@ -334,34 +334,51 @@ bool CW_CheckKeyerInputs(uint8_t new_mode)
              total_checks, stuck_count, any_stuck);
     UART_Send(buf, strlen(buf));
 
-    // Debug: Test PB15 direction changes
-    bool pb15_out = (GPIOB->DIR & GPIO_DIR_15_MASK) != 0;
-    bool pb15_val = GPIO_CheckBit(&GPIOB->DATA, GPIOB_PIN_BK1080);
-    sprintf_(buf, "Before test: PB15_out=%d val=%d\r\n", pb15_out, pb15_val);
-    UART_Send(buf, strlen(buf));
+    // // Test millis accuracy against SYSTEM_DelayMs
+    // uint16_t start_millis = timer_millis();
+    // uint16_t total_delay_ms = 0;
+    // for (int i = 0; i < 10; i++) {
+    //     SYSTEM_DelayMs(50);
+    //     total_delay_ms += 50;
+    // }
+    // uint16_t end_millis = timer_millis();
+    // uint16_t elapsed_millis = end_millis - start_millis;
+    // int16_t error_ms = (int16_t)elapsed_millis - (int16_t)total_delay_ms;
+    // int16_t error_percent = (error_ms * 100) / (int16_t)total_delay_ms;
     
-            GPIOB->DIR |= GPIO_DIR_15_BITS_OUTPUT;
-    GPIO_SetBit(&GPIOB->DATA, GPIOB_PIN_BK1080); // Set PB15 high
-    SYSTEM_DelayMs(10);
-    GPIO_ClearBit(&GPIOB->DATA, GPIOB_PIN_BK1080); // Set PB15 low
-    SYSTEM_DelayMs(10);
-    GPIO_SetBit(&GPIOB->DATA, GPIOB_PIN_BK1080); // Set PB15 high
-    SYSTEM_DelayMs(10);
-    GPIO_ClearBit(&GPIOB->DATA, GPIOB_PIN_BK1080); // Set PB15 low
-    SYSTEM_DelayMs(10);
-    GPIO_SetBit(&GPIOB->DATA, GPIOB_PIN_BK1080); // Set PB15 high
-    SYSTEM_DelayMs(10);
+    // sprintf_(buf, "millis test: expect=%lu actual=%lu err=%ld (%ld%%)\r\n", 
+    //          total_delay_ms, elapsed_millis, error_ms, error_percent);
+    // UART_Send(buf, strlen(buf));
+
+
+
+    // // Debug: Test PB15 direction changes
+    // bool pb15_out = (GPIOB->DIR & GPIO_DIR_15_MASK) != 0;
+    // bool pb15_val = GPIO_CheckBit(&GPIOB->DATA, GPIOB_PIN_BK1080);
+    // sprintf_(buf, "Before test: PB15_out=%d val=%d\r\n", pb15_out, pb15_val);
+    // UART_Send(buf, strlen(buf));
     
-    pb15_out = (GPIOB->DIR & GPIO_DIR_15_MASK) != 0;
-    sprintf_(buf, "After toggle: PB15_out=%d\r\n", pb15_out);
-    UART_Send(buf, strlen(buf));
+    //         GPIOB->DIR |= GPIO_DIR_15_BITS_OUTPUT;
+    // GPIO_SetBit(&GPIOB->DATA, GPIOB_PIN_BK1080); // Set PB15 high
+    // SYSTEM_DelayMs(10);
+    // GPIO_ClearBit(&GPIOB->DATA, GPIOB_PIN_BK1080); // Set PB15 low
+    // SYSTEM_DelayMs(10);
+    // GPIO_SetBit(&GPIOB->DATA, GPIOB_PIN_BK1080); // Set PB15 high
+    // SYSTEM_DelayMs(10);
+    // GPIO_ClearBit(&GPIOB->DATA, GPIOB_PIN_BK1080); // Set PB15 low
+    // SYSTEM_DelayMs(10);
+    // GPIO_SetBit(&GPIOB->DATA, GPIOB_PIN_BK1080); // Set PB15 high
+    // SYSTEM_DelayMs(10);
     
-    GPIOB->DIR &= ~GPIO_DIR_15_MASK;
-    pb15_out = (GPIOB->DIR & GPIO_DIR_15_MASK) != 0;
-    pb15_val = GPIO_CheckBit(&GPIOB->DATA, GPIOB_PIN_BK1080);
-    sprintf_(buf, "After set input: PB15_out=%d val=%d\r\n", pb15_out, pb15_val);
-    UART_Send(buf, strlen(buf));
+    // pb15_out = (GPIOB->DIR & GPIO_DIR_15_MASK) != 0;
+    // sprintf_(buf, "After toggle: PB15_out=%d\r\n", pb15_out);
+    // UART_Send(buf, strlen(buf));
     
+    // GPIOB->DIR &= ~GPIO_DIR_15_MASK;
+    // pb15_out = (GPIOB->DIR & GPIO_DIR_15_MASK) != 0;
+    // pb15_val = GPIO_CheckBit(&GPIOB->DATA, GPIOB_PIN_BK1080);
+    // sprintf_(buf, "After set input: PB15_out=%d val=%d\r\n", pb15_out, pb15_val);
+    // UART_Send(buf, strlen(buf));
 
     // If no stuck keys detected, mode is valid
     if (!any_stuck) {
@@ -371,8 +388,7 @@ bool CW_CheckKeyerInputs(uint8_t new_mode)
     UART_Send("CW keyer inputs stuck\r\n", 24);
 
     // Stuck keys detected - warn user and wait up to 1 second
-	AUDIO_PlayBeep(BEEP_880HZ_60MS_TRIPLE_BEEP);
-    UI_DisplayReleaseKeys();
+    UI_DisplayReleasePaddle();
     BACKLIGHT_TurnOn();
     
     bool released = false;
@@ -387,7 +403,7 @@ bool CW_CheckKeyerInputs(uint8_t new_mode)
                 // Restore port pins
                 CW_ConfigurePortPins(false);
             }
-            return false;
+            break;
         }
         
         // Check if inputs are now released
@@ -402,7 +418,9 @@ bool CW_CheckKeyerInputs(uint8_t new_mode)
         
         SYSTEM_DelayMs(10);
     }
-
+    gKeyReading0 = KEY_INVALID;
+    gKeyReading1 = KEY_INVALID;
+    gDebounceCounter = 0;
     return released;
 }
 

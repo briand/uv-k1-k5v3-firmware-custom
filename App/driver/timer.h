@@ -18,7 +18,9 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#ifdef disabled
 extern uint8_t TIM0_CNT;
+#endif
 
 void TIM0_INIT(void);
 
@@ -28,8 +30,8 @@ void TIM0_INIT(void);
 uint16_t timer_jiffies(void);
 
 // Returns milliseconds since boot
-// WARNING: Rolls over every ~4.9 days (32-bit at 10kHz = 429,496,730ms)
-uint32_t timer_millis(void);
+// WARNING: Rolls over every ~6.5 seconds (16-bit counter at 10kHz = 6553ms)
+uint16_t timer_millis();
 
 // Returns ticks elapsed since previous jiffy value with rollover protection
 // prev: Previous jiffy value from timer_jiffies()
@@ -37,7 +39,7 @@ uint16_t timer_jiffies_since(uint16_t prev);
 
 // Returns milliseconds elapsed since previous millis value with rollover protection
 // prev: Previous millis value from timer_millis()
-uint32_t timer_millis_since(uint32_t prev);
+uint16_t timer_millis_since(uint16_t prev);
 #endif
 
 #endif

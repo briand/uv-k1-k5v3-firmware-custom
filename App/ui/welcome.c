@@ -47,6 +47,20 @@ void UI_DisplayReleaseKeys(void)
     ST7565_BlitFullScreen();
 }
 
+#ifdef ENABLE_CW_MODULATOR
+void UI_DisplayReleasePaddle(void)
+{
+	memset(gStatusLine,  0, sizeof(gStatusLine));
+	UI_DisplayClear();
+
+	UI_PrintString("RELEASE", 0, 127, 1, 10);
+	UI_PrintString("PADDLE KEYS", 0, 127, 3, 10);
+
+	ST7565_BlitStatusLine();  // blank status line
+	ST7565_BlitFullScreen();
+}
+#endif
+
 void UI_DisplayWelcome(void)
 {
     char WelcomeString0[16];

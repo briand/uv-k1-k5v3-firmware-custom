@@ -18,6 +18,9 @@
 #define UI_WELCOME_H
 
 void UI_DisplayReleaseKeys(void);
+#ifdef ENABLE_CW_MODULATOR
+void UI_DisplayReleasePaddle(void);
+#endif
 void UI_DisplayWelcome(void);
 
 #endif

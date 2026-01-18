@@ -6,6 +6,7 @@
 #include "ARMCM0.h"
 #include <stdbool.h>
 
+#ifdef disabled
 uint8_t TIM0_CNT = 0;
 
 __attribute__((weak)) void HandlerTIMER_BASE0()
@@ -13,6 +14,7 @@ __attribute__((weak)) void HandlerTIMER_BASE0()
     TIMERBASE0_IF |= (1 << 0); // clear timer interrupt status first
     TIM0_CNT++;
 }
+#endif
 
 static void TIM0_SET_PSC(uint16_t prescaler) {
     // Clear the DIV field and set the prescaler (16-bit register)
@@ -36,40 +38,27 @@ void TIM0_INIT(void)
     TIM0_SET_PSC(4800U - 1U);
     TIM0_SET_ARR(0xFFFFU);
 
-    TIMERBASE0_IF |= (1 << 1) | (1 << 0); // Write 1 to clear: clear timer interrupt status
+    TIMERBASE0_IF |= (1 << 0); // Write 1 to clear: clear timer interrupt status
     
-    // Clear and enable high counter for millis tracking
-    TIMERBASE0_HIGH_CNT = 0;
-    TIMERBASE0_EN |= (1 << 1) | (1 << 0); // Enable both HIGH_EN and LOW_EN
+    // Enable low counter only (HIGH counter unused - not cascaded)
+    TIMERBASE0_EN |= (1 << 0);
 }
 
 #ifdef ENABLE_MILLIS
 
 // Returns timer count in 100µs ticks (10kHz)
 // WARNING: Rolls over every ~6.5 seconds (16-bit counter)
-uint16_t timer_jiffies(void)
+inline uint16_t timer_jiffies(void)
 {
     return (uint16_t)TIMERBASE0_LOW_CNT;
 }
 
 // Returns milliseconds since boot
-// WARNING: Rolls over every ~4.9 days (32-bit at 10kHz = 429,496,730ms)
-uint32_t timer_millis(void)
+// WARNING: Rolls over every ~6.5 seconds (16-bit counter at 10kHz = 6553ms)
+inline uint16_t timer_millis(void)
 {
-    // Read high/low counters with rollover protection
-    // Loop until we get a consistent read (high counter didn't change - max 2 loops)
-    uint32_t high, low, high2;
-    do {
-        high = TIMERBASE0_HIGH_CNT;
-        low = TIMERBASE0_LOW_CNT;
-        high2 = TIMERBASE0_HIGH_CNT;
-    } while (high != high2);
-    
-    // Combine into 32-bit count: high counter increments every 65536 low ticks
-    uint32_t total_ticks = (high << 16) | low;
-    
-    // Convert to milliseconds: 10 ticks = 1ms
-    return total_ticks / 10;
+    // Read low counter and convert to milliseconds: 10 ticks = 1ms
+    return (uint16_t)(TIMERBASE0_LOW_CNT / 10);
 }
 
 // Returns ticks elapsed since previous jiffy value with rollover protection
@@ -82,13 +71,10 @@ uint16_t timer_jiffies_since(uint16_t prev)
 
 // Returns milliseconds elapsed since previous millis value with rollover protection
 // prev: Previous millis value from timer_millis()
-uint32_t timer_millis_since(uint32_t prev)
+uint16_t timer_millis_since(uint16_t prev)
 {
-    uint32_t cur = timer_millis();
-    return (cur >= prev) ? (cur - prev) : (UINT32_MAX - prev + 1U + cur);
+    uint16_t cur = timer_millis();
+    return (cur >= prev) ? (uint16_t)(cur - prev) : (uint16_t)(UINT16_MAX - prev + 1U + cur);
 }
 
 #endif
-
-
-
