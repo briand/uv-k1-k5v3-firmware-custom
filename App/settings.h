@@ -39,14 +39,22 @@ enum POWER_OnDisplayMode_t {
 typedef enum POWER_OnDisplayMode_t POWER_OnDisplayMode_t;
 
 #ifdef ENABLE_CW_MODULATOR
+// Bit flags for CW key input configuration
+#define CW_KEY_FLAG_REVERSED      0x01  // 0=normal, 1=reversed
+#define CW_KEY_FLAG_PORT_RING     0x02  // 0=no port ring, 1=use port ring input
+#define CW_KEY_FLAG_BUTTONS       0x04  // 0=no buttons, 1=use button inputs
+#define CW_KEY_FLAG_NO_KEYER      0x08  // 0=keyer enabled, 1=handkey only
+#define CW_KEY_FLAG_PORT_GROUND   0x10  // 0=no port ground, 1=use port ground
+
 enum CW_KeyInputType_t {
-	CW_KEY_INPUT_HANDKEY = 0,        // PTT handkey only, no keyer
-	CW_KEY_INPUT_BUTTONS_NORMAL,     // PTT dah/SD1 dit
-	CW_KEY_INPUT_BUTTONS_REVERSED,   // PTT dit/SD1 dah
-	CW_KEY_INPUT_PORT_NORMAL,        // tip dah/sleeve dit
-	CW_KEY_INPUT_PORT_REVERSED,      // tip dit/sleeve dah
-	CW_KEY_INPUT_BOTH_NORMAL,        // PTT+tip dah/SD1+sleeve dit
-	CW_KEY_INPUT_BOTH_REVERSED       // PTT+tip dit/SD1+sleeve dah
+	CW_KEY_INPUT_HANDKEY          = 0x08,  // handkey only (no keyer)
+	CW_KEY_INPUT_HANDKEY_PORT     = 0x18,  // handkey + port ground (no keyer)
+	CW_KEY_INPUT_BUTTONS_NORMAL   = 0x04,  // buttons
+	CW_KEY_INPUT_BUTTONS_REVERSED = 0x05,  // buttons + reversed
+	CW_KEY_INPUT_PORT_NORMAL      = 0x12,  // port ring + port ground
+	CW_KEY_INPUT_PORT_REVERSED    = 0x13,  // port ring + port ground + reversed
+	CW_KEY_INPUT_BOTH_NORMAL      = 0x16,  // buttons + port ring + port ground
+	CW_KEY_INPUT_BOTH_REVERSED    = 0x17   // buttons + port ring + port ground + reversed
 };
 typedef enum CW_KeyInputType_t CW_KeyInputType_t;
 

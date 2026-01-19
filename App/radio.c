@@ -495,7 +495,7 @@ void RADIO_ConfigureSquelchAndOutputPower(VFO_Info_t *pInfo)
 
     if (gEeprom.SQUELCH_LEVEL == 0
 	#ifdef ENABLE_CW_MODULATOR
-		|| pInfo->Modulation == MODULATION_CW
+//		|| pInfo->Modulation == MODULATION_CW   // briand - TOTO revisit squelch
 	#endif
 	)
     {   // squelch == 0 (off)
@@ -1104,15 +1104,14 @@ void RADIO_SetModulation(ModulationMode_t modulation)
         case MODULATION_AM:
             mod = BK4819_AF_FM; // AM no longer needs special AF setting
             break;
-        case MODULATION_USB:
-            mod = BK4819_AF_BASEBAND2;
-            break;
-
 #ifdef ENABLE_CW_MODULATOR
 		case MODULATION_CW:
-#endif	
-			mod = BK4819_AF_BASEBAND2;
-			break;
+			gMonitor = true;
+			[[fallthrough]];
+#endif
+	    case MODULATION_USB:
+            mod = BK4819_AF_BASEBAND2;
+            break;
 
 #ifdef ENABLE_BYP_RAW_DEMODULATORS
         case MODULATION_BYP:

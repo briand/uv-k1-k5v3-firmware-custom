@@ -169,9 +169,9 @@ const t_menu_item MenuList[] =
 #endif
 #ifdef ENABLE_CW_MODULATOR
 	{"CWfreq", VOICE_ID_INVALID,                       MENU_CW_FREQ       },
-	{"CWtnvol", VOICE_ID_INVALID,                      MENU_CW_SIDETONE_LEVEL},
-	{"CWkmode", VOICE_ID_INVALID,                      MENU_CW_KEYER_MODE },
-	{"CWkwpm", VOICE_ID_INVALID,                       MENU_CW_KEY_WPM	  },
+	{"CWvol", VOICE_ID_INVALID,                      MENU_CW_SIDETONE_LEVEL},
+	{"CWkmod", VOICE_ID_INVALID,                      MENU_CW_KEYER_MODE },
+	{"CWwpm", VOICE_ID_INVALID,                       MENU_CW_KEY_WPM	  },
 	{"CWkin", VOICE_ID_INVALID,                        MENU_CW_KEY_INPUT  },
 #endif
 
@@ -512,6 +512,7 @@ const char* gSubMenu_CW_KEYER_MODE[] =
 const char* gSubMenu_CW_KEY_INPUT[] =
 {
 	"PTT\nHandKey",
+	"PTT+port\nHandKey",
 	"PTT dah\nSD1 dit",
 	"PTT dit\nSD1 dah",
 	"PTT+tip\ndah\nsleeve\ndit",

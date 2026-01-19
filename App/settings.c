@@ -355,7 +355,7 @@ gEeprom.FreqChannel[1]   = IS_FREQ_CHANNEL(Data16[5]) ? Data16[5] : (FREQ_CHANNE
 	}
 	gEeprom.CW_KEYER_MODE     = (Data[1] & 0x80) ? CW_IAMBIC_MODE_B : CW_IAMBIC_MODE_A;  // bit 7: 0=A, 1=B
 	gEeprom.CW_KEY_WPM        = ((Data[1] & 0x3f) < 31 && (Data[1] & 0x3f) >= 10) ? Data[1] & 0x3f : 18;  // bits 0-5, valid range 10-30, default 18 WPM
-	gEeprom.CW_KEY_INPUT      = ((Data[2] & 0x07) <= 6) ? (Data[2] & 0x07) : CW_KEY_INPUT_HANDKEY;  // bits 0-2, range 0-6, default HANDKEY
+	gEeprom.CW_KEY_INPUT      = ((Data[2] & 0x0F) <= 7) ? (Data[2] & 0x0F) : CW_KEY_INPUT_HANDKEY;  // bits 0-3, range 0-7, default HANDKEY
 #endif
 
     // 0F40..0F47
@@ -930,7 +930,7 @@ void SETTINGS_SaveSettings(void)
     uint8_t level = gEeprom.CW_SIDETONE_LEVEL / 21;
     State[0] = (gEeprom.CW_TONE_FREQUENCY / 5) | ((level & 0x07) << 4);
 	State[1] = (gEeprom.CW_KEYER_MODE << 7) | (gEeprom.CW_KEY_WPM & 0x3F);  // mode in bit 7 (0=A, 1=B), WPM in bits 0-5
-	State[2] = gEeprom.CW_KEY_INPUT & 0x07;  // key input in bits 0-2
+	State[2] = gEeprom.CW_KEY_INPUT & 0x0F;  // key input in bits 0-3
 
     PY25Q16_WriteBuffer(0x00A140, SecBuf, 0x08, false);
 
