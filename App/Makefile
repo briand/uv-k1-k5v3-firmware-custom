@@ -42,6 +42,7 @@ ENABLE_BLMIN_TMP_OFF          ?= 0
 ENABLE_SCAN_RANGES            ?= 1
 ENABLE_CW_MODULATOR           ?= 1
 ENABLE_MILLIS                 ?= 1
+ENABLE_EXTRA_FILTER           ?= 0
 
 # ---- DEBUGGING ----
 ENABLE_AM_FIX_SHOW_DATA       ?= 0
@@ -66,6 +67,11 @@ endif
 ifeq ($(ENABLE_LTO),1)
 	# can't have LTO and OVERLAY enabled at same time
 	ENABLE_OVERLAY := 0
+endif
+
+ifeq ($(ENABLE_CW_MODULATOR),1)
+	# Auto-enable extra filter when CW is enabled
+	ENABLE_EXTRA_FILTER := 1
 endif
 
 BSP_DEFINITIONS := $(wildcard hardware/*/*.def)
@@ -376,6 +382,9 @@ ifeq ($(ENABLE_CW_MODULATOR),1)
 endif
 ifeq ($(ENABLE_MILLIS),1)
 	CFLAGS  += -DENABLE_MILLIS
+endif
+ifeq ($(ENABLE_EXTRA_FILTER),1)
+	CFLAGS  += -DENABLE_EXTRA_FILTER
 endif
 ifeq ($(ENABLE_DTMF_CALLING),1)
 	CFLAGS  += -DENABLE_DTMF_CALLING

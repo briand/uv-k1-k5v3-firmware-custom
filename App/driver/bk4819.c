@@ -695,6 +695,7 @@ void BK4819_SetFilterBandwidth(const BK4819_FilterBandwidth_t Bandwidth, const b
 			}
 			break;
 
+#ifdef ENABLE_EXTRA_FILTER
 		case BK4819_FILTER_BW_TIGHT: // 1.7kHz
 				val = (0u << 12) |     //  0 RF filter bandwidth
 				  (0u <<  9) |	   //  0 RF filter bandwidth when signal is weak
@@ -704,6 +705,7 @@ void BK4819_SetFilterBandwidth(const BK4819_FilterBandwidth_t Bandwidth, const b
 				  (0u <<  2);      //  0 Gain after FM Demodulation
 
 			break;
+#endif
 	}
 
     BK4819_WriteRegister(BK4819_REG_43, val);

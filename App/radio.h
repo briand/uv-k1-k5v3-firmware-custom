@@ -31,7 +31,9 @@ enum {
 enum {
 	BANDWIDTH_WIDE = 0,
 	BANDWIDTH_NARROW,
+#ifdef ENABLE_EXTRA_FILTER
 	BANDWIDTH_TIGHT
+#endif
 };
 
 enum PTT_ID_t {

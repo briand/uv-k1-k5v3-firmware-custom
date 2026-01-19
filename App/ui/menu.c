@@ -223,7 +223,9 @@ const char gSubMenu_W_N[][7] =
 {
 	"WIDE",
 	"NARROW",
+#ifdef ENABLE_EXTRA_FILTER
 	"TIGHT"
+#endif
 };
 
 const char gSubMenu_OFF_ON[][4] =

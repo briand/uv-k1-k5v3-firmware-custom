@@ -23,6 +23,9 @@
 #ifdef ENABLE_FMRADIO
     #include "app/fm.h"
 #endif
+#ifdef ENABLE_CW_MODULATOR
+	#include "app/app.h"
+#endif
 #include "audio.h"
 #include "dcs.h"
 #include "driver/bk4819.h"
@@ -36,6 +39,7 @@
 #include "radio.h"
 #include "settings.h"
 #include "ui/menu.h"
+
 
 VFO_Info_t    *gTxVfo;
 VFO_Info_t    *gRxVfo;
@@ -379,7 +383,11 @@ void RADIO_ConfigureChannel(const unsigned int VFO, const unsigned int configure
         {
             const uint8_t d4 = data[4];
             pVfo->FrequencyReverse  = !!((d4 >> 0) & 1u);
-            pVfo->CHANNEL_BANDWIDTH = !!((d4 >> 1) & 1u);
+			#ifdef ENABLE_EXTRA_FILTER
+				pVfo->CHANNEL_BANDWIDTH =   ((d4 >> 5) & 3u);
+			#else
+	            pVfo->CHANNEL_BANDWIDTH = !!((d4 >> 1) & 1u);
+			#endif
             pVfo->OUTPUT_POWER      =   ((d4 >> 2) & 7u);
             pVfo->BUSY_CHANNEL_LOCK = !!((d4 >> 5) & 1u);
             pVfo->TX_LOCK           = !!((d4 >> 6) & 1u);
@@ -748,6 +756,7 @@ void RADIO_SelectVfos(void)
 	if(gTxVfo->Modulation==MODULATION_CW)
 	{
 		CW_KeyerReconfigure();
+		gMonitor = true;
 	}
 #endif
 
@@ -823,7 +832,7 @@ void RADIO_SetupRegisters(bool switchToForeground)
     #else
         Frequency = gRxVfo->pRX->Frequency
 	#if ENABLE_CW_MODULATOR
-		- (gTxVfo->Modulation == MODULATION_CW ? 70 : 0) // CW BFO offset (10s of hz)
+		- (gTxVfo->Modulation == MODULATION_CW ? (45 + (5 * gEeprom.CW_TONE_FREQUENCY)) : 0) // CW BFO offset (10s of hz)
 	#endif
 	;
     #endif
@@ -953,6 +962,12 @@ void RADIO_SetupRegisters(bool switchToForeground)
 
     FUNCTION_Init();
 
+#ifdef ENABLE_CW_MODULATOR
+	if (gRxVfo->Modulation == MODULATION_CW)
+	{
+		APP_StartListening(FUNCTION_MONITOR);
+	}
+#endif
     if (switchToForeground)
         FUNCTION_Select(FUNCTION_FOREGROUND);
 }
@@ -1014,9 +1029,9 @@ void RADIO_SetTxParameters(void)
     #endif
 
 	#ifdef ENABLE_CW_MODULATOR
-	if(gTxVfo->Modulation != MODULATION_CW || gEeprom.CW_SIDETONE_LEVEL == 0)
+	if((gTxVfo->Modulation != MODULATION_CW) || (gEeprom.CW_SIDETONE_LEVEL == 0))
 	#endif
-    AUDIO_AudioPathOff();
+	    AUDIO_AudioPathOff();
 
     gEnableSpeaker = false;
 

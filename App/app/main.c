@@ -115,6 +115,8 @@ static void processFKeyFunction(const KEY_Code_t Key, const bool beep)
         case KEY_0:
             #ifdef ENABLE_FMRADIO
                 ACTION_FM();
+			#else
+				ACTION_SwitchDemodul();
             #endif
             break;
 
