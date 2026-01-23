@@ -400,8 +400,8 @@ int MENU_GetLimits(uint8_t menu_id, int32_t *pMin, int32_t *pMax)
             break;
 #ifdef ENABLE_CW_MODULATOR
 		case MENU_CW_FREQ:
-			*pMin = 0;
-			*pMax = 7; // off, and 500 Hz to 800 Hz in 50 Hz steps
+			*pMin = 0; // == 450Hz
+			*pMax = 7; // up to 800 Hz in 50 Hz steps
 			break;
 
 		case MENU_CW_SIDETONE_LEVEL:
@@ -1036,8 +1036,13 @@ void MENU_AcceptSetting(void)
 			break;
 
 		case MENU_CW_FREQ:
-			// 50 hz steps from 500 Hz to 800 Hz
-			gEeprom.CW_TONE_FREQUENCY = gSubMenuSelection * 5;
+			// 50 hz steps from 450 Hz to 800 Hz - stored as 45 to 80
+			gEeprom.CW_TONE_FREQUENCY = 45 + gSubMenuSelection * 5;
+			// Set the "BFO" - Frequency is in deciHz, so no scaling needed
+			BK4819_SetFrequency(gRxVfo->pRX->Frequency - gEeprom.CW_TONE_FREQUENCY);			
+			char buf[64];
+			sprintf_(buf, "in menu RX freq: %d Hz, offset: %d Hz\r\n", gRxVfo->pRX->Frequency * 10, (10 * gEeprom.CW_TONE_FREQUENCY));
+			UART_Send(buf, strlen(buf));
 			break;
 
 		case MENU_CW_SIDETONE_LEVEL:
@@ -1513,7 +1518,7 @@ void MENU_ShowCurrentSetting(void)
 			gSubMenuSelection = gEeprom.CW_KEY_WPM;
 			break;	
 		case MENU_CW_FREQ:
-			gSubMenuSelection = gEeprom.CW_TONE_FREQUENCY / 5;
+			gSubMenuSelection = (gEeprom.CW_TONE_FREQUENCY - 45) / 5;
 			break;
 		case MENU_CW_SIDETONE_LEVEL:
 			// Convert scaled value (0, 18, 36, 54, 72, 90, 108) back to menu value (0-6)

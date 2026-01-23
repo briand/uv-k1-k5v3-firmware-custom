@@ -348,14 +348,11 @@ gEeprom.FreqChannel[1]   = IS_FREQ_CHANNEL(Data16[5]) ? Data16[5] : (FREQ_CHANNE
 #ifdef ENABLE_CW_MODULATOR
 	// 0F20..0F22
 	EEPROM_ReadBuffer(0x00A140, Data, 3);
-	gEeprom.CW_TONE_FREQUENCY = (Data[0] & 0x80) == 0 ? (Data[0] & 0xf) * 5 : 5;  // 50 Hz steps above 500Hz, default 700
-	{
-		uint8_t level = (Data[0] >> 4) & 0x07;  // Extract bits 4-6 (3 bits = 0-7)
-		gEeprom.CW_SIDETONE_LEVEL = (level == 0) ? 0 : (level * 21);  // 0=off, 1-6 scaled by 21 (max 6*21=126)
-	}
+	gEeprom.CW_TONE_FREQUENCY = Data[0] == 0xff ? 60 : 45 + (Data[0] & 0xf) * 5;  // Same as gMenuSelection: 50 Hz steps from 450, default 600
+	gEeprom.CW_SIDETONE_LEVEL = Data[0] == 0xff ? 5*21 : ((Data[0] >> 4) & 0x07) * 21;  // levels 0-6 scaled by 21 (max 6*21=126), default 5*21=105
 	gEeprom.CW_KEYER_MODE     = (Data[1] & 0x80) ? CW_IAMBIC_MODE_B : CW_IAMBIC_MODE_A;  // bit 7: 0=A, 1=B
 	gEeprom.CW_KEY_WPM        = ((Data[1] & 0x3f) < 31 && (Data[1] & 0x3f) >= 10) ? Data[1] & 0x3f : 18;  // bits 0-5, valid range 10-30, default 18 WPM
-	gEeprom.CW_KEY_INPUT      = ((Data[2] & 0x0F) <= 7) ? (Data[2] & 0x0F) : CW_KEY_INPUT_HANDKEY;  // bits 0-3, range 0-7, default HANDKEY
+	gEeprom.CW_KEY_INPUT      = ((Data[2] & 0x0F) < 8) ? (Data[2] & 0x0F) : CW_KEY_INPUT_HANDKEY;  // bits 0-3, range 0-7, default HANDKEY
 #endif
 
     // 0F40..0F47
@@ -928,7 +925,7 @@ void SETTINGS_SaveSettings(void)
 
     // Convert sidetone level back to 0-6 range for storage
     uint8_t level = gEeprom.CW_SIDETONE_LEVEL / 21;
-    State[0] = (gEeprom.CW_TONE_FREQUENCY / 5) | ((level & 0x07) << 4);
+	State[0] = (gEeprom.CW_TONE_FREQUENCY - 45) / 5 | ((level & 0x07) << 4);
 	State[1] = (gEeprom.CW_KEYER_MODE << 7) | (gEeprom.CW_KEY_WPM & 0x3F);  // mode in bit 7 (0=A, 1=B), WPM in bits 0-5
 	State[2] = gEeprom.CW_KEY_INPUT & 0x0F;  // key input in bits 0-3
 

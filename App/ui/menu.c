@@ -221,10 +221,11 @@ const char gSubMenu_SFT_D[][4] =
 
 const char gSubMenu_W_N[][7] =
 {
-	"WIDE",
-	"NARROW",
+	"25k FM",
+	"12k FM",
+	"N 6k",
 #ifdef ENABLE_EXTRA_FILTER
-	"TIGHT"
+	"N 1.7k"
 #endif
 };
 
@@ -1137,7 +1138,7 @@ void UI_DisplayMenu(void)
 
 #ifdef ENABLE_CW_MODULATOR
 		case MENU_CW_FREQ:
-			sprintf(String, "%d Hz", 500 + gSubMenuSelection * 50);
+			sprintf(String, "%d Hz", 450 + gSubMenuSelection * 50);
 			break;
 
 		case MENU_CW_SIDETONE_LEVEL:

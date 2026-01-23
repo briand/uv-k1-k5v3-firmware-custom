@@ -32,7 +32,7 @@ ENABLE_NO_CODE_SCAN_TIMEOUT   ?= 1
 ENABLE_AM_FIX                 ?= 1
 ENABLE_SQUELCH_MORE_SENSITIVE ?= 1
 ENABLE_FASTER_CHANNEL_SCAN    ?= 1
-ENABLE_RSSI_BAR               ?= 1
+ENABLE_RSSI_BAR               ?= 0
 ENABLE_AUDIO_BAR              ?= 1
 ENABLE_COPY_CHAN_TO_VFO       ?= 1
 ENABLE_SPECTRUM               ?= 1
@@ -46,8 +46,8 @@ ENABLE_EXTRA_FILTER           ?= 0
 
 # ---- DEBUGGING ----
 ENABLE_AM_FIX_SHOW_DATA       ?= 0
-ENABLE_AGC_SHOW_DATA          ?= 0
-ENABLE_UART_RW_BK_REGS        ?= 0
+ENABLE_AGC_SHOW_DATA          ?= 1
+ENABLE_UART_RW_BK_REGS        ?= 1
 
 # ---- COMPILER/LINKER OPTIONS ----
 ENABLE_CLANG                  ?= 0

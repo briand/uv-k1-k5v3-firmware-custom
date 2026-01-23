@@ -2140,7 +2140,11 @@ static void ProcessKey(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
                 GENERIC_Key_PTT(bKeyPressed);
                 goto Skip;
             }
-
+#ifdef ENABLE_CW_MODULATOR
+            // Disable DTMF/tone transmission when in CW mode
+            if (gCurrentVfo->Modulation == MODULATION_CW)
+                goto Skip;
+#endif
             if (Key == KEY_SIDE2) { // transmit 1750Hz tone
                 Code = 0xFE;
             }
@@ -2301,6 +2305,11 @@ Skip:
 
     if (gFlagReconfigureVfos) {
         RADIO_SelectVfos();
+
+#ifdef ENABLE_CW_MODULATOR
+	if(gFlagReconfigureVfos && gTxVfo->Modulation==MODULATION_CW)
+		CW_KeyerReconfigure();
+#endif
 
 #ifdef ENABLE_NOAA
         RADIO_ConfigureNOAA();

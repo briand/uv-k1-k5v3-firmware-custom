@@ -961,7 +961,7 @@ static void MAIN_Key_UP_DOWN(bool bKeyPressed, bool bKeyHeld, int8_t Direction)
                 BK4819_SetFrequency(frequency
 				#ifdef ENABLE_CW_MODULATOR
 					- (gTxVfo->Modulation == MODULATION_CW)? 
-						45 + (gEeprom.CW_TONE_FREQUENCY * 5) : 0 // CW BFO offset (10s of hz)
+						(gEeprom.CW_TONE_FREQUENCY * 10) : 0 // CW BFO offset (10s of hz)
 				#endif
 				);
                 BK4819_RX_TurnOn();
