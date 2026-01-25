@@ -44,12 +44,11 @@ typedef enum {
 static CW_KeyerFSMState_t s_KeyerFSMState = CWK_STATE_IDLE;
 
 // Internal keyer runtime state
-static bool           s_iambic_b = false;  // true=B, false=A
-static uint16_t       s_dit_cnt  = 0;      // duration in timer ticks (16-bit)
-static uint16_t       s_dah_cnt  = 0;      // duration in timer ticks (16-bit)
-static uint16_t       s_gap_cnt  = 0;      // inter-element gap in ticks (1 dit)
-static uint16_t       s_last_cnt = 0;      // last TIMERBASE0_LOW_CNT sample (16-bit)
-static uint16_t       s_elem_start_cnt = 0;// element start counter (16-bit)
+static uint16_t       s_dit_count  = 0;      // duration in timer ticks (16-bit)
+static uint16_t       s_dah_count  = 0;      // duration in timer ticks (16-bit)
+static uint16_t       s_gap_count  = 0;      // inter-element gap in ticks (1 dit)
+static uint16_t       s_last_count = 0;      // last TIMERBASE0_LOW_COUNT sample (16-bit)
+static uint16_t       s_elem_start_count = 0;// element start counter (16-bit)
 static bool           s_active_is_dit = false;
 static bool           s_pending_alternate = false; // alternate element queude
 static bool           s_both_held_during_elem = false; // iambic-A detection
@@ -221,13 +220,11 @@ static void CW_ConfigurePortGround(bool enable)
 static void CW_ConfigurePortRing(bool enable)
 {
     if (enable) {
-        // Configure PB15 as GPIO input (ring) with pull-up enabled
-        //PORTCON_PORTB_PU |= PORTCON_PORTB_PU_B15_MASK; // Enable pull-up (reads high when floating)
+        // Configure PB15 as GPIO input (ring)
         GPIOB->DIR &= ~(0 | GPIO_DIR_15_MASK); // PB15 as INPUT
         PORTCON_PORTB_IE |= PORTCON_PORTB_IE_B15_BITS_ENABLE; // Enable input buffer
     } else {
         // Configure PB15 as GPIO output, set high
-        //PORTCON_PORTB_PU &= ~PORTCON_PORTB_PU_B15_MASK; // Disable pull-up
         PORTCON_PORTB_IE &= ~PORTCON_PORTB_IE_B15_MASK; // Disable input buffer
         PORTCON_PORTB_SEL1 &= ~PORTCON_PORTB_SEL1_B15_MASK;
         PORTCON_PORTB_SEL1 |= PORTCON_PORTB_SEL1_B15_BITS_GPIOB15;
@@ -236,22 +233,29 @@ static void CW_ConfigurePortRing(bool enable)
     }
 }
 
-// Initialize keyer from gEeprom settings
-static void CW_KeyerInit()
+void CW_UpdateWPM()
 {
-    // TIMERBASE0_LOW_CNT is 16-bit 10 kHz tick and rolls over at 0xFFFF (~6553 ms)
-
+    // TIMERBASE0_LOW_COUNT is 16-bit 10 kHz tick and rolls over at 0xFFFF (~6553 ms)
     const uint32_t wpm = gEeprom.CW_KEY_WPM;
     const uint32_t dit_ticks = TICKS_PER_MINUTE / (wpm * DITS_PER_WORD);
     const uint32_t dah_ticks = 3U * dit_ticks;
 
-    s_dit_cnt = (uint16_t)dit_ticks;
-    s_dah_cnt = (uint16_t)dah_ticks;
-    s_gap_cnt = (uint16_t)dit_ticks; // inter-element gap = 1 dit
+    s_dit_count = (uint16_t)dit_ticks;
+    s_dah_count = (uint16_t)dah_ticks;
+    s_gap_count = (uint16_t)dit_ticks; // inter-element gap = 1 dit
+
+    char buf[80];
+    sprintf_(buf, "CW_SetWPM: WPM=%u dit=%u dah=%u gap=%u\r\n", 
+             wpm, s_dit_count, s_dah_count, s_gap_count);
+    UART_Send(buf, strlen(buf));
+}
+
+// Initialize keyer from gEeprom settings
+static void CW_KeyerInit()
+{
+    CW_UpdateWPM();
 
     // Load settings from gEeprom
-    s_iambic_b = (gEeprom.CW_KEYER_MODE == CW_IAMBIC_MODE_B);
-    
     // Check reversed flag
     s_reverse_keys = (gEeprom.CW_KEY_INPUT & CW_KEY_FLAG_REVERSED);
     
@@ -269,7 +273,7 @@ static void CW_KeyerInit()
     CW_ConfigurePortGround(uses_port_ground);
     CW_ConfigurePortRing(uses_port_ring);
 
-    s_last_cnt         = (uint16_t)TIMERBASE0_LOW_CNT;
+    s_last_count         = (uint16_t)TIMERBASE0_LOW_CNT;
     s_active_is_dit    = false;
     s_last_dit = false;
     s_last_dah = false;
@@ -391,53 +395,47 @@ CW_Action_t ptt_action(void)
 CW_Action_t CW_HandleState(void)
 {
     CW_Action_t action = CW_ACTION_NONE;
-    static uint16_t last_debug_cnt = 0;
-    static uint32_t state_count = 0;
+    // static uint16_t last_debug_count = 0;
 
-    // Check if keyer is disabled (handkey modes have NO_KEYER flag set)
-    if (gEeprom.CW_KEY_INPUT & CW_KEY_FLAG_NO_KEYER) {
-        static uint32_t handkey_log_count = 0;
-        if (++handkey_log_count % 5000 == 0) {
-            UART_Send("CW in handkey mode\r\n", 20);
-        }
-        return ptt_action();
-    } else {
-        static uint32_t keyer_log_count = 0;
-        if (++keyer_log_count % 5000 == 0) {
-            char buf[60];
-            sprintf_(buf, "CW in keyer mode (0x%02X)\r\n", gEeprom.CW_KEY_INPUT);
-            UART_Send(buf, strlen(buf));
-        }
-    }
-    
-    if(state_count++ % 5000 == 0) {
-    char buf[40];
-    sprintf_(buf, "keyer not SK cnt=%u\r\n", (uint16_t)TIMERBASE0_LOW_CNT);
-    //UART_Send(buf, strlen(buf));
-    }
-
-    // Check dirty flag at idle - reconfigure if needed
+    // check dirty flag at idle - reconfigure only when safe
     if (s_cfg_dirty && s_KeyerFSMState == CWK_STATE_IDLE) {
         CW_KeyerInit();
     }
 
-    const uint16_t cur_cnt = (uint16_t)TIMERBASE0_LOW_CNT;
-    const uint16_t delta_since_last = timer_jiffies_since(s_last_cnt);
+    const uint16_t cur_count = (uint16_t)TIMERBASE0_LOW_CNT;
+    const uint16_t delta_since_last = timer_jiffies_since(s_last_count);
     if (delta_since_last < s_sample_thresh) {
         return action;
     }
-    s_last_cnt = cur_cnt;
+    s_last_count = cur_count;
+
+    // Check if keyer is disabled (handkey modes have NO_KEYER flag set)
+    if (gEeprom.CW_KEY_INPUT & CW_KEY_FLAG_NO_KEYER) {
+        
+        static uint32_t handkey_log_count = 0;
+        if (++handkey_log_count % 1000 == 0) {
+            UART_Send("CW in handkey mode\r\n", 20);
+        }
+        return ptt_action();
+    } else {
+        // static uint32_t keyer_log_count = 0;
+        // if (++keyer_log_count % 1000 == 0) {
+        //     char buf[60];
+        //     sprintf_(buf, "CW in keyer mode (0x%02X)\r\n", gEeprom.CW_KEY_INPUT);
+        //     UART_Send(buf, strlen(buf));
+        // }
+    }
 
     CW_Input in;
     CW_ReadKeys(&in);
-    if(timer_millis_since(last_debug_cnt) >= 100) {
-        last_debug_cnt = cur_cnt;
-        bool pb15_is_output = (GPIOB->DIR & (1U << 15)) != 0;
-        char buf[100];
-        sprintf_(buf, "dit=%d dah=%d dr=%d df=%d hr=%d hf=%d PB15_out=%d\r\n",
-                in.dit, in.dah, in.dit_rise, in.dit_fall, in.dah_rise, in.dah_fall, pb15_is_output);
-        //UART_Send(buf, strlen(buf));
-    }
+    // if(timer_millis_since(last_debug_count) >= 100) {
+    //     last_debug_count = cur_count;
+    //     bool pb15_is_output = (GPIOB->DIR & (1U << 15)) != 0;
+    //     char buf[100];
+    //     sprintf_(buf, "dit=%d dah=%d dr=%d df=%d hr=%d hf=%d PB15_out=%d\r\n",
+    //             in.dit, in.dah, in.dit_rise, in.dit_fall, in.dah_rise, in.dah_fall, pb15_is_output);
+    //     UART_Send(buf, strlen(buf));
+    // }
 
     switch (s_KeyerFSMState) {
     case CWK_STATE_IDLE:
@@ -454,7 +452,7 @@ CW_Action_t CW_HandleState(void)
             }
 
             s_pending_alternate = false;
-            s_elem_start_cnt = cur_cnt;
+            s_elem_start_count = cur_count;
             s_KeyerFSMState = s_active_is_dit ? CWK_STATE_ACTIVE_DIT : CWK_STATE_ACTIVE_DAH;
             UART_LogSend("keyer going active\r\n", 20);
             action = CW_ACTION_CARRIER_ON;
@@ -467,8 +465,8 @@ CW_Action_t CW_HandleState(void)
     case CWK_STATE_ACTIVE_DAH: 
     {
         UART_LogSend("dah - keyer is active\r\n", 18);
-        const uint16_t target = (s_KeyerFSMState == CWK_STATE_ACTIVE_DIT) ? s_dit_cnt : s_dah_cnt;
-        const uint16_t elapsed_elem = timer_jiffies_since(s_elem_start_cnt);
+        const uint16_t target = (s_KeyerFSMState == CWK_STATE_ACTIVE_DIT) ? s_dit_count : s_dah_count;
+        const uint16_t elapsed_elem = timer_jiffies_since(s_elem_start_count);
 
         // Iambic alternation detection
         if (in.dit && in.dah) {
@@ -476,7 +474,7 @@ CW_Action_t CW_HandleState(void)
         }
         
         // Iambic B: detect opposite paddle press during element
-        if (s_iambic_b) {
+        if (gEeprom.CW_KEYER_MODE == CW_IAMBIC_MODE_B) {
             if (s_KeyerFSMState == CWK_STATE_ACTIVE_DIT && in.dah) {
                 s_pending_alternate = true;
             } else if (s_KeyerFSMState == CWK_STATE_ACTIVE_DAH && in.dit) {
@@ -486,7 +484,7 @@ CW_Action_t CW_HandleState(void)
 
         if (elapsed_elem >= target) {
             action = CW_ACTION_CARRIER_OFF;
-            s_elem_start_cnt = cur_cnt;
+            s_elem_start_count = cur_count;
             s_KeyerFSMState = CWK_STATE_INTER_ELEMENT_GAP;
         } else {
             // Carrier is on and should remain on during element
@@ -496,21 +494,14 @@ CW_Action_t CW_HandleState(void)
     }
 
     case CWK_STATE_INTER_ELEMENT_GAP: {
-        const uint16_t elapsed_gap = timer_jiffies_since(s_elem_start_cnt);
+        const uint16_t elapsed_gap = timer_jiffies_since(s_elem_start_count);
         
-        // Check dirty flag during inter-element gap
-        if (s_cfg_dirty) {
-            CW_KeyerInit();
-            s_KeyerFSMState = CWK_STATE_INTER_ELEMENT_GAP; // stay in gap state post-init
-            return action;
-        }
-        
-        if (elapsed_gap >= s_gap_cnt) {
+        if (elapsed_gap >= s_gap_count) {
             bool next_is_dit = false;
             bool have_next = false;
 
             // Iambic A: only alternate if both were held during element and still held
-            if (!s_iambic_b) {
+            if (gEeprom.CW_KEYER_MODE == CW_IAMBIC_MODE_A) {
                 if (s_both_held_during_elem && (in.dit || in.dah)) {
                     next_is_dit = !s_active_is_dit; // alternate
                     have_next = true;
@@ -532,7 +523,7 @@ CW_Action_t CW_HandleState(void)
 
             s_pending_alternate = false;
             s_both_held_during_elem = false;
-            s_elem_start_cnt = cur_cnt;
+            s_elem_start_count = cur_count;
 
             if (have_next) {
                 s_KeyerFSMState = next_is_dit ? CWK_STATE_ACTIVE_DIT : CWK_STATE_ACTIVE_DAH;

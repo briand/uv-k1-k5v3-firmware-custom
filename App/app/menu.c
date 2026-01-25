@@ -59,6 +59,10 @@
 
 uint8_t gUnlockAllTxConfCnt;
 
+#ifdef ENABLE_CW_MODULATOR
+bool gCwKeyInputCheckFailed = false;
+#endif
+
 #ifdef ENABLE_F_CAL_MENU
     void writeXtalFreqCal(const int32_t value, const bool update_eeprom)
     {
@@ -1032,7 +1036,7 @@ void MENU_AcceptSetting(void)
 #ifdef ENABLE_CW_MODULATOR
 		case MENU_CW_KEY_WPM:
 			gEeprom.CW_KEY_WPM = gSubMenuSelection;
-			CW_KeyerReconfigure();
+			CW_UpdateWPM();
 			break;
 
 		case MENU_CW_FREQ:
@@ -1052,13 +1056,23 @@ void MENU_AcceptSetting(void)
 
 		case MENU_CW_KEYER_MODE:
 			gEeprom.CW_KEYER_MODE = gSubMenuSelection;
-			CW_KeyerReconfigure();
 			break;
 
 		case MENU_CW_KEY_INPUT:
 			// Map menu selection (0-7) to bit-mapped value
-			gEeprom.CW_KEY_INPUT = CW_KEY_INPUT_menu_to_bitmap[gSubMenuSelection];
-			CW_KeyerReconfigure();
+			{
+				uint8_t new_mode = CW_KEY_INPUT_menu_to_bitmap[gSubMenuSelection];
+				// Validate key inputs before accepting
+				if (!CW_CheckKeyerInputs(new_mode)) {
+					// Validation failed - keys stuck
+					gCwKeyInputCheckFailed = true;
+					gRequestDisplayScreen = DISPLAY_MENU;
+					return;  // Don't accept the new setting
+				}
+				gCwKeyInputCheckFailed = false;
+				gEeprom.CW_KEY_INPUT = new_mode;
+				CW_KeyerReconfigure();
+			}
 			break;
 #endif
 
@@ -1738,10 +1752,13 @@ static void MENU_Key_EXIT(bool bKeyPressed, bool bKeyHeld)
         {
             if (gInputBoxIndex == 0 || UI_MENU_GetCurrentMenuId() != MENU_OFFSET)
             {
-                gAskForConfirmation = 0;
+                gAskForConfirmation = 0;				
                 gIsInSubMenu        = false;
                 gInputBoxIndex      = 0;
                 gFlagRefreshSetting = true;
+#ifdef ENABLE_CW_MODULATOR
+            	gCwKeyInputCheckFailed = false;
+#endif
 
                 #ifdef ENABLE_VOICE
                     gAnotherVoiceID = VOICE_ID_CANCEL;
@@ -1810,6 +1827,9 @@ static void MENU_Key_MENU(const bool bKeyPressed, const bool bKeyHeld)
 
         gAskForConfirmation = 0;
         gIsInSubMenu        = true;
+#ifdef ENABLE_CW_MODULATOR
+		gCwKeyInputCheckFailed = false;  // Clear error when entering submenu
+#endif
 
 //      if (UI_MENU_GetCurrentMenuId() != MENU_D_LIST)
         {
@@ -2012,10 +2032,17 @@ static void MENU_Key_UP_DOWN(bool bKeyPressed, bool bKeyHeld, int8_t Direction)
         return;
     }
 
+#ifdef ENABLE_CW_MODULATOR
+	if (gIsInSubMenu && UI_MENU_GetCurrentMenuId() == MENU_CW_KEY_INPUT)
+		gCwKeyInputCheckFailed = false;  // Clear error when changing value with UP/DOWN
+#endif
+
     if (!gIsInSubMenu)
     {
         gMenuCursor = NUMBER_AddWithWraparound(gMenuCursor, -Direction, 0, gMenuListCount - 1);
-
+#ifdef ENABLE_CW_MODULATOR
+		gCwKeyInputCheckFailed = false;  // Clear error when changing menu items
+#endif
         gFlagRefreshSetting = true;
 
         gRequestDisplayScreen = DISPLAY_MENU;

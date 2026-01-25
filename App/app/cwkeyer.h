@@ -18,6 +18,9 @@ typedef enum {
 // Periodic handler: drive CW state machine and return actions to apply
 CW_Action_t CW_HandleState(void);
 
+// Set CW keyer speed from EEPROM; updates internal timing parameters
+void CW_UpdateWPM();
+
 // Optional: request reconfigure at next safe boundary (applied at gap or idle)
 void CW_KeyerReconfigure(void);
 

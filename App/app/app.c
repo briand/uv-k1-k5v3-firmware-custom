@@ -1053,11 +1053,19 @@ void APP_Update(void)
 
 				UART_LogSend("CW Suspend\n", 11);
 				RADIO_CW_Suspend();
-				// let the process keys function handle the timeout to end transmission
+				gCW_SuspendCountdown_10ms = 0;
 			break;
 
 			case CW_ACTION_NONE:
 			default:
+				// Suspend timeout is handled by PTT processing code (lines 1078-1084)
+				// paranoia: if transmitting but the keyer didn't request any action, suspend it
+				if(gCW_State == CW_TRANSMITTING)
+				{
+					UART_LogSend("!!! CW Auto Suspend\n", 20);
+					RADIO_CW_Suspend();
+					gCW_SuspendCountdown_10ms = 0;
+				}
 			break;
 		}
 	}

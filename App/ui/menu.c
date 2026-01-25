@@ -1398,5 +1398,12 @@ void UI_DisplayMenu(void)
         UI_PrintString(pPrintStr, menu_item_x1, menu_item_x2, 5, 8);
     }
 
+#ifdef ENABLE_CW_MODULATOR
+	if (UI_MENU_GetCurrentMenuId() == MENU_CW_KEY_INPUT && gCwKeyInputCheckFailed)
+	{	// display error when CW key validation fails
+		UI_PrintString("KEY ERR", menu_item_x1, menu_item_x2, 5, 8);
+	}
+#endif
+
     ST7565_BlitFullScreen();
 }
