@@ -24,6 +24,9 @@
 #include "ui/welcome.h"
 #include "external/printf/printf.h"
 
+// Debug logging control - set to 1 to enable UART debug output
+#define CW_KEYER_DEBUG 0
+
 // Timer scale: 10 kHz tick → 100 µs per tick
 // 16-bit counter rolls over at 6553 ms
 #define DITS_PER_WORD 50
@@ -139,24 +142,28 @@ static bool CW_ReadKeysForMode(uint8_t mode, bool *dit_out, bool *dah_out)
     // Map tip/ring to dit/dah based on reversed flag
     *dit_out = reverse ? hw_tip : hw_ring;
     *dah_out = reverse ? hw_ring : hw_tip;
-    
-    // Log key states
-    // bool pb15_is_output = (GPIOB->DIR & GPIO_DIR_15_MASK) != 0;
-    // char buf[80];
-    // sprintf_(buf, "mode=%u tip=%d ring=%d PB15_out=%d -> dit=%d dah=%d\r\n", 
-    //          mode, hw_tip, hw_ring, pb15_is_output, *dit_out, *dah_out);
-    //UART_Send(buf, strlen(buf));
-    
+
+#if CW_KEYER_DEBUG
+    //Log key states
+    bool pb15_is_output = (GPIOB->DIR & GPIO_DIR_15_MASK) != 0;
+    char buf[80];
+    sprintf_(buf, "mode=%u tip=%d ring=%d PB15_out=%d -> dit=%d dah=%d\r\n", 
+             mode, hw_tip, hw_ring, pb15_is_output, *dit_out, *dah_out);
+    UART_Send(buf, strlen(buf));
+#endif
+
     return true;
 }
 
 // Read GPIO inputs based on configured mode
 static void CW_ReadKeys(CW_Input *in)
 {
+#if CW_KEYER_DEBUG
     static int times_called = 0;
     if(++times_called % 1000 == 0) {
         //UART_Send("Reading keys\r\n", 14);
     }
+#endif
     
     bool n_dit = false;
     bool n_dah = false;
@@ -244,10 +251,12 @@ void CW_UpdateWPM()
     s_dah_count = (uint16_t)dah_ticks;
     s_gap_count = (uint16_t)dit_ticks; // inter-element gap = 1 dit
 
+#if CW_KEYER_DEBUG
     char buf[80];
     sprintf_(buf, "CW_SetWPM: WPM=%u dit=%u dah=%u gap=%u\r\n", 
              wpm, s_dit_count, s_dah_count, s_gap_count);
     UART_Send(buf, strlen(buf));
+#endif
 }
 
 // Initialize keyer from gEeprom settings
@@ -262,13 +271,15 @@ static void CW_KeyerInit()
     // Configure port pins based on bit flags
     bool uses_port_ground = (gEeprom.CW_KEY_INPUT & CW_KEY_FLAG_PORT_GROUND);
     bool uses_port_ring = (gEeprom.CW_KEY_INPUT & CW_KEY_FLAG_PORT_RING);
+    
+#if CW_KEYER_DEBUG
     bool is_handkey = (gEeprom.CW_KEY_INPUT & CW_KEY_FLAG_NO_KEYER);
     bool uses_buttons = (gEeprom.CW_KEY_INPUT & CW_KEY_FLAG_BUTTONS);
-    
     char buf[120];
     sprintf_(buf, "CW_Init: mode=0x%02X handkey=%d btns=%d pG=%d pR=%d rev=%d\r\n",
              gEeprom.CW_KEY_INPUT, is_handkey, uses_buttons, uses_port_ground, uses_port_ring, s_reverse_keys);
     UART_Send(buf, strlen(buf));
+#endif
     
     CW_ConfigurePortGround(uses_port_ground);
     CW_ConfigurePortRing(uses_port_ring);
@@ -280,13 +291,17 @@ static void CW_KeyerInit()
 
     s_KeyerFSMState = CWK_STATE_IDLE;
     s_cfg_dirty = false;
+#if CW_KEYER_DEBUG
     UART_Send("keyer init done\r\n", 17);
+#endif
 }
 
 void CW_KeyerReconfigure(void)
 {
     s_cfg_dirty = true;
+#if CW_KEYER_DEBUG
     UART_Send("keyer marked for reconfig\r\n", 27);
+#endif
 }
 
 // Check keyer inputs before mode change
@@ -307,27 +322,36 @@ bool CW_CheckKeyerInputs(uint8_t new_mode)
         return true;
     }
     
+#if CW_KEYER_DEBUG
     UART_Send("Checking CW keyer inputs\r\n", 26);
+#endif
     
     // Temporarily configure port pins if needed
     if (uses_port_ground || uses_port_ring) {
+#if CW_KEYER_DEBUG
         UART_Send("Configuring port pins for CW keyer check\r\n", 42);
+#endif
         CW_ConfigurePortGround(uses_port_ground);
         CW_ConfigurePortRing(uses_port_ring);
         
         // Allow pins to stabilize after configuration
         SYSTEM_DelayMs(50);
     }
+#if CW_KEYER_DEBUG
     UART_Send("done with config, starting validation\r\n", 40);
+#endif
 
     // Check inputs with 10ms intervals - consider stuck if key stays down for over 10 consecutive checks
     int stuck_count = 0;
     bool any_stuck = false;
+#if CW_KEYER_DEBUG
     int total_checks = 0;
+#endif
     
     for (int i = 0; i < 20; i++) {  // Check up to 20 times = 200ms max
         bool dit = false, dah = false;
         CW_ReadKeysForMode(new_mode, &dit, &dah);
+#if CW_KEYER_DEBUG
         total_checks++;
         
         // Debug output every 5 checks
@@ -336,6 +360,7 @@ bool CW_CheckKeyerInputs(uint8_t new_mode)
             sprintf_(dbg, "check %d: dit=%d dah=%d stuck=%d\r\n", i, dit, dah, stuck_count);
             UART_Send(dbg, strlen(dbg));
         }
+#endif
         
         if (dit || dah) {
             stuck_count++;
@@ -350,17 +375,23 @@ bool CW_CheckKeyerInputs(uint8_t new_mode)
         SYSTEM_DelayMs(10);
     }
     
+#if CW_KEYER_DEBUG
     char buf[60];
     sprintf_(buf, "total_checks=%d stuck_count=%d stuck=%d\r\n", 
              total_checks, stuck_count, any_stuck);
     UART_Send(buf, strlen(buf));
+#endif
 
     // If no stuck keys detected, mode is valid
     if (!any_stuck) {
+#if CW_KEYER_DEBUG
         UART_Send("CW keyer inputs valid\r\n", 24);
+#endif
         return true;
     }
+#if CW_KEYER_DEBUG
     UART_Send("CW keyer inputs stuck\r\n", 24);
+#endif
 
     CW_ConfigurePortGround(false);
     CW_ConfigurePortRing(false);
@@ -378,11 +409,15 @@ CW_Action_t ptt_action(void)
     if (ptt && !s_last_handkey_ptt) {
         // PTT pressed
         action = CW_ACTION_CARRIER_ON;
+#if CW_KEYER_DEBUG
         UART_Send("handkey PTT on\r\n", 17);
+#endif
     } else if (!ptt && s_last_handkey_ptt) {
         // PTT released
         action = CW_ACTION_CARRIER_OFF;
+#if CW_KEYER_DEBUG
         UART_Send("handkey PTT off\r\n", 18);
+#endif
     } else if (ptt && s_last_handkey_ptt) {
         // PTT being held - keep carrier active
         action = CW_ACTION_CARRIER_HOLD;
@@ -411,11 +446,12 @@ CW_Action_t CW_HandleState(void)
 
     // Check if keyer is disabled (handkey modes have NO_KEYER flag set)
     if (gEeprom.CW_KEY_INPUT & CW_KEY_FLAG_NO_KEYER) {
-        
+#if CW_KEYER_DEBUG
         static uint32_t handkey_log_count = 0;
         if (++handkey_log_count % 1000 == 0) {
             UART_Send("CW in handkey mode\r\n", 20);
         }
+#endif
         return ptt_action();
     } else {
         // static uint32_t keyer_log_count = 0;
@@ -454,17 +490,23 @@ CW_Action_t CW_HandleState(void)
             s_pending_alternate = false;
             s_elem_start_count = cur_count;
             s_KeyerFSMState = s_active_is_dit ? CWK_STATE_ACTIVE_DIT : CWK_STATE_ACTIVE_DAH;
+#if CW_KEYER_DEBUG
             UART_LogSend("keyer going active\r\n", 20);
+#endif
             action = CW_ACTION_CARRIER_ON;
         }
         break;
 
     case CWK_STATE_ACTIVE_DIT:
+#if CW_KEYER_DEBUG
         UART_LogSend("dit\r\n", 5);
+#endif
         [[fallthrough]];
     case CWK_STATE_ACTIVE_DAH: 
     {
+#if CW_KEYER_DEBUG
         UART_LogSend("dah - keyer is active\r\n", 18);
+#endif
         const uint16_t target = (s_KeyerFSMState == CWK_STATE_ACTIVE_DIT) ? s_dit_count : s_dah_count;
         const uint16_t elapsed_elem = timer_jiffies_since(s_elem_start_count);
 

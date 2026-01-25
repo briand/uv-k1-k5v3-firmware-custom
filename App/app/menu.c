@@ -1044,9 +1044,9 @@ void MENU_AcceptSetting(void)
 			gEeprom.CW_TONE_FREQUENCY = 45 + gSubMenuSelection * 5;
 			// Set the "BFO" - Frequency is in deciHz, so no scaling needed
 			BK4819_SetFrequency(gRxVfo->pRX->Frequency - gEeprom.CW_TONE_FREQUENCY);			
-			char buf[64];
-			sprintf_(buf, "in menu RX freq: %d Hz, offset: %d Hz\r\n", gRxVfo->pRX->Frequency * 10, (10 * gEeprom.CW_TONE_FREQUENCY));
-			UART_Send(buf, strlen(buf));
+			// char buf[64];
+			// sprintf_(buf, "in menu RX freq: %d Hz, offset: %d Hz\r\n", gRxVfo->pRX->Frequency * 10, (10 * gEeprom.CW_TONE_FREQUENCY));
+			// UART_Send(buf, strlen(buf));
 			break;
 
 		case MENU_CW_SIDETONE_LEVEL:

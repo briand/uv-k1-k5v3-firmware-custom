@@ -837,9 +837,9 @@ void RADIO_SetupRegisters(bool switchToForeground)
 	#if ENABLE_CW_MODULATOR
 		- (gRxVfo->Modulation == MODULATION_CW ? gEeprom.CW_TONE_FREQUENCY : 0) // CW BFO offset
 		;
-			char buf[64];
-			sprintf_(buf, "RX freq: %d Hz, offset: %d Hz\r\n", gRxVfo->pRX->Frequency * 10, (10 * gEeprom.CW_TONE_FREQUENCY));
-			UART_Send(buf, strlen(buf));
+			// char buf[64];
+			// sprintf_(buf, "RX freq: %d Hz, offset: %d Hz\r\n", gRxVfo->pRX->Frequency * 10, (10 * gEeprom.CW_TONE_FREQUENCY));
+			// UART_Send(buf, strlen(buf));
 	#endif
 	;
     #endif
