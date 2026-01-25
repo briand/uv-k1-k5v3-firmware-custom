@@ -47,7 +47,7 @@ typedef enum POWER_OnDisplayMode_t POWER_OnDisplayMode_t;
 #define CW_KEY_FLAG_PORT_GROUND   0x10  // 0=no port ground, 1=use port ground
 
 enum CW_KeyInputType_t {
-	CW_KEY_INPUT_HANDKEY          = 0x08,  // handkey only (no keyer)
+	CW_KEY_INPUT_HANDKEY          = 0x08,  // handkey only (disable keyer)
 	CW_KEY_INPUT_HANDKEY_PORT     = 0x18,  // handkey + port ground (no keyer)
 	CW_KEY_INPUT_BUTTONS_NORMAL   = 0x04,  // buttons
 	CW_KEY_INPUT_BUTTONS_REVERSED = 0x05,  // buttons + reversed

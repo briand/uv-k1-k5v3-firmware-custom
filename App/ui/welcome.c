@@ -53,8 +53,9 @@ void UI_DisplayReleasePaddle(void)
 	memset(gStatusLine,  0, sizeof(gStatusLine));
 	UI_DisplayClear();
 
-	UI_PrintString("RELEASE", 0, 127, 1, 10);
-	UI_PrintString("PADDLE KEYS", 0, 127, 3, 10);
+	UI_PrintString("CW KEY STUCK", 0, 127, 0, 10);
+	UI_PrintString("Turning Off", 0, 127, 2, 10);
+	UI_PrintString("Port Input", 0, 127, 4, 10);
 
 	ST7565_BlitStatusLine();  // blank status line
 	ST7565_BlitFullScreen();

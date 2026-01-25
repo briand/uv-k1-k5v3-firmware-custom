@@ -766,6 +766,7 @@ void RADIO_SelectVfos(void)
 
 void RADIO_SetupRegisters(bool switchToForeground)
 {
+{
     BK4819_FilterBandwidth_t Bandwidth = gRxVfo->CHANNEL_BANDWIDTH;
 
     #ifdef ENABLE_FEAT_F4HWN_NARROWER
@@ -775,8 +776,10 @@ void RADIO_SetupRegisters(bool switchToForeground)
         }
     #endif
 
-    AUDIO_AudioPathOff();
-
+#ifdef ENABLE_CW_MODULATOR
+	if (gRxVfo->Modulation == MODULATION_CW)
+		AUDIO_AudioPathOff();
+#endif
     gEnableSpeaker = false;
 
     BK4819_ToggleGpioOut(BK4819_GPIO6_PIN2_GREEN, false);
@@ -965,7 +968,7 @@ void RADIO_SetupRegisters(bool switchToForeground)
     BK4819_WriteRegister(BK4819_REG_3F, InterruptMask);
 
 	FUNCTION_Init();
-	
+
 	if (switchToForeground)
 		FUNCTION_Select(FUNCTION_FOREGROUND);
 }

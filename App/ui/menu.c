@@ -518,10 +518,10 @@ const char* gSubMenu_CW_KEY_INPUT[] =
 	"PTT+port\nHandKey",
 	"PTT dah\nSD1 dit",
 	"PTT dit\nSD1 dah",
-	"PTT+tip\ndah\nsleeve\ndit",
-	"PTT+tip\ndit\nsleeve\ndah",
-	"PTT+tip\ndah\nSD1+slv\ndit",
-	"PTT+tip\ndit\nSD1+slv\ndah"
+	"PTT+tip\ndah\nring\ndit",
+	"PTT+tip\ndit\nring\ndah",
+	"PTT+tip\ndah\nSD1+rng\ndit",
+	"PTT+tip\ndit\nSD1+rng\ndah"
 };
 #endif
 

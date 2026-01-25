@@ -210,6 +210,23 @@ void Main(void)
 	// Check CW keyer inputs at startup - if stuck, fall back to handkey mode
 	if (!CW_CheckKeyerInputs(gEeprom.CW_KEY_INPUT)) {
 		gEeprom.CW_KEY_INPUT = CW_KEY_INPUT_HANDKEY;
+		gRequestSaveSettings = true;
+
+		// Stuck keys detected - warn user and disable input mode
+		UI_DisplayReleasePaddle();
+		BACKLIGHT_TurnOn();
+		
+		for (int i = 0; i < 100; i++) {  // 100 iterations * 10ms = 1 second
+			// A button was pressed, stop showing the message
+			if (KEYBOARD_Poll() != KEY_INVALID) {
+				break;
+			}
+			
+			SYSTEM_DelayMs(10);
+		}
+		gKeyReading0 = KEY_INVALID;
+		gKeyReading1 = KEY_INVALID;
+		gDebounceCounter = 0;
 	}
 #endif
 

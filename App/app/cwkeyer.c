@@ -142,10 +142,10 @@ static bool CW_ReadKeysForMode(uint8_t mode, bool *dit_out, bool *dah_out)
     *dah_out = reverse ? hw_ring : hw_tip;
     
     // Log key states
-    bool pb15_is_output = (GPIOB->DIR & GPIO_DIR_15_MASK) != 0;
-    char buf[80];
-    sprintf_(buf, "mode=%u tip=%d ring=%d PB15_out=%d -> dit=%d dah=%d\r\n", 
-             mode, hw_tip, hw_ring, pb15_is_output, *dit_out, *dah_out);
+    // bool pb15_is_output = (GPIOB->DIR & GPIO_DIR_15_MASK) != 0;
+    // char buf[80];
+    // sprintf_(buf, "mode=%u tip=%d ring=%d PB15_out=%d -> dit=%d dah=%d\r\n", 
+    //          mode, hw_tip, hw_ring, pb15_is_output, *dit_out, *dah_out);
     //UART_Send(buf, strlen(buf));
     
     return true;
@@ -181,7 +181,7 @@ static void CW_ReadKeys(CW_Input *in)
     s_last_dah = n_dah;
 }
 
-// Configure port ground pin (PA8) for tip/sleeve paddle input
+// Configure port ground pin (PA8) for tip/ring paddle input
 // When enabled: PA8 becomes GPIO output low (acts as ground for paddle port)
 // When disabled: PA8 returns to UART1 RX function with DMA
 static void CW_ConfigurePortGround(bool enable)
@@ -217,7 +217,7 @@ static void CW_ConfigurePortGround(bool enable)
 
 // Configure port ring pin (PB15) for paddle input
 // When enabled: PB15 becomes GPIO input for paddle ring
-// When disabled: PB15 becomes GPIO output high
+// When disabled: PB15 becomes GPIO output high (BK1080 control pin)
 static void CW_ConfigurePortRing(bool enable)
 {
     if (enable) {
@@ -286,12 +286,18 @@ bool CW_CheckKeyerInputs(uint8_t new_mode)
     if (new_mode & CW_KEY_FLAG_NO_KEYER) {
         return true;
     }
-    UART_Send("Checking CW keyer inputs\r\n", 26);
-    SYSTEM_DelayMs(10);
-
+    
     // Determine if we need to configure port pins for this mode (use bit flags)
     bool uses_port_ground = (new_mode & CW_KEY_FLAG_PORT_GROUND);
     bool uses_port_ring = (new_mode & CW_KEY_FLAG_PORT_RING);
+    
+    // Button-only modes don't need validation (no port pins to check)
+    if (!uses_port_ground && !uses_port_ring) {
+        return true;
+    }
+    
+    UART_Send("Checking CW keyer inputs\r\n", 26);
+    SYSTEM_DelayMs(10);
     
     // Temporarily configure port pins if needed
     if (uses_port_ground || uses_port_ring) {
@@ -301,12 +307,12 @@ bool CW_CheckKeyerInputs(uint8_t new_mode)
     }
     UART_Send("done with config\r\n", 15);
 
-    // Check inputs with 20ms intervals - consider stuck if key stays down for over 10 consecutive checks
+    // Check inputs with 10ms intervals - consider stuck if key stays down for over 10 consecutive checks
     int stuck_count = 0;
     bool any_stuck = false;
     int total_checks = 0;
     
-    for (int i = 0; i < 20; i++) {  // Check up to 20 times = 400ms max
+    for (int i = 0; i < 20; i++) {  // Check up to 20 times = 200ms max
         bool dit = false, dah = false;
         CW_ReadKeysForMode(new_mode, &dit, &dah);
         total_checks++;
@@ -321,7 +327,7 @@ bool CW_CheckKeyerInputs(uint8_t new_mode)
             stuck_count = 0;  // Reset if keys released
         }
         
-        SYSTEM_DelayMs(20);
+        SYSTEM_DelayMs(10);
     }
     
     char buf[60];
@@ -336,42 +342,10 @@ bool CW_CheckKeyerInputs(uint8_t new_mode)
     }
     UART_Send("CW keyer inputs stuck\r\n", 24);
 
-    // Stuck keys detected - warn user and wait up to 1 second
-    UI_DisplayReleasePaddle();
-    BACKLIGHT_TurnOn();
-    
-    bool released = false;
-    
-    for (int i = 0; i < 100; i++) {  // 100 iterations * 10ms = 1 second
-        // Check if EXIT button was pressed
-        KEY_Code_t key = KEYBOARD_Poll();
-        if (key == KEY_EXIT) {
-            // User aborted
-            UART_Send("CW keyer mode change aborted by user\r\n", 39);
-            if (uses_port_ground || uses_port_ring) {
-                // Restore port pins
-                CW_ConfigurePortGround(false);
-                CW_ConfigurePortRing(false);
-            }
-            break;
-        }
-        
-        // Check if inputs are now released
-        bool dit = false, dah = false;
-        if (CW_ReadKeysForMode(new_mode, &dit, &dah)) {
-            if (!dit && !dah) {
-                released = true;
-                UART_Send("CW keyer inputs released\r\n", 26);
-                break;
-            }
-        }
-        
-        SYSTEM_DelayMs(10);
-    }
-    gKeyReading0 = KEY_INVALID;
-    gKeyReading1 = KEY_INVALID;
-    gDebounceCounter = 0;
-    return released;
+    CW_ConfigurePortGround(false);
+    CW_ConfigurePortRing(false);
+
+    return false;
 }
 
 CW_Action_t ptt_action(void)
@@ -401,19 +375,19 @@ CW_Action_t ptt_action(void)
 CW_Action_t CW_HandleState(void)
 {
     CW_Action_t action = CW_ACTION_NONE;
-    static uint32_t skip_count = 0;
+    static uint16_t last_debug_cnt = 0;
     static uint32_t state_count = 0;
-    //static uint32_t idle_count = 0;
 
     // Check if keyer is disabled (handkey modes have NO_KEYER flag set)
     if (gEeprom.CW_KEY_INPUT & CW_KEY_FLAG_NO_KEYER) {
         return ptt_action();
     }
-            if(state_count++ % 5000 == 0) {
-            char buf[40];
-            sprintf_(buf, "keyer not SK cnt=%u\r\n", (uint16_t)TIMERBASE0_LOW_CNT);
-            //UART_Send(buf, strlen(buf));
-            }
+    
+    if(state_count++ % 5000 == 0) {
+    char buf[40];
+    sprintf_(buf, "keyer not SK cnt=%u\r\n", (uint16_t)TIMERBASE0_LOW_CNT);
+    //UART_Send(buf, strlen(buf));
+    }
 
     // Check dirty flag at idle - reconfigure if needed
     if (s_cfg_dirty && s_KeyerFSMState == CWK_STATE_IDLE) {
@@ -429,7 +403,8 @@ CW_Action_t CW_HandleState(void)
 
     CW_Input in;
     CW_ReadKeys(&in);
-    if(++skip_count % 1000 == 0) {
+    if(timer_millis_since(last_debug_cnt) >= 100) {
+        last_debug_cnt = cur_cnt;
         bool pb15_is_output = (GPIOB->DIR & (1U << 15)) != 0;
         char buf[100];
         sprintf_(buf, "dit=%d dah=%d dr=%d df=%d hr=%d hf=%d PB15_out=%d\r\n",
