@@ -221,11 +221,13 @@ static void CW_ConfigurePortGround(bool enable)
 static void CW_ConfigurePortRing(bool enable)
 {
     if (enable) {
-        // Configure PB15 as GPIO input (ring)
+        // Configure PB15 as GPIO input (ring) with pull-up enabled
+        //PORTCON_PORTB_PU |= PORTCON_PORTB_PU_B15_MASK; // Enable pull-up (reads high when floating)
         GPIOB->DIR &= ~(0 | GPIO_DIR_15_MASK); // PB15 as INPUT
         PORTCON_PORTB_IE |= PORTCON_PORTB_IE_B15_BITS_ENABLE; // Enable input buffer
     } else {
         // Configure PB15 as GPIO output, set high
+        //PORTCON_PORTB_PU &= ~PORTCON_PORTB_PU_B15_MASK; // Disable pull-up
         PORTCON_PORTB_IE &= ~PORTCON_PORTB_IE_B15_MASK; // Disable input buffer
         PORTCON_PORTB_SEL1 &= ~PORTCON_PORTB_SEL1_B15_MASK;
         PORTCON_PORTB_SEL1 |= PORTCON_PORTB_SEL1_B15_BITS_GPIOB15;
@@ -256,14 +258,19 @@ static void CW_KeyerInit()
     // Configure port pins based on bit flags
     bool uses_port_ground = (gEeprom.CW_KEY_INPUT & CW_KEY_FLAG_PORT_GROUND);
     bool uses_port_ring = (gEeprom.CW_KEY_INPUT & CW_KEY_FLAG_PORT_RING);
+    bool is_handkey = (gEeprom.CW_KEY_INPUT & CW_KEY_FLAG_NO_KEYER);
+    bool uses_buttons = (gEeprom.CW_KEY_INPUT & CW_KEY_FLAG_BUTTONS);
+    
+    char buf[120];
+    sprintf_(buf, "CW_Init: mode=0x%02X handkey=%d btns=%d pG=%d pR=%d rev=%d\r\n",
+             gEeprom.CW_KEY_INPUT, is_handkey, uses_buttons, uses_port_ground, uses_port_ring, s_reverse_keys);
+    UART_Send(buf, strlen(buf));
+    
     CW_ConfigurePortGround(uses_port_ground);
     CW_ConfigurePortRing(uses_port_ring);
 
     s_last_cnt         = (uint16_t)TIMERBASE0_LOW_CNT;
-    s_elem_start_cnt   = s_last_cnt;
     s_active_is_dit    = false;
-    s_pending_alternate = false;
-    s_both_held_during_elem = false;
     s_last_dit = false;
     s_last_dah = false;
 
@@ -297,15 +304,17 @@ bool CW_CheckKeyerInputs(uint8_t new_mode)
     }
     
     UART_Send("Checking CW keyer inputs\r\n", 26);
-    SYSTEM_DelayMs(10);
     
     // Temporarily configure port pins if needed
     if (uses_port_ground || uses_port_ring) {
         UART_Send("Configuring port pins for CW keyer check\r\n", 42);
         CW_ConfigurePortGround(uses_port_ground);
         CW_ConfigurePortRing(uses_port_ring);
+        
+        // Allow pins to stabilize after configuration
+        SYSTEM_DelayMs(50);
     }
-    UART_Send("done with config\r\n", 15);
+    UART_Send("done with config, starting validation\r\n", 40);
 
     // Check inputs with 10ms intervals - consider stuck if key stays down for over 10 consecutive checks
     int stuck_count = 0;
@@ -316,6 +325,13 @@ bool CW_CheckKeyerInputs(uint8_t new_mode)
         bool dit = false, dah = false;
         CW_ReadKeysForMode(new_mode, &dit, &dah);
         total_checks++;
+        
+        // Debug output every 5 checks
+        if (i % 5 == 0) {
+            char dbg[50];
+            sprintf_(dbg, "check %d: dit=%d dah=%d stuck=%d\r\n", i, dit, dah, stuck_count);
+            UART_Send(dbg, strlen(dbg));
+        }
         
         if (dit || dah) {
             stuck_count++;
@@ -380,7 +396,18 @@ CW_Action_t CW_HandleState(void)
 
     // Check if keyer is disabled (handkey modes have NO_KEYER flag set)
     if (gEeprom.CW_KEY_INPUT & CW_KEY_FLAG_NO_KEYER) {
+        static uint32_t handkey_log_count = 0;
+        if (++handkey_log_count % 5000 == 0) {
+            UART_Send("CW in handkey mode\r\n", 20);
+        }
         return ptt_action();
+    } else {
+        static uint32_t keyer_log_count = 0;
+        if (++keyer_log_count % 5000 == 0) {
+            char buf[60];
+            sprintf_(buf, "CW in keyer mode (0x%02X)\r\n", gEeprom.CW_KEY_INPUT);
+            UART_Send(buf, strlen(buf));
+        }
     }
     
     if(state_count++ % 5000 == 0) {
@@ -474,6 +501,7 @@ CW_Action_t CW_HandleState(void)
         // Check dirty flag during inter-element gap
         if (s_cfg_dirty) {
             CW_KeyerInit();
+            s_KeyerFSMState = CWK_STATE_INTER_ELEMENT_GAP; // stay in gap state post-init
             return action;
         }
         

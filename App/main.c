@@ -211,12 +211,13 @@ void Main(void)
 	if (!CW_CheckKeyerInputs(gEeprom.CW_KEY_INPUT)) {
 		gEeprom.CW_KEY_INPUT = CW_KEY_INPUT_HANDKEY;
 		gRequestSaveSettings = true;
+		CW_KeyerReconfigure();  // Force keyer to reinitialize with handkey mode
 
 		// Stuck keys detected - warn user and disable input mode
 		UI_DisplayReleasePaddle();
 		BACKLIGHT_TurnOn();
 		
-		for (int i = 0; i < 100; i++) {  // 100 iterations * 10ms = 1 second
+		for (int i = 0; i < 200; i++) {  // 200 iterations * 10ms = 2 seconds
 			// A button was pressed, stop showing the message
 			if (KEYBOARD_Poll() != KEY_INVALID) {
 				break;
