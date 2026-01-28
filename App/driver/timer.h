@@ -31,7 +31,7 @@ uint16_t timer_jiffies(void);
 
 // Returns milliseconds since boot
 // WARNING: Rolls over every ~6.5 seconds (16-bit counter at 10kHz = 6553ms)
-uint16_t timer_millis();
+uint16_t timer_millis(void);
 
 // Returns ticks elapsed since previous jiffy value with rollover protection
 // prev: Previous jiffy value from timer_jiffies()

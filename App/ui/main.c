@@ -22,10 +22,14 @@
 #ifdef ENABLE_AM_FIX
     #include "am_fix.h"
 #endif
+#ifdef ENABLE_CW_MODULATOR
+	#include "app/cwmacro.h"
+#endif
 #include "bitmaps.h"
 #include "board.h"
 #include "driver/bk4819.h"
 #include "driver/st7565.h"
+#include "driver/uart.h"
 #include "external/printf/printf.h"
 #include "functions.h"
 #include "helper/battery.h"
@@ -236,6 +240,60 @@ void UI_DisplayAudioBar(void)
         if (gCurrentFunction == FUNCTION_TRANSMIT)
             ST7565_BlitFullScreen();
     }
+}
+#endif
+
+#ifdef ENABLE_CW_MODULATOR
+void DrawCWDecodeBar(bool now)
+{
+	now = now;
+	const unsigned int line = 3;
+	uint8_t *p_line = gFrameBuffer[line];
+	char String[20];
+	
+	if (gScreenToDisplay != DISPLAY_MAIN)
+		return;  // screen is in use
+	
+	// Always do immediate blit when called during CW transmission
+	now = true;
+	
+	memset(p_line, 0, LCD_WIDTH);
+	
+	// Get the last 20 characters from display buffer
+	const unsigned int len = strlen(gCW_TX_Display);
+	const unsigned int idx = (len > 20) ? len - 20 : 0;
+	
+	sprintf(String, "%s", gCW_TX_Display + idx);
+	UI_PrintStringSmallNormal(String, 2, 0, line);
+	
+	ST7565_BlitLine(line);
+}
+#endif
+
+#ifdef ENABLE_CW_MODULATOR
+void DrawCWDecodeBar(bool now)
+{
+	now = now;
+	const unsigned int line = 3;
+	uint8_t *p_line = gFrameBuffer[line];
+	char String[20];
+	
+	if (gScreenToDisplay != DISPLAY_MAIN)
+		return;  // screen is in use
+	
+	// Always do immediate blit when called during CW transmission
+	now = true;
+	
+	memset(p_line, 0, LCD_WIDTH);
+	
+	// Get the last 20 characters from display buffer
+	const unsigned int len = strlen(gCW_TX_Display);
+	const unsigned int idx = (len > 20) ? len - 20 : 0;
+	
+	sprintf(String, "%s", gCW_TX_Display + idx);
+	UI_PrintStringSmallNormal(String, 2, 0, line);
+	
+	ST7565_BlitLine(line);
 }
 #endif
 
@@ -1433,6 +1491,24 @@ void UI_DisplayMain(void)
             UI_DisplayAudioBar();
         }
         else
+#endif
+
+#ifdef ENABLE_CW_MODULATOR
+		if (gCurrentFunction == FUNCTION_TRANSMIT && gCurrentVfo->Modulation == MODULATION_CW && gCW_TX_Display[0] != 0)
+		{	// show CW characters being transmitted
+			center_line = CENTER_LINE_CW_DECODE;
+			DrawCWDecodeBar(false);
+		}
+		else
+#endif
+
+#ifdef ENABLE_CW_MODULATOR
+		if (gCurrentFunction == FUNCTION_TRANSMIT && gCurrentVfo->Modulation == MODULATION_CW && gCW_TX_Display[0] != 0)
+		{	// show CW characters being transmitted
+			center_line = CENTER_LINE_CW_DECODE;
+			DrawCWDecodeBar(false);
+		}
+		else
 #endif
 
 #if defined(ENABLE_AM_FIX) && defined(ENABLE_AM_FIX_SHOW_DATA)

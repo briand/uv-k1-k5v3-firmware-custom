@@ -20,6 +20,9 @@
 #if defined(ENABLE_FMRADIO)
     #include "app/fm.h"
 #endif
+#ifdef ENABLE_CW_MODULATOR
+	#include "app/cwmacro.h"
+#endif
 #include "audio.h"
 #include "dcs.h"
 #include "driver/backlight.h"
@@ -243,11 +246,6 @@ void FUNCTION_Transmit()
 
 void FUNCTION_Transmit_CW()
 {
-	// TODO: briand debug remove
-	// BK4819_ToggleGpioOut(BK4819_GPIO5_PIN1_RED, true);
-	// BK4819_ToggleGpioOut(BK4819_GPIO5_PIN1_RED, false);
-	// BK4819_ToggleGpioOut(BK4819_GPIO5_PIN1_RED, true);
-
 	// Mark CW TX in progress and clear suspend counter
 	gCW_State = CW_TRANSMITTING;
 	gCW_SuspendCountdown_10ms = 0;

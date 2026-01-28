@@ -33,7 +33,7 @@ ENABLE_AM_FIX                 ?= 1
 ENABLE_SQUELCH_MORE_SENSITIVE ?= 1
 ENABLE_FASTER_CHANNEL_SCAN    ?= 1
 ENABLE_RSSI_BAR               ?= 1
-ENABLE_AUDIO_BAR              ?= 1
+ENABLE_AUDIO_BAR              ?= 0
 ENABLE_COPY_CHAN_TO_VFO       ?= 1
 ENABLE_SPECTRUM               ?= 1
 ENABLE_REDUCE_LOW_MID_TX_POWER?= 0
@@ -118,6 +118,7 @@ ifeq ($(ENABLE_CW_MODULATOR),1)
 	# CW modulator requires millis timer
 	ENABLE_MILLIS := 1
     OBJS += app/cwkeyer.o
+    OBJS += app/cwmacro.o
 endif
 ifeq ($(ENABLE_MILLIS),1)
 	OBJS += driver/timer.o

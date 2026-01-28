@@ -76,6 +76,7 @@
 #include "ui/ui.h"
 #ifdef ENABLE_CW_MODULATOR
 #include "app/cwkeyer.h"
+#include "app/cwmacro.h"
 #endif
 
 #ifdef ENABLE_FEAT_F4HWN_SCREENSHOT
@@ -1022,7 +1023,36 @@ void APP_Update(void)
 // 	static uint32_t local_counter = 0;
 	if (gTxVfo->Modulation == MODULATION_CW) 
 	{
-		switch(CW_HandleState())
+		CW_Action_t action = CW_HandleState();
+		
+		// Don't transmit RF if we're recording a macro
+		if (gCW_Recording) {
+			switch(action)
+			{
+				case CW_ACTION_CARRIER_HOLD:
+				break;
+				case CW_ACTION_CARRIER_ON:
+					AUDIO_AudioPathOn();
+					BK4819_SetAF(BK4819_AF_ALAM);	
+					BK4819_WriteRegister(BK4819_REG_70,
+						BK4819_REG_70_ENABLE_TONE1 |
+						(gEeprom.CW_SIDETONE_LEVEL << BK4819_REG_70_SHIFT_TONE1_TUNING_GAIN));
+					// Set local AF sidetone freq in Hz
+					BK4819_SetScrambleFrequencyControlWord(gEeprom.CW_TONE_FREQUENCY * 10);
+				break;
+				case CW_ACTION_CARRIER_OFF:
+					// Set TONE1 to 0 Hz - this works better than gain to disable sidetone
+					BK4819_SetScrambleFrequencyControlWord(0);
+					RADIO_SetModulation(gRxVfo->Modulation);  // back to RX audio path
+				break;
+				default:
+				break;
+			}
+			// don't let RF happen
+			action = CW_ACTION_NONE;
+		}
+		
+		switch(action)
 		{
 			case CW_ACTION_CARRIER_HOLD:
 				gPttIsPressed = true;
@@ -1461,6 +1491,14 @@ void APP_TimeSlice10ms(void)
     }
 #endif
 
+#ifdef ENABLE_CW_MODULATOR
+	// Handle CW macro recording updates
+	if (gCW_Recording && gCW_RecordNewChar) {
+		gCW_RecordNewChar = false;
+		gUpdateDisplay = true;
+	}
+#endif
+
     if (gReducedService)
         return;
 
@@ -1672,9 +1710,16 @@ void APP_TimeSlice500ms(void)
         }
     }
 
-    if (gMenuCountdown > 0)
+    if (gMenuCountdown > 0) {
+#ifdef ENABLE_CW_MODULATOR
+		// Don't timeout if recording CW macro
+		if (gCW_Recording) {
+			gMenuCountdown = menu_timeout_500ms;  // Keep resetting the timer
+		} else
+#endif
         if (--gMenuCountdown == 0)
             exit_menu = (gScreenToDisplay == DISPLAY_MENU); // exit menu mode
+	}
 
 #ifdef ENABLE_DTMF_CALLING
     if (gDTMF_RX_timeout > 0)
@@ -2211,10 +2256,13 @@ static void ProcessKey(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
         }
 #endif
     }
+#ifdef ENABLE_CW_MODULATOR
+	else if (Key == KEY_SIDE1 && gCW_Recording) {}
+#endif
 #ifdef ENABLE_FEAT_F4HWN // For F + SIDE1 or F + SIDE2
     else if (gWasFKeyPressed && (Key == KEY_SIDE1 || Key == KEY_SIDE2)) {
         ProcessKeysFunctions[gScreenToDisplay](Key, bKeyPressed, bKeyHeld);
-    }
+	}
     else if (Key != KEY_SIDE1 && Key != KEY_SIDE2 && gScreenToDisplay != DISPLAY_INVALID) {
         ProcessKeysFunctions[gScreenToDisplay](Key, bKeyPressed, bKeyHeld);
     }

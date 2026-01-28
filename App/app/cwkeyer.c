@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "app/cwkeyer.h"
+#include "app/cwmacro.h"
 #include "audio.h"
 #include "settings.h"
 #include "bsp/dp32g030/dma.h"
@@ -42,6 +43,8 @@ typedef enum {
     CWK_STATE_ACTIVE_DIT,
     CWK_STATE_ACTIVE_DAH,
     CWK_STATE_INTER_ELEMENT_GAP,
+    CWK_STATE_INTER_CHAR_GAP,    // Extended gap = end of character
+    CWK_STATE_INTER_WORD_GAP,    // Long gap = inter-word space
 } CW_KeyerFSMState_t;
 
 static CW_KeyerFSMState_t s_KeyerFSMState = CWK_STATE_IDLE;
@@ -50,6 +53,8 @@ static CW_KeyerFSMState_t s_KeyerFSMState = CWK_STATE_IDLE;
 static uint16_t       s_dit_count  = 0;      // duration in timer ticks (16-bit)
 static uint16_t       s_dah_count  = 0;      // duration in timer ticks (16-bit)
 static uint16_t       s_gap_count  = 0;      // inter-element gap in ticks (1 dit)
+static uint16_t       s_char_gap_count = 0;  // inter-char gap in ticks (3 dits)
+static uint16_t       s_word_gap_count = 0;  // inter-word gap in ticks (7 dits)
 static uint16_t       s_last_count = 0;      // last TIMERBASE0_LOW_COUNT sample (16-bit)
 static uint16_t       s_elem_start_count = 0;// element start counter (16-bit)
 static bool           s_active_is_dit = false;
@@ -110,6 +115,36 @@ static void CW_ReadSideButton(bool *ring_out)
     *ring_out = ring;
 }
 
+// Generic GPIO deglitch function - reads with de-noise
+// Returns true if pin is active (low), false if inactive (high)
+static bool CW_ReadGpioDeglitched(volatile uint32_t *gpio_data, uint8_t pin_bit, bool heavy)
+{
+    bool result = false;
+    uint16_t reg = 0, reg2;
+    unsigned int i, k;
+    uint32_t limit = heavy ? 18 : 8; // more samples for heavy de-noise
+    uint32_t goal = heavy ? 16 : 4;  // need this many stable samples
+    
+    for (i = 0, k = 0, reg = 0; i < goal && k < limit; i++, k++) {
+        SYSTICK_DelayUs(1);
+        reg2 = (*gpio_data) & (1U << pin_bit);
+        i *= (reg == reg2);  // Reset i if readings differ
+        reg = reg2;
+    }
+    
+    if (i >= goal) {
+        // Stable reading achieved - active low
+        result = !reg;
+    }
+    
+    return result;
+}
+
+// Read the PTT/tip with de-noise
+static void CW_ReadPtt(bool *ptt_out)
+{
+    *ptt_out = CW_ReadGpioDeglitched(&GPIOC->DATA, GPIOC_PIN_PTT, false);
+}
 // Read raw paddle inputs for a specific mode
 // Returns true if mode is valid, false otherwise
 static bool CW_ReadKeysForMode(uint8_t mode, bool *dit_out, bool *dah_out)
@@ -120,19 +155,18 @@ static bool CW_ReadKeysForMode(uint8_t mode, bool *dit_out, bool *dah_out)
     }
     
     // Read PTT (PC5) as tip - shared across button and port configs
-    bool hw_tip = !(GPIO_CheckBit(&GPIOC->DATA, GPIOC_PIN_PTT));
+    bool hw_tip = false;
+    CW_ReadPtt(&hw_tip);
     bool hw_ring = false;
     
     // Read button ring input if enabled
     if (mode & CW_KEY_FLAG_BUTTONS) {
-        bool btn_ring = false;
-        CW_ReadSideButton(&btn_ring);
-        hw_ring = btn_ring;
+        CW_ReadSideButton(&hw_ring);
     }
     
     // Read port ring input if enabled and OR with button ring
     if (mode & CW_KEY_FLAG_PORT_RING) {
-        bool port_ring = !(GPIO_CheckBit(&GPIOB->DATA, GPIOB_PIN_BK1080));
+        bool port_ring = CW_ReadGpioDeglitched(&GPIOB->DATA, GPIOB_PIN_BK1080, true);
         hw_ring = hw_ring || port_ring;  // OR both sources
     }
     
@@ -142,15 +176,6 @@ static bool CW_ReadKeysForMode(uint8_t mode, bool *dit_out, bool *dah_out)
     // Map tip/ring to dit/dah based on reversed flag
     *dit_out = reverse ? hw_tip : hw_ring;
     *dah_out = reverse ? hw_ring : hw_tip;
-
-#if CW_KEYER_DEBUG
-    //Log key states
-    bool pb15_is_output = (GPIOB->DIR & GPIO_DIR_15_MASK) != 0;
-    char buf[80];
-    sprintf_(buf, "mode=%u tip=%d ring=%d PB15_out=%d -> dit=%d dah=%d\r\n", 
-             mode, hw_tip, hw_ring, pb15_is_output, *dit_out, *dah_out);
-    UART_Send(buf, strlen(buf));
-#endif
 
     return true;
 }
@@ -185,6 +210,16 @@ static void CW_ReadKeys(CW_Input *in)
 
     s_last_dit = n_dit;
     s_last_dah = n_dah;
+
+
+#if CW_KEYER_DEBUG
+    if(in->dit_rise || in->dah_rise || in->dit_fall || in->dah_fall) {
+        char buf[50];
+        sprintf_(buf, "%u edge: dit=%d dah=%d\r\n", (unsigned)TIMERBASE0_LOW_CNT,
+                 n_dit, n_dah);
+        UART_Send(buf, strlen(buf));
+    }
+#endif
 }
 
 // Configure port ground pin (PA8) for tip/ring paddle input
@@ -230,9 +265,11 @@ static void CW_ConfigurePortRing(bool enable)
         // Configure PB15 as GPIO input (ring)
         GPIOB->DIR &= ~(0 | GPIO_DIR_15_MASK); // PB15 as INPUT
         PORTCON_PORTB_IE |= PORTCON_PORTB_IE_B15_BITS_ENABLE; // Enable input buffer
+        PORTCON_PORTB_PU |= PORTCON_PORTB_PU_B15_BITS_ENABLE; // activate the PB15 pullup
     } else {
         // Configure PB15 as GPIO output, set high
         PORTCON_PORTB_IE &= ~PORTCON_PORTB_IE_B15_MASK; // Disable input buffer
+        PORTCON_PORTB_PU &= ~PORTCON_PORTB_PU_B15_MASK; // disable the PB15 pullup
         PORTCON_PORTB_SEL1 &= ~PORTCON_PORTB_SEL1_B15_MASK;
         PORTCON_PORTB_SEL1 |= PORTCON_PORTB_SEL1_B15_BITS_GPIOB15;
         GPIO_SetBit(&GPIOB->DATA, GPIOB_PIN_BK1080); // Set PB15 high
@@ -250,6 +287,8 @@ void CW_UpdateWPM()
     s_dit_count = (uint16_t)dit_ticks;
     s_dah_count = (uint16_t)dah_ticks;
     s_gap_count = (uint16_t)dit_ticks; // inter-element gap = 1 dit
+    s_char_gap_count = (uint16_t)(3U * dit_ticks); // inter-char gap = 3 dits
+    s_word_gap_count = (uint16_t)(7U * dit_ticks); // inter-word gap = 7 dits
 
 #if CW_KEYER_DEBUG
     char buf[80];
@@ -430,7 +469,9 @@ CW_Action_t ptt_action(void)
 CW_Action_t CW_HandleState(void)
 {
     CW_Action_t action = CW_ACTION_NONE;
-    // static uint16_t last_debug_count = 0;
+#if CW_KEYER_DEBUG
+    static CW_KeyerFSMState_t last_logged_state = CWK_STATE_IDLE;
+#endif
 
     // check dirty flag at idle - reconfigure only when safe
     if (s_cfg_dirty && s_KeyerFSMState == CWK_STATE_IDLE) {
@@ -444,6 +485,17 @@ CW_Action_t CW_HandleState(void)
     }
     s_last_count = cur_count;
 
+#if CW_KEYER_DEBUG
+    // Log state changes
+    if (s_KeyerFSMState != last_logged_state) {
+        const char* state_names[] = {"IDLE", "ACTIVE_DIT", "ACTIVE_DAH", "INTER_ELEM", "INTER_CHAR", "INTER_WORD"};
+        char buf[60];
+        sprintf_(buf, "STATE: %s -> %s\r\n", state_names[last_logged_state], state_names[s_KeyerFSMState]);
+        UART_Send(buf, strlen(buf));
+        last_logged_state = s_KeyerFSMState;
+    }
+#endif
+
     // Check if keyer is disabled (handkey modes have NO_KEYER flag set)
     if (gEeprom.CW_KEY_INPUT & CW_KEY_FLAG_NO_KEYER) {
 #if CW_KEYER_DEBUG
@@ -453,31 +505,27 @@ CW_Action_t CW_HandleState(void)
         }
 #endif
         return ptt_action();
-    } else {
-        // static uint32_t keyer_log_count = 0;
-        // if (++keyer_log_count % 1000 == 0) {
-        //     char buf[60];
-        //     sprintf_(buf, "CW in keyer mode (0x%02X)\r\n", gEeprom.CW_KEY_INPUT);
-        //     UART_Send(buf, strlen(buf));
-        // }
     }
 
     CW_Input in;
     CW_ReadKeys(&in);
-    // if(timer_millis_since(last_debug_count) >= 100) {
-    //     last_debug_count = cur_count;
-    //     bool pb15_is_output = (GPIOB->DIR & (1U << 15)) != 0;
-    //     char buf[100];
-    //     sprintf_(buf, "dit=%d dah=%d dr=%d df=%d hr=%d hf=%d PB15_out=%d\r\n",
-    //             in.dit, in.dah, in.dit_rise, in.dit_fall, in.dah_rise, in.dah_fall, pb15_is_output);
-    //     UART_Send(buf, strlen(buf));
-    // }
 
     switch (s_KeyerFSMState) {
     case CWK_STATE_IDLE:
-        // if (idle_count++ % 3000 == 0)
-        //     UART_Send("keyer is idle\r\n", 15);
+#if CW_KEYER_DEBUG
         if (in.dit || in.dah) {
+            char buf[60];
+            sprintf_(buf, "%u IDLE sees dit=%d dah=%d\r\n", (unsigned)cur_count, in.dit, in.dah);
+            UART_Send(buf, strlen(buf));
+        }
+        static uint32_t idle_count = 0;
+        if (idle_count++ % 3000 == 0)
+            UART_Send("keyer is idle\r\n", 15);
+#endif
+        if (in.dit || in.dah) {
+#if CW_KEYER_DEBUG
+            UART_Send("entered if block\r\n", 18);
+#endif
             if (in.dit && in.dah) {
                 // Both pressed: start with dit (normal) or dah (reversed)
                 s_active_is_dit = !s_reverse_keys;
@@ -491,24 +539,30 @@ CW_Action_t CW_HandleState(void)
             s_elem_start_count = cur_count;
             s_KeyerFSMState = s_active_is_dit ? CWK_STATE_ACTIVE_DIT : CWK_STATE_ACTIVE_DAH;
 #if CW_KEYER_DEBUG
-            UART_LogSend("keyer going active\r\n", 20);
+            UART_Send("keyer going active\r\n", 20);
 #endif
             action = CW_ACTION_CARRIER_ON;
         }
         break;
 
     case CWK_STATE_ACTIVE_DIT:
-#if CW_KEYER_DEBUG
-        UART_LogSend("dit\r\n", 5);
-#endif
         [[fallthrough]];
     case CWK_STATE_ACTIVE_DAH: 
     {
-#if CW_KEYER_DEBUG
-        UART_LogSend("dah - keyer is active\r\n", 18);
-#endif
         const uint16_t target = (s_KeyerFSMState == CWK_STATE_ACTIVE_DIT) ? s_dit_count : s_dah_count;
         const uint16_t elapsed_elem = timer_jiffies_since(s_elem_start_count);
+
+#if CW_KEYER_DEBUG
+        {
+            static uint32_t debug_count = 0;
+            if (++debug_count % 10 == 0) {  // Print every 10th iteration
+                char buf[80];
+                sprintf_(buf, "elem: elapsed=%u target=%u start=%u cur=%u\r\n", 
+                         elapsed_elem, target, s_elem_start_count, (unsigned)cur_count);
+                UART_Send(buf, strlen(buf));
+            }
+        }
+#endif
 
         // Iambic alternation detection
         if (in.dit && in.dah) {
@@ -528,6 +582,8 @@ CW_Action_t CW_HandleState(void)
             action = CW_ACTION_CARRIER_OFF;
             s_elem_start_count = cur_count;
             s_KeyerFSMState = CWK_STATE_INTER_ELEMENT_GAP;
+            // Emit element to encoder on state exit
+            CW_EncoderProcessElement(s_active_is_dit ? CW_ELEMENT_DIT : CW_ELEMENT_DAH);
         } else {
             // Carrier is on and should remain on during element
             action = CW_ACTION_CARRIER_HOLD;
@@ -570,18 +626,63 @@ CW_Action_t CW_HandleState(void)
             if (have_next) {
                 s_KeyerFSMState = next_is_dit ? CWK_STATE_ACTIVE_DIT : CWK_STATE_ACTIVE_DAH;
                 s_active_is_dit   = next_is_dit;
-                action = CW_ACTION_CARRIER_ON;
+                action = CW_ACTION_CARRIER_ON;				
             } else {
-                s_KeyerFSMState = CWK_STATE_IDLE;
-                // Already in NONE state, carrier was turned off at end of last element
+                // No key input - transition to inter-char gap (carry over timing)
+                s_KeyerFSMState = CWK_STATE_INTER_CHAR_GAP;
+                s_pending_alternate = false;
+                s_both_held_during_elem = false;
             }
         }
-        break; }
+		break;
+	}
 
-    default:
-        s_KeyerFSMState = CWK_STATE_IDLE;
-        break;
-    }
+	case CWK_STATE_INTER_CHAR_GAP: {
+		const uint16_t elapsed_gap = timer_jiffies_since(s_elem_start_count);
+		
+		// Check for new key input
+		if (in.dit || in.dah) {
+			bool next_is_dit = (in.dit && in.dah) ? !s_reverse_keys : in.dit;
+			s_elem_start_count = cur_count;
+			s_KeyerFSMState = next_is_dit ? CWK_STATE_ACTIVE_DIT : CWK_STATE_ACTIVE_DAH;
+			s_active_is_dit = next_is_dit;
 
-    return action;
+			action = CW_ACTION_CARRIER_ON;
+            // Emit element to encoder on state exit
+            CW_EncoderProcessElement(CW_ELEMENT_INTER_CHAR_SPACE);
+		} else if (elapsed_gap >= s_char_gap_count) {
+            // Emit element to encoder on state exit
+            CW_EncoderProcessElement(CW_ELEMENT_INTER_CHAR_SPACE);
+			// Transition to inter-word gap - carry over timing
+			s_KeyerFSMState = CWK_STATE_INTER_WORD_GAP;
+		}
+		break;
+	}
+
+	case CWK_STATE_INTER_WORD_GAP: {
+		const uint16_t elapsed_gap = timer_jiffies_since(s_elem_start_count);
+		
+		// Check for new key input
+		if (in.dit || in.dah) {
+			
+			bool next_is_dit = (in.dit && in.dah) ? !s_reverse_keys : in.dit;
+			s_elem_start_count = cur_count;
+			s_KeyerFSMState = next_is_dit ? CWK_STATE_ACTIVE_DIT : CWK_STATE_ACTIVE_DAH;
+            s_active_is_dit = next_is_dit;
+            action = CW_ACTION_CARRIER_ON;
+            
+		} else if (elapsed_gap >= s_word_gap_count) {
+			// Long silence - go back to idle
+			s_KeyerFSMState = CWK_STATE_IDLE;
+            CW_EncoderProcessElement(CW_ELEMENT_INTER_WORD_SPACE);
+		}
+		break;
+	}
+
+	default:
+		s_KeyerFSMState = CWK_STATE_IDLE;
+		break;
+	}
+
+	return action;
 }
