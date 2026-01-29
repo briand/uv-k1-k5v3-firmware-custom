@@ -9,7 +9,7 @@
 #include <string.h>
 
 // Debug logging control - set to 1 to enable encoder debug output
-#define CW_ENCODER_DEBUG 1
+#define CW_ENCODER_DEBUG 0
 
 // Morse code lookup table
 // Pattern: LSB first, 0=dit, 1=dah

@@ -1029,8 +1029,6 @@ void APP_Update(void)
 		if (gCW_Recording) {
 			switch(action)
 			{
-				case CW_ACTION_CARRIER_HOLD:
-				break;
 				case CW_ACTION_CARRIER_ON:
 					AUDIO_AudioPathOn();
 					BK4819_SetAF(BK4819_AF_ALAM);	
@@ -1045,6 +1043,7 @@ void APP_Update(void)
 					BK4819_SetScrambleFrequencyControlWord(0);
 					RADIO_SetModulation(gRxVfo->Modulation);  // back to RX audio path
 				break;
+				
 				default:
 				break;
 			}
@@ -1054,36 +1053,33 @@ void APP_Update(void)
 		
 		switch(action)
 		{
-			case CW_ACTION_CARRIER_HOLD:
-				gPttIsPressed = true;
-				gDebounceCounter = 0;
-				gCW_SuspendCountdown_10ms = 0;
-				[[fallthrough]];
 			case CW_ACTION_CARRIER_ON:
 				gTxTimerCountdown_500ms = 0;
+				gPttIsPressed = true;
 
 				if(gCW_State == CW_INACTIVE)
 				{	
-					UART_LogSend("CW Start\n", 9);
-					// gUpdateDisplay = true;
-					// gUpdateStatus  = true;  // maybe?
-					// FUNCTION_Transmit_CW();
-					// gPttIsPressed = true;
-					// gCurrentFunction = FUNCTION_TRANSMIT;
+					UART_Send("CW Start\r\n", 10);
 					RADIO_PrepareTX();
 				}
 				else
 				{
-					UART_LogSend("CW Resume\n", 10);
+					UART_Send("CW Resume\r\n", 11);
 					RADIO_CW_BeginResume();
 				}
 			break;
 
 			case CW_ACTION_CARRIER_OFF:
-
-				UART_LogSend("CW Suspend\n", 11);
+				UART_Send("CW Suspend\r\n", 12);
 				RADIO_CW_Suspend();
 				gCW_SuspendCountdown_10ms = 0;
+			break;
+
+			case CW_ACTION_CARRIER_HOLD:
+				gPttIsPressed = true;
+				//gDebounceCounter = 0;
+				gCW_SuspendCountdown_10ms = 0;
+				gTxTimerCountdown_500ms = 0;
 			break;
 
 			case CW_ACTION_NONE:
@@ -1092,7 +1088,7 @@ void APP_Update(void)
 				// paranoia: if transmitting but the keyer didn't request any action, suspend it
 				if(gCW_State == CW_TRANSMITTING)
 				{
-					UART_LogSend("!!! CW Auto Suspend\n", 20);
+					UART_Send("!!! CW Auto Suspend\r\n", 21);
 					RADIO_CW_Suspend();
 					gCW_SuspendCountdown_10ms = 0;
 				}
