@@ -1075,7 +1075,7 @@ void APP_Update(void)
 				gCW_SuspendCountdown_10ms = 0;
 			break;
 
-			case CW_ACTION_CARRIER_HOLD:
+			case CW_ACTION_CARRIER_HOLD_ON:
 				gPttIsPressed = true;
 				//gDebounceCounter = 0;
 				gCW_SuspendCountdown_10ms = 0;

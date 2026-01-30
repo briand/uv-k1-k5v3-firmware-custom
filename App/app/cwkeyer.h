@@ -12,7 +12,7 @@ typedef enum {
     CW_ACTION_NONE        = 0,  // no carrier active (idle, inter-element gap)
     CW_ACTION_CARRIER_ON  = 1,  // transition carrier from off to on (start element)
     CW_ACTION_CARRIER_OFF = 2,  // transition carrier from on to off (end element)
-    CW_ACTION_CARRIER_HOLD = 3, // carrier is on and should remain on (during element)
+    CW_ACTION_CARRIER_HOLD_ON = 3, // carrier is on and should remain on (during element)
 } CW_Action_t;
 
 // Periodic handler: drive CW state machine and return actions to apply
