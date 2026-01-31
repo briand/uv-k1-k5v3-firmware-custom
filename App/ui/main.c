@@ -1503,8 +1503,8 @@ void UI_DisplayMain(void)
 #endif
 
 #ifdef ENABLE_CW_MODULATOR
-		if (gCurrentFunction == FUNCTION_TRANSMIT && gCurrentVfo->Modulation == MODULATION_CW && gCW_TX_Display[0] != 0)
-		{	// show CW characters being transmitted
+		if ((gCurrentFunction == FUNCTION_TRANSMIT || gCW_TxDisplayHoldoff_10ms > 0) && gCurrentVfo->Modulation == MODULATION_CW && gCW_TX_Display[0] != 0)
+		{	// show CW characters being transmitted (persists 1 sec after TX ends)
 			center_line = CENTER_LINE_CW_DECODE;
 			DrawCWDecodeBar(false);
 		}

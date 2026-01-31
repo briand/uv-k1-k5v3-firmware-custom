@@ -823,6 +823,8 @@ void APP_EndTransmission(void)
 	// Clear CW state when ending transmission entirely
 	gCW_State = CW_INACTIVE;
 	gCW_SuspendCountdown_10ms = 0;
+	// Keep TX display visible for 1 second after TX ends
+	gCW_TxDisplayHoldoff_10ms = 100;
 #endif
 
     if (gMonitor) {
@@ -1059,18 +1061,18 @@ void APP_Update(void)
 
 				if(gCW_State == CW_INACTIVE)
 				{	
-					UART_Send("CW Start\r\n", 10);
+					// UART_Send("CW Start\r\n", 10);
 					RADIO_PrepareTX();
 				}
 				else
 				{
-					UART_Send("CW Resume\r\n", 11);
+					// UART_Send("CW Resume\r\n", 11);
 					RADIO_CW_BeginResume();
 				}
 			break;
 
 			case CW_ACTION_CARRIER_OFF:
-				UART_Send("CW Suspend\r\n", 12);
+				//UART_Send("CW Suspend\r\n", 12);
 				RADIO_CW_Suspend();
 				gCW_SuspendCountdown_10ms = 0;
 			break;
@@ -1088,7 +1090,7 @@ void APP_Update(void)
 				// paranoia: if transmitting but the keyer didn't request any action, suspend it
 				if(gCW_State == CW_TRANSMITTING)
 				{
-					UART_Send("!!! CW Auto Suspend\r\n", 21);
+					// UART_Send("!!! CW Auto Suspend\r\n", 21);
 					RADIO_CW_Suspend();
 					gCW_SuspendCountdown_10ms = 0;
 				}
@@ -1393,6 +1395,24 @@ static void CheckKeys(void)
     }
     else
         gPttDebounceCounter = 0;
+#endif
+
+#ifdef ENABLE_CW_MODULATOR
+	// Decrement TX display holdoff timer (runs every 10ms tick regardless of TX state)
+	if (gCW_TxDisplayHoldoff_10ms > 0)
+	{
+		if (--gCW_TxDisplayHoldoff_10ms == 0)
+			gUpdateDisplay = true;  // Trigger screen refresh to switch away from CW display
+	}
+#endif
+
+#ifdef ENABLE_CW_MODULATOR
+	// Decrement TX display holdoff timer (runs every 10ms tick regardless of TX state)
+	if (gCW_TxDisplayHoldoff_10ms > 0)
+	{
+		if (--gCW_TxDisplayHoldoff_10ms == 0)
+			gUpdateDisplay = true;  // Trigger screen refresh to switch away from CW display
+	}
 #endif
 
 // --------------------- OTHER KEYS ----------------------------

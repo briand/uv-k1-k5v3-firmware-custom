@@ -513,8 +513,8 @@ const uint8_t gSubMenu_SIDEFUNCTIONS_size = ARRAY_SIZE(gSubMenu_SIDEFUNCTIONS);
 #ifdef ENABLE_CW_MODULATOR
 const char* gSubMenu_CW_KEYER_MODE[] =
 {
-	"Iambic\nA",
-	"Iambic\nB"
+	"Mode\nA",
+	"Mode\nB"
 };
 
 const char* gSubMenu_CW_KEY_INPUT[] =
