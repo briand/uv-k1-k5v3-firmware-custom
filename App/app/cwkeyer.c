@@ -45,6 +45,11 @@ static uint8_t s_vcd_state = 0;
 static uint16_t s_vcd_count = 0;
 #endif
 
+// Debug: log when a dit is created while only dah is pressed
+#ifndef CW_KEYER_DEBUG_DAH_SEND
+#define CW_KEYER_DEBUG_DAH_SEND 1
+#endif
+
 // Timer scale: 10 kHz tick → 100 µs per tick
 // 16-bit counter rolls over at 6553 ms
 #define DITS_PER_WORD 50
@@ -86,6 +91,24 @@ typedef struct {
     bool dit_rise;
     bool dah_rise;
 } CW_Input;
+
+// Debug helper: log when a dit would be created while only dah is pressed
+static void CW_Debug_DahOnlyLog(uint16_t timestamp, const char *where, const CW_Input *in, bool would_create_dit)
+{
+#if CW_KEYER_DEBUG_DAH_SEND
+    if (in && in->dah && !in->dit && would_create_dit) {
+        char buf[120];
+        int len = sprintf_(buf, "%u DBUG_DAH: %s state=%d active=%d pending=%d in.dah=%d in.dit=%d\r\n",
+                           (unsigned)timestamp, where, (int)s_KeyerFSMState, (int)s_active_is_dit, (int)s_pending_alternate, (int)in->dah, (int)in->dit);
+        UART_Send(buf, len);
+    }
+#else
+    (void)timestamp;
+    (void)where;
+    (void)in;
+    (void)would_create_dit;
+#endif
+}
 
 #if CW_VCD_LOG
 // Send VCD header (call once at start)
@@ -651,7 +674,16 @@ CW_Action_t CW_HandleState(void)
 #if CW_KEYER_DEBUG
             UART_Send("entered if block\r\n", 18);
 #endif
-            s_active_is_dit = in.dit;  // if in.dit is false, must have been dah
+            // Explicit handling when both paddles are pressed:
+            // If both pressed and previous element was a dit, choose dah; otherwise choose dit.
+            if (in.dit && !in.dah) {
+                s_active_is_dit = true;
+            } else if (in.dah && !in.dit) {
+                s_active_is_dit = false;
+            } else {
+                // both pressed -> toggle previous element type (dit->dah, dah->dit)
+                s_active_is_dit = !s_active_is_dit;
+            }
 
             s_pending_alternate = false;
             s_elem_start_count = cur_count;
@@ -691,8 +723,10 @@ CW_Action_t CW_HandleState(void)
                 // Type A: Purely edge detection for opposite paddle throughout element
                 if (s_active_is_dit && in.dah_rise) {
                     s_pending_alternate = true;
+                    CW_Debug_DahOnlyLog(cur_count, "ACTIVE: A dah_rise -> pending", &in, (!s_active_is_dit));
                 } else if (!s_active_is_dit && in.dit_rise) {
                     s_pending_alternate = true;
+                    CW_Debug_DahOnlyLog(cur_count, "ACTIVE: A dit_rise -> pending", &in, (!s_active_is_dit));
                 }
             } else {
                 // "Elecraft style" Type B with an edge-trigger during the first third of a dah
@@ -700,13 +734,16 @@ CW_Action_t CW_HandleState(void)
                 if ((!s_active_is_dit) && (elapsed_elem < s_dit_count)) {
                     if (in.dit_rise) {
                         s_pending_alternate = true;
+                        CW_Debug_DahOnlyLog(cur_count, "ACTIVE: B early dit_rise -> pending", &in, (!s_active_is_dit));
                     }
                 } else {
                     // Standard Type B logic: state detection
                     if (s_active_is_dit && in.dah) {
                         s_pending_alternate = true;
+                        CW_Debug_DahOnlyLog(cur_count, "ACTIVE: B dah level -> pending", &in, (!s_active_is_dit));
                     } else if (!s_active_is_dit && in.dit) {
                         s_pending_alternate = true;
+                        CW_Debug_DahOnlyLog(cur_count, "ACTIVE: B dit level -> pending", &in, (!s_active_is_dit));
                     }
                 }
             }
@@ -739,8 +776,10 @@ CW_Action_t CW_HandleState(void)
             // Mode A style Edge detection for opposite key throughout element AND gap, but for both modes
             if (s_active_is_dit && in.dah_rise) {
                 s_pending_alternate = true;
+                CW_Debug_DahOnlyLog(cur_count, "GAP: A dah_rise -> pending", &in, (!s_active_is_dit));
             } else if (!s_active_is_dit && in.dit_rise) {
                 s_pending_alternate = true;
+                CW_Debug_DahOnlyLog(cur_count, "GAP: A dit_rise -> pending", &in, (!s_active_is_dit));
             }
             // I think we don't want B reading during gap? this was probably the double-dit problem.
             // else {
@@ -769,16 +808,17 @@ CW_Action_t CW_HandleState(void)
                 // Gap complete with no alternate pending - take a sample
                 CW_ReadKeys(&in);
 
-                if(in.dit)
-                { 
-                    // don't dit if dah is also pressed and we just sent a dit
-                    if(!in.dah || !s_active_is_dit)
-                    {
-                        next_is_dit = true; 
+                if (in.dit || in.dah) {
+                    // Explicit handling: only create a dit if dit was actually pressed.
+                    // If both paddles are pressed, choose the opposite of the prior element:
+                    // prior dit -> choose dah, otherwise choose dit.
+                    if (in.dit && !in.dah) {
+                        next_is_dit = true;
+                    } else if (in.dah && !in.dit) {
+                        next_is_dit = false;
+                    } else { /* both pressed -> choose opposite of previous */
+                        next_is_dit = !s_active_is_dit;
                     }
-                    have_next = true; 
-                } 
-                else if (in.dah) {
                     have_next = true;
                 }
             } 
@@ -789,6 +829,9 @@ CW_Action_t CW_HandleState(void)
                 s_elem_start_count = cur_count;  // start new count for the new element
                 s_KeyerFSMState = CWK_STATE_ACTIVE_ELEMENT;
                 s_active_is_dit = next_is_dit;
+                // Sample now and log if this creates a dit while only dah is pressed
+                CW_ReadKeys(&in);
+                CW_Debug_DahOnlyLog(cur_count, "GAP: next -> active", &in, s_active_is_dit);
                 action = CW_ACTION_CARRIER_ON;				
             } else {
                 // No key input - transition to inter-char gap (carry over timing)
@@ -812,10 +855,20 @@ CW_Action_t CW_HandleState(void)
             if (elapsed_gap < s_ext_gap_count) {
 			    // Early period: immediate send, same character continues
                 if (have_key) {
-                    s_active_is_dit = (!in.dah || !s_active_is_dit);  // prefer dah if both pressed and we just sent dit
+                    // If both pressed: choose the opposite of the prior element (if prior was dit, send dah; otherwise send dit)
+                    if (in.dit && !in.dah) {
+                        s_active_is_dit = true;
+                    } else if (in.dah && !in.dit) {
+                        s_active_is_dit = false;
+                    } else { // both pressed -> toggle previous
+                        s_active_is_dit = !s_active_is_dit;
+                    }
+
                     s_elem_start_count = cur_count;
                     s_KeyerFSMState = CWK_STATE_ACTIVE_ELEMENT;
                     action = CW_ACTION_CARRIER_ON;
+                    // log if we just created a dit while only dah is pressed
+                    CW_Debug_DahOnlyLog(cur_count, "CHAR: early -> active", &in, s_active_is_dit);
                 }
 		    } else {
 			    // Hold period (ext_gap <= elapsed < char_gap): queue key but wait for char_gap deadline
@@ -850,7 +903,9 @@ CW_Action_t CW_HandleState(void)
 		CW_ReadKeys(&in);
 		
 		if (in.dit || in.dah) {
-			s_active_is_dit = in.dit;
+            s_active_is_dit = in.dit;
+            // Log if this sets a dit while only dah is present
+            CW_Debug_DahOnlyLog(cur_count, "WORD: -> active", &in, s_active_is_dit);
 			s_elem_start_count = cur_count;
 			s_KeyerFSMState = CWK_STATE_ACTIVE_ELEMENT;
 			action = CW_ACTION_CARRIER_ON;
