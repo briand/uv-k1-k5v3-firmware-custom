@@ -28,6 +28,23 @@
 // Debug logging control - set to 1 to enable UART debug output
 #define CW_KEYER_DEBUG 0
 
+// VCD waveform logging - set to 1 to output VCD format to UART for GTKWave
+#define CW_VCD_LOG 0
+
+#if CW_VCD_LOG
+// VCD state tracking - previous values for change detection
+static bool s_vcd_header_sent = false;
+static bool s_vcd_dit = false;
+static bool s_vcd_dah = false;
+static bool s_vcd_dit_rise = false;
+static bool s_vcd_dah_rise = false;
+static bool s_vcd_pending = false;
+static bool s_vcd_carrier = false;
+static bool s_vcd_is_dit = false;
+static uint8_t s_vcd_state = 0;
+static uint16_t s_vcd_count = 0;
+#endif
+
 // Timer scale: 10 kHz tick → 100 µs per tick
 // 16-bit counter rolls over at 6553 ms
 #define DITS_PER_WORD 50
@@ -70,6 +87,112 @@ typedef struct {
     bool dah_rise;
 } CW_Input;
 
+#if CW_VCD_LOG
+// Send VCD header (call once at start)
+static void VCD_SendHeader(void)
+{
+    const char* hdr =
+        "$timescale 100us $end\n"
+        "$scope module keyer $end\n"
+        "$var wire 1 d dit $end\n"
+        "$var wire 1 D dah $end\n"
+        "$var wire 1 r dit_rise $end\n"
+        "$var wire 1 R dah_rise $end\n"
+        "$var wire 1 p pending $end\n"
+        "$var wire 1 c carrier $end\n"
+        "$var wire 1 i is_dit $end\n"
+        "$var reg 3 s state $end\n"
+        "$var reg 16 t count $end\n"
+        "$upscope $end\n"
+        "$enddefinitions $end\n"
+        "#0\n0d\n0D\n0r\n0R\n0p\n0c\n0i\nb000 s\nb0000000000000000 t\n";
+    UART_Send(hdr, strlen(hdr));
+    s_vcd_header_sent = true;
+}
+
+// Log VCD signal changes
+static void VCD_LogSignals(uint16_t timestamp, const CW_Input *in, bool pending, bool carrier, bool is_dit, uint8_t state)
+{
+    if (!s_vcd_header_sent) {
+        VCD_SendHeader();
+    }
+    
+    char buf[80];
+    int len = 0;
+    
+    // Always output timestamp
+    len = sprintf_(buf, "#%u\n", timestamp);
+    UART_Send(buf, len);
+    
+    // Output changed signals
+    if (in->dit != s_vcd_dit) {
+        s_vcd_dit = in->dit;
+        len = sprintf_(buf, "%cd\n", in->dit ? '1' : '0');
+        UART_Send(buf, len);
+    }
+    if (in->dah != s_vcd_dah) {
+        s_vcd_dah = in->dah;
+        len = sprintf_(buf, "%cD\n", in->dah ? '1' : '0');
+        UART_Send(buf, len);
+    }
+    if (in->dit_rise != s_vcd_dit_rise) {
+        s_vcd_dit_rise = in->dit_rise;
+        len = sprintf_(buf, "%cr\n", in->dit_rise ? '1' : '0');
+        UART_Send(buf, len);
+    }
+    if (in->dah_rise != s_vcd_dah_rise) {
+        s_vcd_dah_rise = in->dah_rise;
+        len = sprintf_(buf, "%cR\n", in->dah_rise ? '1' : '0');
+        UART_Send(buf, len);
+    }
+    if (pending != s_vcd_pending) {
+        s_vcd_pending = pending;
+        len = sprintf_(buf, "%cp\n", pending ? '1' : '0');
+        UART_Send(buf, len);
+    }
+    if (carrier != s_vcd_carrier) {
+        s_vcd_carrier = carrier;
+        len = sprintf_(buf, "%cc\n", carrier ? '1' : '0');
+        UART_Send(buf, len);
+    }
+    if (is_dit != s_vcd_is_dit) {
+        s_vcd_is_dit = is_dit;
+        len = sprintf_(buf, "%ci\n", is_dit ? '1' : '0');
+        UART_Send(buf, len);
+    }
+    if (state != s_vcd_state) {
+        s_vcd_state = state;
+        len = sprintf_(buf, "b%c%c%c s\n", 
+            (state & 4) ? '1' : '0',
+            (state & 2) ? '1' : '0',
+            (state & 1) ? '1' : '0');
+        UART_Send(buf, len);
+    }
+    if (timestamp != s_vcd_count) {
+        s_vcd_count = timestamp;
+        // 16-bit binary
+        len = sprintf_(buf, "b%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c t\n",
+            (timestamp >> 15) & 1 ? '1' : '0',
+            (timestamp >> 14) & 1 ? '1' : '0',
+            (timestamp >> 13) & 1 ? '1' : '0',
+            (timestamp >> 12) & 1 ? '1' : '0',
+            (timestamp >> 11) & 1 ? '1' : '0',
+            (timestamp >> 10) & 1 ? '1' : '0',
+            (timestamp >> 9) & 1 ? '1' : '0',
+            (timestamp >> 8) & 1 ? '1' : '0',
+            (timestamp >> 7) & 1 ? '1' : '0',
+            (timestamp >> 6) & 1 ? '1' : '0',
+            (timestamp >> 5) & 1 ? '1' : '0',
+            (timestamp >> 4) & 1 ? '1' : '0',
+            (timestamp >> 3) & 1 ? '1' : '0',
+            (timestamp >> 2) & 1 ? '1' : '0',
+            (timestamp >> 1) & 1 ? '1' : '0',
+            (timestamp >> 0) & 1 ? '1' : '0');
+        UART_Send(buf, len);
+    }
+}
+#endif
+
 // Read button ring input (SIDE1)
 static void CW_ReadSideButton(bool *ring_out)
 {
@@ -101,7 +224,7 @@ static void CW_ReadSideButton(bool *ring_out)
 	// This leaves GPIOA_PIN_KEYBOARD_4 and GPIOA_PIN_KEYBOARD_5 high
 	I2C_Stop();
 
-	// Reset VOICE pins
+	// Reset VOICE chip pins
 	GPIO_ClearBit(&GPIOA->DATA, GPIOA_PIN_KEYBOARD_6);
 	GPIO_SetBit(  &GPIOA->DATA, GPIOA_PIN_KEYBOARD_7);
 
@@ -505,7 +628,7 @@ CW_Action_t CW_HandleState(void)
     }
 
     // Input struct - will be sampled at appropriate times in each state
-    CW_Input in;
+    CW_Input in = {0};
 
     switch (s_KeyerFSMState) {
     case CWK_STATE_IDLE:
@@ -525,12 +648,7 @@ CW_Action_t CW_HandleState(void)
 #if CW_KEYER_DEBUG
             UART_Send("entered if block\r\n", 18);
 #endif
-            if (in.dit && in.dah) {
-                // Both pressed: start with dit (normal) or dah (reversed)
-                s_active_is_dit = !s_reverse_keys;
-            } else {
-                s_active_is_dit = in.dit;
-            }
+            s_active_is_dit = in.dit;  // if in.dit is false, must have been dah
 
             s_pending_alternate = false;
             s_elem_start_count = cur_count;
@@ -604,23 +722,20 @@ CW_Action_t CW_HandleState(void)
     }
 
     case CWK_STATE_INTER_ELEMENT_GAP: {
-        // INTER_ELEMENT_GAP: Do NOT sample until gap completes
         const uint16_t elapsed_gap = timer_jiffies_since(s_elem_start_count);
         
-        // Read if needed
-        if(!s_pending_alternate)
+        // Read only if needed
+        if(!s_pending_alternate) // briand - lets try doing this regardless of mode // && (gEeprom.CW_KEYER_MODE == CW_IAMBIC_MODE_A))
         {
             // keep doing sampling during gap for memory logic
             CW_ReadKeys(&in);
         
-            if (gEeprom.CW_KEYER_MODE == CW_IAMBIC_MODE_A) {
-                // Type A: Edge detection for opposite key throughout element AND gap
-                if (s_active_is_dit && in.dah_rise) {
-                    s_pending_alternate = true;
-                } else if (!s_active_is_dit && in.dit_rise) {
-                    s_pending_alternate = true;
-                }
-            } 
+            // Type A: Edge detection for opposite key throughout element AND gap
+            if (s_active_is_dit && in.dah_rise) {
+                s_pending_alternate = true;
+            } else if (!s_active_is_dit && in.dit_rise) {
+                s_pending_alternate = true;
+            }
             // I think we don't want B reading during gap? this was probably the double-dit problem.
             // else {
             //     // Standard Type B logic: state detection
@@ -632,9 +747,6 @@ CW_Action_t CW_HandleState(void)
             // }
         }
         if (elapsed_gap >= s_gap_count) {
-            
-            // Gap complete - take a sample
-            CW_ReadKeys(&in);
 
             bool next_is_dit = false;
             bool have_next = false;
@@ -647,10 +759,13 @@ CW_Action_t CW_HandleState(void)
                 have_next = true;
             }
             else  // no pending alternate
-            {
+            {            
+                // Gap complete with no alternate pending - take a sample
+                CW_ReadKeys(&in);
+
                 if(in.dit)
                 { 
-                    // don't set to dit if dah is also pressed and we were sending dit
+                    // don't dit if dah is also pressed and we just sent a dit
                     if(!in.dah || !s_active_is_dit)
                     {
                         next_is_dit = true; 
@@ -685,7 +800,7 @@ CW_Action_t CW_HandleState(void)
 		
 		// Check for new key input
 		if (in.dit || in.dah) {
-			s_active_is_dit = in.dit;
+			s_active_is_dit = in.dit;  // dit wins
 			s_elem_start_count = cur_count;
 			s_KeyerFSMState = CWK_STATE_ACTIVE_ELEMENT;
 
@@ -726,6 +841,12 @@ CW_Action_t CW_HandleState(void)
 		s_KeyerFSMState = CWK_STATE_IDLE;
 		break;
 	}
+
+#if CW_VCD_LOG
+    // Log VCD signals - carrier is on if action is ON or HOLD_ON
+    bool carrier = (action == CW_ACTION_CARRIER_ON || action == CW_ACTION_CARRIER_HOLD_ON);
+    VCD_LogSignals(cur_count, &in, s_pending_alternate, carrier, s_active_is_dit, (uint8_t)s_KeyerFSMState);
+#endif
 
 	return action;
 }
