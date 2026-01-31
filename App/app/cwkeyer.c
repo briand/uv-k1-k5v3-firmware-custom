@@ -29,23 +29,6 @@
 // Debug logging control - set to 1 to enable UART debug output
 #define CW_KEYER_DEBUG 0
 
-// VCD waveform logging - set to 1 to output VCD format to UART for GTKWave
-#define CW_VCD_LOG 0
-
-#if CW_VCD_LOG
-// VCD state tracking - previous values for change detection
-static bool s_vcd_header_sent = false;
-static bool s_vcd_dit = false;
-static bool s_vcd_dah = false;
-static bool s_vcd_dit_rise = false;
-static bool s_vcd_dah_rise = false;
-static bool s_vcd_pending = false;
-static bool s_vcd_carrier = false;
-static bool s_vcd_is_dit = false;
-static uint8_t s_vcd_state = 0;
-static uint16_t s_vcd_count = 0;
-#endif
-
 // Debug: log when a dit is created while only dah is pressed
 #ifndef CW_KEYER_DEBUG_DAH_SEND
 #define CW_KEYER_DEBUG_DAH_SEND 1
@@ -85,121 +68,6 @@ static bool           s_last_handkey_ptt = false; // last PTT state for handkey 
 // Reconfigure requested (apply at idle or after gap)
 static volatile bool s_cfg_dirty = true;
 
-// Input struct moved to app/cwhardware.h
-
-
-#if CW_VCD_LOG
-// Send VCD header (call once at start)
-static void VCD_SendHeader(void)
-{
-    const char* hdr =
-        "$timescale 100us $end\n"
-        "$scope module keyer $end\n"
-        "$var wire 1 d dit $end\n"
-        "$var wire 1 D dah $end\n"
-        "$var wire 1 r dit_rise $end\n"
-        "$var wire 1 R dah_rise $end\n"
-        "$var wire 1 p pending $end\n"
-        "$var wire 1 c carrier $end\n"
-        "$var wire 1 i is_dit $end\n"
-        "$var reg 3 s state $end\n"
-        "$var reg 16 t count $end\n"
-        "$upscope $end\n"
-        "$enddefinitions $end\n"
-        "#0\n0d\n0D\n0r\n0R\n0p\n0c\n0i\nb000 s\nb0000000000000000 t\n";
-    UART_Send(hdr, strlen(hdr));
-    s_vcd_header_sent = true;
-}
-
-// Log VCD signal changes
-static void VCD_LogSignals(uint16_t timestamp, const CW_Input *in, bool pending, bool carrier, bool is_dit, uint8_t state)
-{
-    if (!s_vcd_header_sent) {
-        VCD_SendHeader();
-    }
-    
-    char buf[80];
-    int len = 0;
-    
-    // Always output timestamp
-    len = sprintf_(buf, "#%u\n", timestamp);
-    UART_Send(buf, len);
-    
-    // Output changed signals
-    if (in->dit != s_vcd_dit) {
-        s_vcd_dit = in->dit;
-        len = sprintf_(buf, "%cd\n", in->dit ? '1' : '0');
-        UART_Send(buf, len);
-    }
-    if (in->dah != s_vcd_dah) {
-        s_vcd_dah = in->dah;
-        len = sprintf_(buf, "%cD\n", in->dah ? '1' : '0');
-        UART_Send(buf, len);
-    }
-    if (in->dit_rise != s_vcd_dit_rise) {
-        s_vcd_dit_rise = in->dit_rise;
-        len = sprintf_(buf, "%cr\n", in->dit_rise ? '1' : '0');
-        UART_Send(buf, len);
-    }
-    if (in->dah_rise != s_vcd_dah_rise) {
-        s_vcd_dah_rise = in->dah_rise;
-        len = sprintf_(buf, "%cR\n", in->dah_rise ? '1' : '0');
-        UART_Send(buf, len);
-    }
-    if (pending != s_vcd_pending) {
-        s_vcd_pending = pending;
-        len = sprintf_(buf, "%cp\n", pending ? '1' : '0');
-        UART_Send(buf, len);
-    }
-    if (carrier != s_vcd_carrier) {
-        s_vcd_carrier = carrier;
-        len = sprintf_(buf, "%cc\n", carrier ? '1' : '0');
-        UART_Send(buf, len);
-    }
-    if (is_dit != s_vcd_is_dit) {
-        s_vcd_is_dit = is_dit;
-        len = sprintf_(buf, "%ci\n", is_dit ? '1' : '0');
-        UART_Send(buf, len);
-    }
-    if (state != s_vcd_state) {
-        s_vcd_state = state;
-        len = sprintf_(buf, "b%c%c%c s\n", 
-            (state & 4) ? '1' : '0',
-            (state & 2) ? '1' : '0',
-            (state & 1) ? '1' : '0');
-        UART_Send(buf, len);
-    }
-    if (timestamp != s_vcd_count) {
-        s_vcd_count = timestamp;
-        // 16-bit binary
-        len = sprintf_(buf, "b%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c t\n",
-            (timestamp >> 15) & 1 ? '1' : '0',
-            (timestamp >> 14) & 1 ? '1' : '0',
-            (timestamp >> 13) & 1 ? '1' : '0',
-            (timestamp >> 12) & 1 ? '1' : '0',
-            (timestamp >> 11) & 1 ? '1' : '0',
-            (timestamp >> 10) & 1 ? '1' : '0',
-            (timestamp >> 9) & 1 ? '1' : '0',
-            (timestamp >> 8) & 1 ? '1' : '0',
-            (timestamp >> 7) & 1 ? '1' : '0',
-            (timestamp >> 6) & 1 ? '1' : '0',
-            (timestamp >> 5) & 1 ? '1' : '0',
-            (timestamp >> 4) & 1 ? '1' : '0',
-            (timestamp >> 3) & 1 ? '1' : '0',
-            (timestamp >> 2) & 1 ? '1' : '0',
-            (timestamp >> 1) & 1 ? '1' : '0',
-            (timestamp >> 0) & 1 ? '1' : '0');
-        UART_Send(buf, len);
-    }
-}
-#endif
-/* CW_ReadSideButton moved to app/cwhardware.c */
-/* CW_ReadGpioDeglitched moved to app/cwhardware.c */
-/* CW_ReadPtt moved to app/cwhardware.c */
-/* CW_ReadKeysForMode moved to app/cwhardware.c */
-/* CW_ReadKeys moved to app/cwhardware.c */
-/* CW_ConfigurePortGround moved to app/cwhardware.c */
-/* CW_ConfigurePortRing moved to app/cwhardware.c */
 
 void CW_UpdateWPM()
 {
@@ -693,12 +561,6 @@ CW_Action_t CW_HandleState(void)
 		s_KeyerFSMState = CWK_STATE_IDLE;
 		break;
 	}
-
-#if CW_VCD_LOG
-    // Log VCD signals - carrier is on if action is ON or HOLD_ON
-    bool carrier = (action == CW_ACTION_CARRIER_ON || action == CW_ACTION_CARRIER_HOLD_ON);
-    VCD_LogSignals(cur_count, &in, s_pending_alternate, carrier, s_active_is_dit, (uint8_t)s_KeyerFSMState);
-#endif
 
 	return action;
 }
