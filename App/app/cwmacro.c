@@ -11,6 +11,9 @@
 // Debug logging control - set to 1 to enable encoder debug output
 #define CW_ENCODER_DEBUG 0
 
+// Macro save/load debug logging - set to 1 to enable
+#define CW_MACRO_DEBUG 1
+
 // Morse code lookup table
 // Pattern: LSB first, 0=dit, 1=dah
 typedef struct {
@@ -105,13 +108,16 @@ uint8_t CW_GetMacroLength(uint8_t macroIndex)
 	uint8_t length;
 	EEPROM_ReadBuffer(MACRO_ADDRS[macroIndex], &length, 1);
 
-#if CW_ENCODER_DEBUG
+#if CW_MACRO_DEBUG
 	{
 		char buf[64];
 		sprintf_(buf, "CW_GetMacroLength: idx=%u raw_len=0x%02x\r\n", macroIndex, length);
 		UART_Send(buf, strlen(buf));
 	}
 #endif
+	
+	// Check if length is valid (0xFF = empty)
+	if (length == 0xFF || length > CW_MACRO_MAX_LEN)
 		return 0;
 	
 	return length;
@@ -131,6 +137,19 @@ uint8_t CW_LoadMacro(uint8_t macroIndex, char *buffer, uint8_t bufferSize)
 	// Read the macro data (skip the length byte)
 	uint8_t data[CW_MACRO_MAX_LEN];
 	EEPROM_ReadBuffer(MACRO_ADDRS[macroIndex] + 1, data, length < CW_MACRO_MAX_LEN ? length : CW_MACRO_MAX_LEN);
+	
+#if CW_MACRO_DEBUG
+	{
+		char buf[64];
+		sprintf_(buf, "CW_LoadMacro: read %u bytes from EEPROM\r\n", length);
+		UART_Send(buf, strlen(buf));
+		for (uint8_t i = 0; i < length && i < 10; i++) {
+			sprintf_(buf, "  [%u]=0x%02x '%c'%s\r\n", i, data[i], 
+				CW_MACRO_GET_CHAR(data[i]), CW_MACRO_HAS_SPACE(data[i]) ? " +SPC" : "");
+			UART_Send(buf, strlen(buf));
+		}
+	}
+#endif
 	
 	// Decode into buffer with spaces
 	uint8_t outPos = 0;
@@ -162,15 +181,19 @@ void CW_SaveMacro(uint8_t macroIndex, const char *buffer, uint8_t length)
 	if (length > CW_MACRO_MAX_LEN)
 		length = CW_MACRO_MAX_LEN;
 
-#if CW_ENCODER_DEBUG
+#if CW_MACRO_DEBUG
 	{
 		char buf[64];
 		sprintf_(buf, "CW_SaveMacro: idx=%u len=%u\r\n", macroIndex, length);
 		UART_Send(buf, strlen(buf));
-		// Show first few bytes
-		for (uint8_t i = 0; i < length && i < 8; i++) {
+		// Show all bytes being saved
+		for (uint8_t i = 0; i < length && i < 20; i++) {
 			sprintf_(buf, "  [%u]=0x%02x (%c%s)\r\n", i, (uint8_t)buffer[i], 
 				CW_MACRO_GET_CHAR(buffer[i]), CW_MACRO_HAS_SPACE(buffer[i]) ? " +SPC" : "");
+			UART_Send(buf, strlen(buf));
+		}
+		if (length > 20) {
+			sprintf_(buf, "  ... and %u more\r\n", length - 20);
 			UART_Send(buf, strlen(buf));
 		}
 	}
@@ -189,8 +212,25 @@ void CW_SaveMacro(uint8_t macroIndex, const char *buffer, uint8_t length)
 		data[i + 1] = buffer[i];
 	}
 	
-	// Write entire 40-byte block to EEPROM
-	EEPROM_WriteBuffer(MACRO_ADDRS[macroIndex], data);
+#if CW_MACRO_DEBUG
+	{
+		char buf[64];
+		sprintf_(buf, "CW_SaveMacro: prepared %u-byte EEPROM block\r\n", (uint8_t)sizeof(data));
+		UART_Send(buf, strlen(buf));
+		sprintf_(buf, "  data[0]=0x%02x (length byte)\r\n", data[0]);
+		UART_Send(buf, strlen(buf));
+		for (uint8_t i = 1; i <= length && i <= 20; i++) {
+			sprintf_(buf, "  data[%u]=0x%02x\r\n", i, data[i]);
+			UART_Send(buf, strlen(buf));
+		}
+	}
+#endif
+	
+	// Write entire 40-byte block to EEPROM in 8-byte chunks
+	// EEPROM_WriteBuffer only writes 8 bytes at a time
+	for (uint8_t i = 0; i < 40; i += 8) {
+		EEPROM_WriteBuffer(MACRO_ADDRS[macroIndex] + i, data + i);
+	}
 }
 
 uint8_t CW_FormatMacroDisplay(uint8_t macroIndex, char *display, uint8_t maxChars)
@@ -208,60 +248,78 @@ uint8_t CW_FormatMacroDisplay(uint8_t macroIndex, char *display, uint8_t maxChar
 	uint8_t data[CW_MACRO_MAX_LEN];
 	EEPROM_ReadBuffer(MACRO_ADDRS[macroIndex] + 1, data, length < CW_MACRO_MAX_LEN ? length : CW_MACRO_MAX_LEN);
 	
-	// Decode into display buffer with spaces, up to 3 lines
+#if CW_MACRO_DEBUG
+	{
+		char buf[64];
+		sprintf_(buf, "CW_FormatMacroDisplay: length=%u maxChars=%u\r\n", length, maxChars);
+		UART_Send(buf, strlen(buf));
+		for (uint8_t i = 0; i < length && i < 15; i++) {
+			sprintf_(buf, "  data[%u]=0x%02x '%c'%s\r\n", i, data[i], 
+				CW_MACRO_GET_CHAR(data[i]), CW_MACRO_HAS_SPACE(data[i]) ? " +SPC" : "");
+			UART_Send(buf, strlen(buf));
+		}
+	}
+#endif
+	
+	// Decode into display buffer with spaces, up to 4 lines
 	uint8_t outPos = 0;
 	uint8_t linePos = 0;
 	uint8_t lineCount = 0;
 	
 	for (uint8_t i = 0; i < length; i++) {
-		// Stop if we've filled 3 lines
-		if (lineCount >= 3)
+		// Stop if we've filled 4 lines
+		if (lineCount >= 4)
 			break;
 		
-		// Check if space precedes this character
+#if CW_MACRO_DEBUG
+		if (i < 10) {
+			char buf[64];
+			sprintf_(buf, "  i=%u lineCount=%u linePos=%u outPos=%u\r\n", i, lineCount, linePos, outPos);
+			UART_Send(buf, strlen(buf));
+		}
+#endif
+		
+		// Calculate how many positions this entry needs (space + char)
+		uint8_t positions_needed = 1;  // Always need 1 for the character
 		if (CW_MACRO_HAS_SPACE(data[i])) {
-			// Check if adding space would exceed line width
-			if (linePos >= maxChars) {
-				// Start new line
-				display[outPos++] = '\n';
-				linePos = 0;
-				lineCount++;
-				if (lineCount >= 3) break;
-			}
+			positions_needed++;  // +1 for the space before it
+		}
+		
+		// Check if we need a new line to fit this entry
+		if (linePos + positions_needed > maxChars && linePos > 0) {
+			// Start new line
+			display[outPos++] = '\n';
+			linePos = 0;
+			lineCount++;
+		}
+		
+		// Add space if present
+		if (CW_MACRO_HAS_SPACE(data[i])) {
 			display[outPos++] = ' ';
 			linePos++;
 		}
 		
-		// Get the character
+		// Add the character
 		char ch = CW_MACRO_GET_CHAR(data[i]);
-		
-		// Check if we need a new line before this character
-		if (linePos >= maxChars) {
-			display[outPos++] = '\n';
-			linePos = 0;
-			lineCount++;
-			if (lineCount >= 3) break;
-		}
-		
 		display[outPos++] = ch;
 		linePos++;
 	}
 	
-	// Add final newline before char count
+	// Add single newline before char count
 	display[outPos++] = '\n';
 	
-	// Add char count on the 4th line
+	// Add char count on the final line
 	int n = sprintf_(display + outPos, "%u chars", length);
 	outPos += n;
 
 	display[outPos] = '\0';
 
-#if CW_ENCODER_DEBUG
+#if CW_MACRO_DEBUG
 	{
-		char buf[64];
+		char buf[128];
 		sprintf_(buf, "CW_FormatMacro result: outPos=%u lineCount=%u\r\n", outPos, lineCount);
 		UART_Send(buf, strlen(buf));
-		sprintf_(buf, "Display string: [%s]\r\n", display);
+		sprintf_(buf, "Display string len=%u: [%s]\r\n", strlen(display), display);
 		UART_Send(buf, strlen(buf));
 	}
 #endif
@@ -347,11 +405,6 @@ void CW_EncoderProcessElement(CW_ElementType_t element)
 				if (gCW_Recording && gCW_RecordLength < CW_MACRO_MAX_LEN) {
 					gCW_RecordBuffer[gCW_RecordLength++] = CW_MACRO_ENCODE(ch, s_encoder_space_pending);
 					gCW_RecordNewChar = true;
-					
-					// Auto-complete if we hit the limit
-					if (gCW_RecordLength >= CW_MACRO_MAX_LEN) {
-						CW_StopRecording();
-					}
 				}
 				// Add to TX display buffer when transmitting (not recording)
 				else if (!gCW_Recording) {
@@ -398,8 +451,19 @@ void CW_StopRecording(void)
 	if (!gCW_Recording)
 		return;
 	
+#if CW_MACRO_DEBUG
+	char buf[64];
+	sprintf_(buf, "CW_StopRecording: saving %u chars to macro %u\r\n", gCW_RecordLength, gCW_RecordMacroIndex);
+	UART_Send(buf, strlen(buf));
+#endif
+	
 	// Save the recorded macro
 	CW_SaveMacro(gCW_RecordMacroIndex, (const char *)gCW_RecordBuffer, gCW_RecordLength);
+	
+#if CW_MACRO_DEBUG
+	sprintf_(buf, "CW_StopRecording: save complete\r\n");
+	UART_Send(buf, strlen(buf));
+#endif
 	
 	gCW_Recording = false;
 	gCW_RecordNewChar = false;
@@ -464,64 +528,73 @@ uint8_t CW_GetRecordingDisplay(char *display, uint8_t maxChars)
 		return 0;
 	
 	uint8_t cursor_pos = 0;
-	uint8_t start_idx = 0;
-	
-	// Build display string from the end, working backwards to fit in maxChars
-	// Display width is limited (typically 16 chars for full screen width)
-	// We need to scroll when display would exceed ~9 chars to prevent wrapping
-	
 	uint8_t outPos = 0;
 	
-	// First pass: calculate how much will fit in maxChars
-	// Start from the end and work backwards
-	if (gCW_RecordLength > 0) {
-		// Calculate display length from the end
-		uint8_t test_pos = 0;
-		for (int i = gCW_RecordLength - 1; i >= 0 && test_pos < (maxChars - 2); i--) {
-			// Count space if needed
-			if (CW_MACRO_HAS_SPACE(gCW_RecordBuffer[i])) {
-				test_pos++;
-			}
-			test_pos++;  // The character itself
-			
-			// Stop scrolling if we fit in ~9 display positions
-			if (test_pos <= 9) {
-				start_idx = i;
-			} else {
-				break;
-			}
+	// Calculate total display positions (each space and each char = 1 position)
+	uint8_t total_positions = 0;
+	for (uint8_t i = 0; i < gCW_RecordLength; i++) {
+		if (CW_MACRO_HAS_SPACE(gCW_RecordBuffer[i])) {
+			total_positions++;  // Space position
 		}
+		total_positions++;  // Character position
 	}
 	
-	// Decode characters for display starting from start_idx
-	for (uint8_t i = start_idx; i < gCW_RecordLength && outPos < maxChars - 2; i++) {
-		// Add space if needed
+	// Calculate how many positions to skip from the left (scroll when > 9)
+	uint8_t skip_positions = 0;
+	if (total_positions > 9) {
+		skip_positions = total_positions - 9;
+	}
+	
+	// Build display string, skipping positions from the left
+	uint8_t position_count = 0;
+	for (uint8_t i = 0; i < gCW_RecordLength && outPos < maxChars - 2; i++) {
+		// Handle space before character
 		if (CW_MACRO_HAS_SPACE(gCW_RecordBuffer[i])) {
-			if (outPos < maxChars - 2) {
-				display[outPos++] = ' ';
+			if (position_count >= skip_positions) {
+				// This space position is visible
+				if (outPos < maxChars - 2) {
+					display[outPos++] = ' ';
+				}
 			}
+			position_count++;
 		}
 		
-		// Add character
-		char ch = CW_MACRO_GET_CHAR(gCW_RecordBuffer[i]);
-		if (outPos < maxChars - 2) {
-			display[outPos++] = ch;
+		// Handle character
+		if (position_count >= skip_positions) {
+			// This character position is visible
+			char ch = CW_MACRO_GET_CHAR(gCW_RecordBuffer[i]);
+			if (outPos < maxChars - 2) {
+				display[outPos++] = ch;
+			}
+		}
+		position_count++;
+	}
+	
+	// Add cursor placeholder if room, or space if buffer is full
+	if (outPos < maxChars - 1) {
+		if (gCW_RecordLength < CW_MACRO_MAX_LEN) {
+			display[outPos++] = '_';
+		} else {
+			display[outPos++] = ' ';  // Space to maintain alignment when full
 		}
 	}
 	
-	// Add cursor placeholder if room
-	if (outPos < maxChars - 1 && gCW_RecordLength < CW_MACRO_MAX_LEN) {
-		display[outPos++] = '_';
-	}
-	
-	display[outPos] = '\0';
-	
-	// Cursor position is at the underscore (end of string - 1)
+	// Cursor position is at the underscore (currently at outPos - 1)
 	if (outPos > 0 && display[outPos - 1] == '_') {
 		cursor_pos = outPos - 1;
 	} else {
 		cursor_pos = outPos;
 	}
+
+	// Pad with spaces up to 10 chars to prevent centering jitter
+	// Only pad if total content (before padding) is < 10 positions
+	if (total_positions < 10) {
+		while (outPos < 10 && outPos < maxChars - 1) {
+			display[outPos++] = ' ';
+		}
+	}
+	
+	display[outPos] = '\0';
 	
 	return cursor_pos;
 }

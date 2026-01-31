@@ -1777,9 +1777,10 @@ static void MENU_Key_EXIT(bool bKeyPressed, bool bKeyHeld)
     gBeepToPlay = BEEP_1KHZ_60MS_OPTIONAL;
 
 #ifdef ENABLE_CW_MODULATOR
-	// Handle exiting CW macro recording mode
+	// Handle exiting CW macro recording mode (discard without saving)
 	if (gCW_Recording) {
-		CW_StopRecording();
+		gCW_Recording = false;
+		gCW_RecordNewChar = false;
 		edit_index = -1;
 		gIsInSubMenu = false;
 		gRequestDisplayScreen = DISPLAY_MENU;

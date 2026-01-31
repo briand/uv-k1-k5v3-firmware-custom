@@ -1187,12 +1187,16 @@ void UI_DisplayMenu(void)
 					}
 					
 					// Show recording count on line 5 (not 6 which gets cut off)
-					sprintf(String, "REC %u/%u", gCW_RecordLength, CW_MACRO_MAX_LEN);
+					if (gCW_RecordLength >= CW_MACRO_MAX_LEN) {
+						sprintf(String, "FULL %u/%u", gCW_RecordLength, CW_MACRO_MAX_LEN);
+					} else {
+						sprintf(String, "REC %u/%u", gCW_RecordLength, CW_MACRO_MAX_LEN);
+					}
 					UI_PrintString(String, menu_item_x1, menu_item_x2, 5, 8);
 					
 					already_printed = true;
 				} else if (gSubMenuSelection == 0) {
-					// Show current macro (use 9 char width for 3 lines)
+					// Show current macro (use 9 char width for 4 lines = 36 chars)
 					if (len == 0) {
 						strcpy(String, "empty");
 					} else {
