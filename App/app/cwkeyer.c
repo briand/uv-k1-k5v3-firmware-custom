@@ -66,13 +66,13 @@ static CW_KeyerFSMState_t s_KeyerFSMState = CWK_STATE_IDLE;
 static uint16_t       s_dit_count  = 0;      // duration in timer ticks (16-bit)
 static uint16_t       s_dah_count  = 0;      // duration in timer ticks (16-bit)
 static uint16_t       s_gap_count  = 0;      // inter-element gap in ticks (1 dit)
+static uint16_t       s_ext_gap_count = 0;       // tick count when auto-char extension kicks in (16-bit)
 static uint16_t       s_char_gap_count = 0;  // inter-char gap in ticks (3 dits)
 static uint16_t       s_word_gap_count = 0;  // inter-word gap in ticks (7 dits)
 static uint16_t       s_last_count = 0;      // last TIMERBASE0_LOW_COUNT sample (16-bit)
 static uint16_t       s_elem_start_count = 0;// element start counter (16-bit)
 static bool           s_active_is_dit = false;
-static bool           s_pending_alternate = false; // alternate element queude
-static bool           s_reverse_keys = false; // normalized mapping flag
+static bool           s_pending_alternate = false; // alternate element queued
 static bool           s_last_dit = false, s_last_dah = false; // last sampled paddles
 static bool           s_last_handkey_ptt = false; // last PTT state for handkey mode
 
@@ -238,8 +238,8 @@ static bool CW_ReadGpioDeglitched(volatile uint32_t *gpio_data, uint8_t pin_bit,
     bool result = false;
     uint16_t reg = 0, reg2;
     unsigned int i, k;
-    uint32_t limit = heavy ? 18 : 8; // more samples for heavy de-noise
-    uint32_t goal = heavy ? 16 : 3;  // need this many stable samples
+    uint32_t limit = heavy ? 500 : 100; // more samples for heavy de-noise
+    uint32_t goal = heavy ? 300 : 60;  // need this many stable samples
     
     for (i = 0, k = 0, reg = 0; i < goal && k < limit; i++, k++) {
         SYSTICK_DelayUs(1);
@@ -261,6 +261,7 @@ static void CW_ReadPtt(bool *ptt_out)
 {
     *ptt_out = CW_ReadGpioDeglitched(&GPIOC->DATA, GPIOC_PIN_PTT, false);
 }
+
 // Read raw paddle inputs for a specific mode
 // Returns true if mode is valid, false otherwise
 static bool CW_ReadKeysForMode(uint8_t mode, bool *dit_out, bool *dah_out)
@@ -400,6 +401,7 @@ void CW_UpdateWPM()
     s_dit_count = dit_ticks;
     s_dah_count = 3U * dit_ticks;
     s_gap_count = dit_ticks; // inter-element gap = 1 dit
+    s_ext_gap_count = 3U * dit_ticks / 2U; // after 1.5 dits, hold char gap if key pressed
     s_char_gap_count = 3U * dit_ticks; // inter-char gap = 3 dits
     s_word_gap_count = 7U * dit_ticks; // inter-word gap = 7 dits
 
@@ -417,9 +419,7 @@ static void CW_KeyerInit()
     CW_UpdateWPM();
 
     // Load settings from gEeprom
-    // Check reversed flag
-    s_reverse_keys = (gEeprom.CW_KEY_INPUT & CW_KEY_FLAG_REVERSED);
-    
+
     // Configure port pins based on bit flags
     bool uses_port_ground = (gEeprom.CW_KEY_INPUT & CW_KEY_FLAG_PORT_GROUND);
     bool uses_port_ring = (gEeprom.CW_KEY_INPUT & CW_KEY_FLAG_PORT_RING);
@@ -429,7 +429,7 @@ static void CW_KeyerInit()
     bool uses_buttons = (gEeprom.CW_KEY_INPUT & CW_KEY_FLAG_BUTTONS);
     char buf[120];
     sprintf_(buf, "CW_Init: mode=0x%02X handkey=%d btns=%d pG=%d pR=%d rev=%d\r\n",
-             gEeprom.CW_KEY_INPUT, is_handkey, uses_buttons, uses_port_ground, uses_port_ring, s_reverse_keys);
+             gEeprom.CW_KEY_INPUT, is_handkey, uses_buttons, uses_port_ground, uses_port_ring, (gEeprom.CW_KEY_INPUT & CW_KEY_FLAG_REVERSED));
     UART_Send(buf, strlen(buf));
 #endif
     
@@ -631,6 +631,9 @@ CW_Action_t CW_HandleState(void)
     CW_Input in = {0};
 
     switch (s_KeyerFSMState) {
+    ///
+    ///  IDLE
+    ///
     case CWK_STATE_IDLE:
         // IDLE: Sample continuously for any key press
         CW_ReadKeys(&in);
@@ -660,9 +663,10 @@ CW_Action_t CW_HandleState(void)
         }
         break;
 
+    ///
+    ///  ACTIVE
+    ///
     case CWK_STATE_ACTIVE_ELEMENT:
-    {
-        // ACTIVE: Sample paddles during element for memory logic
         const uint16_t target = s_active_is_dit ? s_dit_count : s_dah_count;
         const uint16_t elapsed_elem = timer_jiffies_since(s_elem_start_count);
 
@@ -718,9 +722,11 @@ CW_Action_t CW_HandleState(void)
             // Carrier is on and should remain on during element
             action = CW_ACTION_CARRIER_HOLD_ON;
         }
-        break; 
-    }
+        break;
 
+    ///
+    ///   ELEMENT GAP
+    ///
     case CWK_STATE_INTER_ELEMENT_GAP: {
         const uint16_t elapsed_gap = timer_jiffies_since(s_elem_start_count);
         
@@ -730,7 +736,7 @@ CW_Action_t CW_HandleState(void)
             // keep doing sampling during gap for memory logic
             CW_ReadKeys(&in);
         
-            // Type A: Edge detection for opposite key throughout element AND gap
+            // Mode A style Edge detection for opposite key throughout element AND gap, but for both modes
             if (s_active_is_dit && in.dah_rise) {
                 s_pending_alternate = true;
             } else if (!s_active_is_dit && in.dit_rise) {
@@ -778,9 +784,9 @@ CW_Action_t CW_HandleState(void)
             } 
 
             s_pending_alternate = false;
-            s_elem_start_count = cur_count;
 
             if (have_next) {
+                s_elem_start_count = cur_count;  // start new count for the new element
                 s_KeyerFSMState = CWK_STATE_ACTIVE_ELEMENT;
                 s_active_is_dit = next_is_dit;
                 action = CW_ACTION_CARRIER_ON;				
@@ -792,47 +798,65 @@ CW_Action_t CW_HandleState(void)
 		break;
 	}
 
+    ///
+    ///    CHAR GAP
+    ///
 	case CWK_STATE_INTER_CHAR_GAP: {
-		// INTER_CHAR_GAP: Sample continuously for new input
 		const uint16_t elapsed_gap = timer_jiffies_since(s_elem_start_count);
-		
-		CW_ReadKeys(&in);
-		
-		// Check for new key input
-		if (in.dit || in.dah) {
-			s_active_is_dit = in.dit;  // dit wins
-			s_elem_start_count = cur_count;
-			s_KeyerFSMState = CWK_STATE_ACTIVE_ELEMENT;
 
-			action = CW_ACTION_CARRIER_ON;
-            // Emit element to encoder on state exit
-            CW_EncoderProcessElement(CW_ELEMENT_INTER_CHAR_SPACE);
-		} else if (elapsed_gap >= s_char_gap_count) {
-            // Emit element to encoder on state exit
-            CW_EncoderProcessElement(CW_ELEMENT_INTER_CHAR_SPACE);
-			// Transition to inter-word gap - carry over timing
-			s_KeyerFSMState = CWK_STATE_INTER_WORD_GAP;
+		if (elapsed_gap < s_char_gap_count) {  // until char gap complete
+
+            CW_ReadKeys(&in);
+            bool have_key = (in.dit || in.dah);
+
+            if (elapsed_gap < s_ext_gap_count) {
+			    // Early period: immediate send, same character continues
+                if (have_key) {
+                    s_active_is_dit = (!in.dah || !s_active_is_dit);  // prefer dah if both pressed and we just sent dit
+                    s_elem_start_count = cur_count;
+                    s_KeyerFSMState = CWK_STATE_ACTIVE_ELEMENT;
+                    action = CW_ACTION_CARRIER_ON;
+                }
+		    } else {
+			    // Hold period (ext_gap <= elapsed < char_gap): queue key but wait for char_gap deadline
+			    if (have_key && !s_pending_alternate) {
+				    s_pending_alternate = true;
+				    s_active_is_dit = in.dit;
+			    }
+            }
+
+		} else {
+			// Char gap complete - character boundary reached
+			CW_EncoderProcessElement(CW_ELEMENT_INTER_CHAR_SPACE);
+			if (s_pending_alternate) {
+				// Send queued key now because the gap is over
+				s_pending_alternate = false;
+				s_elem_start_count = cur_count;
+				s_KeyerFSMState = CWK_STATE_ACTIVE_ELEMENT;
+				action = CW_ACTION_CARRIER_ON;
+			} else {
+				s_KeyerFSMState = CWK_STATE_INTER_WORD_GAP;
+			}
 		}
 		break;
 	}
 
+    ///
+    ///   WORD GAP
+    ///
 	case CWK_STATE_INTER_WORD_GAP: {
-		// INTER_WORD_GAP: Sample continuously for new input
+		// Post char-gap: monitor and send immediately, or goto idle at word_gap
 		const uint16_t elapsed_gap = timer_jiffies_since(s_elem_start_count);
-		
 		CW_ReadKeys(&in);
 		
-		// Check for new key input
 		if (in.dit || in.dah) {
 			s_active_is_dit = in.dit;
 			s_elem_start_count = cur_count;
 			s_KeyerFSMState = CWK_STATE_ACTIVE_ELEMENT;
-            action = CW_ACTION_CARRIER_ON;
-            
+			action = CW_ACTION_CARRIER_ON;
 		} else if (elapsed_gap >= s_word_gap_count) {
-			// Long silence - go back to idle
+			CW_EncoderProcessElement(CW_ELEMENT_INTER_WORD_SPACE);
 			s_KeyerFSMState = CWK_STATE_IDLE;
-            CW_EncoderProcessElement(CW_ELEMENT_INTER_WORD_SPACE);
 		}
 		break;
 	}

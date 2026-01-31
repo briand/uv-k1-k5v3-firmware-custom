@@ -238,92 +238,36 @@ uint8_t CW_FormatMacroDisplay(uint8_t macroIndex, char *display, uint8_t maxChar
 	if (display == NULL || maxChars == 0)
 		return 0;
 	
-	uint8_t length = CW_GetMacroLength(macroIndex);
-	if (length == 0) {
-	    strcpy(display, "empty");
+	// Read first 10 bytes (length + up to 9 chars)
+	uint8_t data[10];
+	EEPROM_ReadBuffer(MACRO_ADDRS[macroIndex], data, 10);
+	
+	uint8_t length = data[0];
+	if (length == 0xFF || length == 0) {
+		strcpy(display, "empty");
 		return 0;
 	}
 	
-	// Read the macro data (skip the length byte)
-	uint8_t data[CW_MACRO_MAX_LEN];
-	EEPROM_ReadBuffer(MACRO_ADDRS[macroIndex] + 1, data, length < CW_MACRO_MAX_LEN ? length : CW_MACRO_MAX_LEN);
-	
-#if CW_MACRO_DEBUG
-	{
-		char buf[64];
-		sprintf_(buf, "CW_FormatMacroDisplay: length=%u maxChars=%u\r\n", length, maxChars);
-		UART_Send(buf, strlen(buf));
-		for (uint8_t i = 0; i < length && i < 15; i++) {
-			sprintf_(buf, "  data[%u]=0x%02x '%c'%s\r\n", i, data[i], 
-				CW_MACRO_GET_CHAR(data[i]), CW_MACRO_HAS_SPACE(data[i]) ? " +SPC" : "");
-			UART_Send(buf, strlen(buf));
-		}
-	}
-#endif
-	
-	// Decode into display buffer with spaces, up to 4 lines
+	// Copy up to 9 display positions (spaces + chars)
 	uint8_t outPos = 0;
-	uint8_t linePos = 0;
-	uint8_t lineCount = 0;
+	uint8_t dispCount = 0;
 	
-	for (uint8_t i = 0; i < length; i++) {
-		// Stop if we've filled 4 lines
-		if (lineCount >= 4)
-			break;
-		
-#if CW_MACRO_DEBUG
-		if (i < 10) {
-			char buf[64];
-			sprintf_(buf, "  i=%u lineCount=%u linePos=%u outPos=%u\r\n", i, lineCount, linePos, outPos);
-			UART_Send(buf, strlen(buf));
-		}
-#endif
-		
-		// Calculate how many positions this entry needs (space + char)
-		uint8_t positions_needed = 1;  // Always need 1 for the character
-		if (CW_MACRO_HAS_SPACE(data[i])) {
-			positions_needed++;  // +1 for the space before it
-		}
-		
-		// Check if we need a new line to fit this entry
-		if (linePos + positions_needed > maxChars && linePos > 0) {
-			// Start new line
-			display[outPos++] = '\n';
-			linePos = 0;
-			lineCount++;
-		}
-		
+	for (uint8_t i = 1; i <= length && i < 10 && dispCount < 9; i++) {
 		// Add space if present
-		if (CW_MACRO_HAS_SPACE(data[i])) {
+		if (CW_MACRO_HAS_SPACE(data[i]) && dispCount < 9) {
 			display[outPos++] = ' ';
-			linePos++;
+			dispCount++;
 		}
-		
-		// Add the character
-		char ch = CW_MACRO_GET_CHAR(data[i]);
-		display[outPos++] = ch;
-		linePos++;
+		// Add character if room
+		if (dispCount < 9) {
+			display[outPos++] = CW_MACRO_GET_CHAR(data[i]);
+			dispCount++;
+		}
 	}
 	
-	// Add single newline before char count
-	display[outPos++] = '\n';
+	// Add newline and char count
+	outPos += sprintf_(display + outPos, "\n%u chars", length);
 	
-	// Add char count on the final line
-	int n = sprintf_(display + outPos, "%u chars", length);
-	outPos += n;
-
-	display[outPos] = '\0';
-
-#if CW_MACRO_DEBUG
-	{
-		char buf[128];
-		sprintf_(buf, "CW_FormatMacro result: outPos=%u lineCount=%u\r\n", outPos, lineCount);
-		UART_Send(buf, strlen(buf));
-		sprintf_(buf, "Display string len=%u: [%s]\r\n", strlen(display), display);
-		UART_Send(buf, strlen(buf));
-	}
-#endif
-
 	return outPos;
 }
 
