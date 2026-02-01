@@ -1107,8 +1107,15 @@ void MENU_AcceptSetting(void)
 				// Check if we're in CW mode (playback requires CW mode active)
 				if (gTxVfo->Modulation != MODULATION_CW) {
 					gCwNoKeyerError = true;
+					gSubMenuSelection = 0; // Reset selection to "show"
 					gRequestDisplayScreen = DISPLAY_MENU;
 					return; // Can't play when not in CW mode
+				}
+				if (CW_GetMacroLength(macroIdx) == 0) {
+					// No macro recorded
+					gSubMenuSelection = 0; // Reset selection to "show"
+					gRequestDisplayScreen = DISPLAY_MENU;
+					return; // Don't attempt playback
 				}
 				gCwNoKeyerError = false;
 				CW_StartMacroPlayback(macroIdx);
@@ -1799,6 +1806,7 @@ static void MENU_Key_EXIT(bool bKeyPressed, bool bKeyHeld)
 		gCW_RecordNewChar = false;
 		edit_index = -1;
 		gIsInSubMenu = false;
+		gSubMenuSelection = 0;
 		gRequestDisplayScreen = DISPLAY_MENU;
 		return;
 	}

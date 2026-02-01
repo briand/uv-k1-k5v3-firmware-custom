@@ -9,7 +9,7 @@ ENABLE_AIRCOPY                ?= 0
 ENABLE_FMRADIO                ?= 0
 ENABLE_NOAA                   ?= 0
 ENABLE_VOICE                  ?= 0
-ENABLE_VOX                    ?= 1
+ENABLE_VOX                    ?= 0
 ENABLE_ALARM                  ?= 0
 ENABLE_TX1750                 ?= 0
 ENABLE_PWRON_PASSWORD         ?= 0
@@ -18,7 +18,7 @@ ENABLE_FLASHLIGHT             ?= 1
 
 # ---- CUSTOM MODS ----
 ENABLE_BIG_FREQ               ?= 1
-ENABLE_SMALL_BOLD             ?= 1
+ENABLE_SMALL_BOLD             ?= 0
 ENABLE_CUSTOM_MENU_LAYOUT     ?= 1
 ENABLE_KEEP_MEM_NAME          ?= 1
 ENABLE_WIDE_RX                ?= 1
@@ -51,7 +51,7 @@ ENABLE_UART_RW_BK_REGS        ?= 1
 
 # ---- COMPILER/LINKER OPTIONS ----
 ENABLE_CLANG                  ?= 0
-ENABLE_SWD                    ?= 0
+ENABLE_SWD                    ?= 1
 ENABLE_OVERLAY                ?= 0
 ENABLE_LTO                    ?= 1
 
@@ -72,6 +72,12 @@ endif
 ifeq ($(ENABLE_CW_MODULATOR),1)
 	# Auto-enable extra filter when CW is enabled
 	ENABLE_EXTRA_FILTER := 1
+endif
+
+ifeq ($(ENABLE_CW_MODULATOR),1)
+ifeq ($(ENABLE_DTMF_CALLING),1)
+$(error ENABLE_CW_MODULATOR and ENABLE_DTMF_CALLING cannot both be enabled at the same time)
+endif
 endif
 
 BSP_DEFINITIONS := $(wildcard hardware/*/*.def)
@@ -118,6 +124,7 @@ ifeq ($(ENABLE_CW_MODULATOR),1)
 	# CW modulator requires millis timer
 	ENABLE_MILLIS := 1
     OBJS += app/cwkeyer.o
+    OBJS += app/cwhardware.o
     OBJS += app/cwmacro.o
 endif
 ifeq ($(ENABLE_MILLIS),1)
@@ -230,7 +237,7 @@ endif
 ifeq (, $(VERSION_STRING))
 	VERSION_STRING := NOGIT
 endif
-#VERSION_STRING := 230930b
+VERSION_STRING := beta2
 
 
 ASFLAGS = -c -mcpu=cortex-m0
