@@ -48,14 +48,14 @@ void TIM0_INIT(void)
 
 // Returns timer count in 100µs ticks (10kHz)
 // WARNING: Rolls over every ~6.5 seconds (16-bit counter)
-inline uint16_t timer_jiffies(void)
+uint16_t timer_jiffies(void)
 {
     return (uint16_t)TIMERBASE0_LOW_CNT;
 }
 
 // Returns milliseconds since boot
 // WARNING: Rolls over every ~6.5 seconds (16-bit counter at 10kHz = 6553ms)
-inline uint16_t timer_millis(void)
+uint16_t timer_millis(void)
 {
     // Read low counter and convert to milliseconds: 10 ticks = 1ms
     return (uint16_t)(TIMERBASE0_LOW_CNT / 10);

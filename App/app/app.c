@@ -1025,7 +1025,11 @@ void APP_Update(void)
 // 	static uint32_t local_counter = 0;
 	if (gTxVfo->Modulation == MODULATION_CW) 
 	{
-		CW_Action_t action = CW_HandleState();
+		CW_Action_t action;
+		if (CW_IsMacroPlaybackActive())
+			action = CW_PlaybackHandleState();
+		else
+			action = CW_HandleState();
 		
 		// Don't transmit RF if we're recording a macro
 		if (gCW_Recording) {
@@ -1097,14 +1101,7 @@ void APP_Update(void)
 			break;
 		}
 	}
-	// else 
-	// {
-	// 	if(++local_counter% 1000 == 0)
-	// 	{
 
-	// 		UART_Send("Not in CW mode\r\n", 17);
-	// 	}
-	// }
 #endif
 
 #ifdef ENABLE_FMRADIO
@@ -1513,6 +1510,8 @@ void APP_TimeSlice10ms(void)
 		gCW_RecordNewChar = false;
 		gUpdateDisplay = true;
 	}
+	// Update playback indicator
+	CW_PlaybackIndicatorDeadline();
 #endif
 
     if (gReducedService)

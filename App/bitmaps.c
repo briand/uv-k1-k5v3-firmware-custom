@@ -270,3 +270,15 @@ const uint8_t BITMAP_CurrentIndicator[8] = {
     0x18
 };
 #endif
+
+/* Small play glyph (8x8): right-facing triangle (full 8 columns) */
+const uint8_t BITMAP_Play[8] = {
+	0b00000000,
+	0b00011000,
+	0b00011000,
+	0b00011000,	
+	0b10011001,
+	0b01011010,
+	0b00111100,
+	0b00011000,
+};

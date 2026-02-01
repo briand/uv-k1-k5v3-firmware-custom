@@ -435,7 +435,7 @@ int MENU_GetLimits(uint8_t menu_id, int32_t *pMin, int32_t *pMax)
 		case MENU_CW_MSG1:
 		case MENU_CW_MSG2:
 			*pMin = 0;
-			*pMax = 1;  // 0 = show macro, 1 = record new
+			*pMax = 2;  // show, record, play
 			break;
 #endif
 #ifdef ENABLE_FEAT_F4HWN_SLEEP
@@ -1087,6 +1087,7 @@ void MENU_AcceptSetting(void)
 
 		case MENU_CW_MSG1:
 		case MENU_CW_MSG2:
+			uint8_t macroIdx = (UI_MENU_GetCurrentMenuId() == MENU_CW_MSG1) ? 0 : 1;
 			// If gSubMenuSelection == 1, user selected "record new"
 			if (gSubMenuSelection == 1) {
 				// Check if we're in CW mode
@@ -1098,9 +1099,24 @@ void MENU_AcceptSetting(void)
 				}
 				// Enter recording mode
 				gCwNoKeyerError = false;
-				uint8_t macroIdx = (UI_MENU_GetCurrentMenuId() == MENU_CW_MSG1) ? 0 : 1;
 				CW_StartRecording(macroIdx);
 				edit_index = 0;  // Use edit_index >= 0 to signal we're in recording mode
+			}
+			// If gSubMenuSelection == 2, user selected "play"
+			else if (gSubMenuSelection == 2) {
+				// Check if we're in CW mode (playback requires CW mode active)
+				if (gTxVfo->Modulation != MODULATION_CW) {
+					gCwNoKeyerError = true;
+					gRequestDisplayScreen = DISPLAY_MENU;
+					return; // Can't play when not in CW mode
+				}
+				gCwNoKeyerError = false;
+				CW_StartMacroPlayback(macroIdx);
+
+				// This is the magic incantation so it won't re-open the submenu after accepting
+				gRequestDisplayScreen = DISPLAY_MAIN;
+				gPttWasReleased = true;
+				return;
 			}
 			break;
 #endif

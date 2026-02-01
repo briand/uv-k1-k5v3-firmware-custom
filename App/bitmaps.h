@@ -40,6 +40,7 @@ extern const uint8_t BITMAP_VFO_Default[7];
 extern const uint8_t BITMAP_VFO_NotDefault[7];
 extern const uint8_t BITMAP_VFO_Lock[7];
 extern const uint8_t BITMAP_PowerUser[3];
+extern const uint8_t BITMAP_Play[8];  /* small right-facing triangle (8x8) */
 extern const uint8_t BITMAP_compand[6];
 
 extern const uint8_t BITMAP_NOAA[12];

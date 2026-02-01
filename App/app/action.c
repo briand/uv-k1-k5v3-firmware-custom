@@ -45,6 +45,10 @@
     #include "app/rega.h"
 #endif
 
+#ifdef ENABLE_CW_MODULATOR
+#include "app/cwkeyer.h"
+#endif
+
 #if defined(ENABLE_FMRADIO)
 static void ACTION_Scan_FM(bool bRestart);
 #endif
@@ -56,6 +60,11 @@ inline static void ACTION_1750() { ACTION_AlarmOr1750(true); };
 #endif
 
 inline static void ACTION_ScanRestart() { ACTION_Scan(true); };
+
+#ifdef ENABLE_CW_MODULATOR
+static void ACTION_PlayCWMsg1(void);
+static void ACTION_PlayCWMsg2(void);
+#endif
 
 void (*action_opt_table[])(void) = {
     [ACTION_OPT_NONE] = &FUNCTION_NOP,
@@ -101,6 +110,14 @@ void (*action_opt_table[])(void) = {
     [ACTION_OPT_BLMIN_TMP_OFF] = &ACTION_BlminTmpOff,
 #else
     [ACTION_OPT_BLMIN_TMP_OFF] = &FUNCTION_NOP,
+#endif
+
+#ifdef ENABLE_CW_MODULATOR
+	[ACTION_OPT_PLAY_CWMSG1] = &ACTION_PlayCWMsg1,
+	[ACTION_OPT_PLAY_CWMSG2] = &ACTION_PlayCWMsg2,
+#else
+	[ACTION_OPT_PLAY_CWMSG1] = &FUNCTION_NOP,
+	[ACTION_OPT_PLAY_CWMSG2] = &FUNCTION_NOP,
 #endif
 
 #ifdef ENABLE_FEAT_F4HWN
@@ -389,7 +406,6 @@ void ACTION_FM(void)
         gRequestDisplayScreen = DISPLAY_FM;
     }
 }
-
 static void ACTION_Scan_FM(bool bRestart)
 {
     if (FUNCTION_IsRx())
@@ -430,6 +446,18 @@ static void ACTION_Scan_FM(bool bRestart)
 
 }
 
+#endif
+
+#ifdef ENABLE_CW_MODULATOR
+static void ACTION_PlayCWMsg1(void)
+{
+	CW_StartMacroPlayback(0);
+}
+
+static void ACTION_PlayCWMsg2(void)
+{
+	CW_StartMacroPlayback(1);
+}
 #endif
 
 

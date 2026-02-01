@@ -93,11 +93,21 @@ bool CW_ValidateChar(char ch)
 	// Valid characters: A-Z, 0-9, '/', '?'
 	if (ch >= 'A' && ch <= 'Z')
 		return true;
-	if (ch >= '0' && ch <= '9')
+	if (ch >= '/' && ch <= '9')  // '/' to '9' are contiguous in ASCII
 		return true;
-	if (ch == '/' || ch == '?')
+	if (ch == '?')
 		return true;
 	return false;
+}
+
+uint8_t compute_macro_checksum(const uint8_t *block, uint8_t length)
+{
+	uint8_t sum = 0;
+	// Sum payload bytes only (block[1] .. block[length])
+	for (uint8_t i = 1; i <= length; i++) {
+		sum += block[i];
+	}
+	return sum;
 }
 
 uint8_t CW_GetMacroLength(uint8_t macroIndex)
@@ -105,21 +115,36 @@ uint8_t CW_GetMacroLength(uint8_t macroIndex)
 	if (macroIndex >= CW_MACRO_COUNT)
 		return 0;
 	
-	uint8_t length;
-	EEPROM_ReadBuffer(MACRO_ADDRS[macroIndex], &length, 1);
+	uint8_t raw_len;
+	EEPROM_ReadBuffer(MACRO_ADDRS[macroIndex], &raw_len, 1);
 
 #if CW_MACRO_DEBUG
 	{
 		char buf[64];
-		sprintf_(buf, "CW_GetMacroLength: idx=%u raw_len=0x%02x\r\n", macroIndex, length);
+		sprintf_(buf, "CW_GetMacroLength: idx=%u raw_len=0x%02x\r\n", macroIndex, raw_len);
 		UART_Send(buf, strlen(buf));
 	}
 #endif
-	
-	// Check if length is valid (0xFF = empty)
-	if (length == 0xFF || length > CW_MACRO_MAX_LEN)
+
+	// 0xFF = empty block
+	if (raw_len == 0xFF)
 		return 0;
-	
+
+	// Check signature bit (high bit set indicates a valid macro)
+	if ((raw_len & CW_MACRO_SIG) == 0)
+		return 0;
+
+	uint8_t length = raw_len & ~CW_MACRO_SIG;
+	if (length == 0 || length > CW_MACRO_MAX_LEN)
+		return 0;
+
+	// Validate checksum (read entire block including checksum byte)
+	uint8_t block[CW_MACRO_BLOCK_SIZE];
+	EEPROM_ReadBuffer(MACRO_ADDRS[macroIndex], block, CW_MACRO_BLOCK_SIZE);
+	uint8_t checksum = block[CW_MACRO_CHECKSUM_OFFSET];
+	if (checksum != compute_macro_checksum(block, length))
+		return 0;
+
 	return length;
 }
 
@@ -134,18 +159,18 @@ uint8_t CW_LoadMacro(uint8_t macroIndex, char *buffer, uint8_t bufferSize)
 		return 0;
 	}
 	
-	// Read the macro data (skip the length byte)
-	uint8_t data[CW_MACRO_MAX_LEN];
-	EEPROM_ReadBuffer(MACRO_ADDRS[macroIndex] + 1, data, length < CW_MACRO_MAX_LEN ? length : CW_MACRO_MAX_LEN);
-	
+	// Read the macro data block (length + payload + checksum)
+	uint8_t block[CW_MACRO_BLOCK_SIZE];
+	EEPROM_ReadBuffer(MACRO_ADDRS[macroIndex], block, CW_MACRO_BLOCK_SIZE);
+
 #if CW_MACRO_DEBUG
 	{
 		char buf[64];
-		sprintf_(buf, "CW_LoadMacro: read %u bytes from EEPROM\r\n", length);
+		sprintf_(buf, "CW_LoadMacro: read %u bytes from EEPROM (payload length=%u)\r\n", CW_MACRO_BLOCK_SIZE, length);
 		UART_Send(buf, strlen(buf));
 		for (uint8_t i = 0; i < length && i < 10; i++) {
-			sprintf_(buf, "  [%u]=0x%02x '%c'%s\r\n", i, data[i], 
-				CW_MACRO_GET_CHAR(data[i]), CW_MACRO_HAS_SPACE(data[i]) ? " +SPC" : "");
+			sprintf_(buf, "  [%u]=0x%02x '%c'%s\r\n", i, block[i+1], 
+				CW_MACRO_GET_CHAR(block[i+1]), CW_MACRO_HAS_SPACE(block[i+1]) ? " +SPC" : "");
 			UART_Send(buf, strlen(buf));
 		}
 	}
@@ -155,14 +180,14 @@ uint8_t CW_LoadMacro(uint8_t macroIndex, char *buffer, uint8_t bufferSize)
 	uint8_t outPos = 0;
 	for (uint8_t i = 0; i < length && outPos < bufferSize - 1; i++) {
 		// Check if space precedes this character
-		if (CW_MACRO_HAS_SPACE(data[i])) {
+		if (CW_MACRO_HAS_SPACE(block[i+1])) {
 			if (outPos < bufferSize - 1) {
 				buffer[outPos++] = ' ';
 			}
 		}
 		
 		// Get the character
-		char ch = CW_MACRO_GET_CHAR(data[i]);
+		char ch = CW_MACRO_GET_CHAR(block[i+1]);
 		if (outPos < bufferSize - 1) {
 			buffer[outPos++] = ch;
 		}
@@ -199,19 +224,21 @@ void CW_SaveMacro(uint8_t macroIndex, const char *buffer, uint8_t length)
 	}
 #endif
 
-	// Prepare data to write (40 bytes total)
-	uint8_t data[40];
+	// Prepare data to write (CW_MACRO_BLOCK_SIZE bytes total)
+	uint8_t data[CW_MACRO_BLOCK_SIZE];
 	memset(data, 0xFF, sizeof(data));
 	
-	// First byte is the character count (or 0xFF for empty)
-	data[0] = (length == 0) ? 0xFF : length;
+	// First byte is the character count with signature bit (or 0xFF for empty)
+	data[0] = (length == 0) ? 0xFF : ((length & ~CW_MACRO_SIG) | CW_MACRO_SIG);
 	
-	// Copy encoded characters from buffer
-	// Buffer contains already-encoded bytes (char with bit 7 set for space)
+	// Copy encoded characters from buffer (payload up to CW_MACRO_MAX_LEN)
 	for (uint8_t i = 0; i < length; i++) {
 		data[i + 1] = buffer[i];
 	}
-	
+
+	// Compute and store checksum in the extra byte after payload
+	data[CW_MACRO_CHECKSUM_OFFSET] = compute_macro_checksum(data, length);
+
 #if CW_MACRO_DEBUG
 	{
 		char buf[64];
@@ -225,10 +252,10 @@ void CW_SaveMacro(uint8_t macroIndex, const char *buffer, uint8_t length)
 		}
 	}
 #endif
-	
+
 	// Write entire 40-byte block to EEPROM in 8-byte chunks
 	// EEPROM_WriteBuffer only writes 8 bytes at a time
-	for (uint8_t i = 0; i < 40; i += 8) {
+	for (uint8_t i = 0; i < CW_MACRO_BLOCK_SIZE; i += 8) {
 		EEPROM_WriteBuffer(MACRO_ADDRS[macroIndex] + i, data + i);
 	}
 }
@@ -238,21 +265,22 @@ uint8_t CW_FormatMacroDisplay(uint8_t macroIndex, char *display, uint8_t maxChar
 	if (display == NULL || maxChars == 0)
 		return 0;
 	
-	// Read first 10 bytes (length + up to 9 chars)
-	uint8_t data[10];
-	EEPROM_ReadBuffer(MACRO_ADDRS[macroIndex], data, 10);
-	
-	uint8_t length = data[0];
-	if (length == 0xFF || length == 0) {
+	// Use CW_GetMacroLength to validate signature + checksum
+	uint8_t length = CW_GetMacroLength(macroIndex);
+	if (length == 0) {
 		strcpy(display, "empty");
 		return 0;
 	}
-	
+
+	// Read first up to 9 encoded bytes (start after length byte)
+	uint8_t data[10];
+	EEPROM_ReadBuffer(MACRO_ADDRS[macroIndex] + 1, data, (length < 9) ? (length) : 9);
+
 	// Copy up to 9 display positions (spaces + chars)
 	uint8_t outPos = 0;
 	uint8_t dispCount = 0;
-	
-	for (uint8_t i = 1; i <= length && i < 10 && dispCount < 9; i++) {
+
+	for (uint8_t i = 0; i < length && i < 9 && dispCount < 9; i++) {
 		// Add space if present
 		if (CW_MACRO_HAS_SPACE(data[i]) && dispCount < 9) {
 			display[outPos++] = ' ';
@@ -264,10 +292,10 @@ uint8_t CW_FormatMacroDisplay(uint8_t macroIndex, char *display, uint8_t maxChar
 			dispCount++;
 		}
 	}
-	
+
 	// Add newline and char count
 	outPos += sprintf_(display + outPos, "\n%u chars", length);
-	
+
 	return outPos;
 }
 
@@ -284,6 +312,22 @@ static char CW_DecodePattern(uint8_t pattern, uint8_t length)
 	}
 	
 	return 0;  // Unknown pattern
+}
+
+// Playback helper: lookup pattern/length for a character
+bool CW_GetMorseForChar(char ch, uint8_t *pattern, uint8_t *length)
+{
+	if (pattern == NULL || length == NULL)
+		return false;
+
+	for (unsigned int i = 0; i < MORSE_TABLE_SIZE; i++) {
+		if (MORSE_TABLE[i].ch == ch) {
+			*pattern = MORSE_TABLE[i].pattern;
+			*length = MORSE_TABLE[i].length;
+			return true;
+		}
+	}
+	return false;
 }
 
 void CW_EncoderProcessElement(CW_ElementType_t element)

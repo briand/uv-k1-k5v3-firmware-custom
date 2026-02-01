@@ -28,4 +28,18 @@ void CW_KeyerReconfigure(void);
 // new_mode: The CW_KeyInputType_t mode to validate
 bool CW_CheckKeyerInputs(uint8_t new_mode);
 
+// Macro playback API
+// Start playback of macro (0 or 1). Sets playback active flag and loads macro.
+void CW_StartMacroPlayback(uint8_t macroIndex);
+
+// Query whether playback is active
+bool CW_IsMacroPlaybackActive(void);
+
+// Periodic handler for playback FSM - returns CW_Action_t (carrier on/off/hold)
+CW_Action_t CW_PlaybackHandleState(void);
+
+// Periodic deadline handler to refresh CW playback UI indicator (blinker).
+// Call from a periodic context (e.g., APP_TimeSlice10ms). Uses timer_jiffies/millis.
+void CW_PlaybackIndicatorDeadline(void);
+
 #endif // APP_CWKEYER_H

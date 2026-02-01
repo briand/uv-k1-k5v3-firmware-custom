@@ -10,6 +10,7 @@
 #include "app/cwmacro.h"
 #include "audio.h"
 #include "settings.h"
+#include "misc.h"
 #include "bsp/dp32g030/dma.h"
 #include "bsp/dp32g030/timer.h"
 #include "bsp/dp32g030/gpio.h"
@@ -24,14 +25,13 @@
 #include "driver/keyboard.h"
 #include "driver/backlight.h"
 #include "ui/welcome.h"
-#include "external/printf/printf.h"
 
 // Debug logging control - set to 1 to enable UART debug output
 #define CW_KEYER_DEBUG 0
 
 // Debug: log when a dit is created while only dah is pressed
 #ifndef CW_KEYER_DEBUG_DAH_SEND
-#define CW_KEYER_DEBUG_DAH_SEND 1
+#define CW_KEYER_DEBUG_DAH_SEND 0
 #endif
 
 // Timer scale: 10 kHz tick → 100 µs per tick
@@ -64,6 +64,27 @@ static bool           s_active_is_dit = false;
 static bool           s_pending_alternate = false; // alternate element queued
 /* last sampled paddles moved to app/cwhardware.c */
 static bool           s_last_handkey_ptt = false; // last PTT state for handkey mode
+
+// Macro playback state
+static bool s_playback_active = false;
+static uint8_t s_playback_macro_index = 0;
+static char s_playback_buf[CW_MACRO_MAX_LEN * 2 + 1]; // decoded with spaces inserted
+static uint16_t s_playback_buf_len = 0; // strlen of the buffer
+static uint16_t s_playback_pos = 0; // index into playback buffer
+static uint8_t s_play_char_pattern = 0; // current char morse pattern (LSB-first)
+static uint8_t s_play_char_len = 0; // number of elements in current char
+static uint8_t s_play_elem_index = 0; // current element index within char
+
+// Playback FSM states
+typedef enum {
+    PB_STATE_IDLE = 0,
+    PB_STATE_ACTIVE_ELEMENT,
+    PB_STATE_INTER_ELEMENT_GAP,
+    PB_STATE_INTER_CHAR_GAP,
+    PB_STATE_INTER_WORD_GAP,
+} PB_State_t;
+static PB_State_t s_pb_state = PB_STATE_IDLE;
+static bool s_play_space_pending = false;  // indicates next char should be shown with a leading space
 
 // Reconfigure requested (apply at idle or after gap)
 static volatile bool s_cfg_dirty = true;
@@ -130,6 +151,191 @@ void CW_KeyerReconfigure(void)
 #if CW_KEYER_DEBUG
     UART_Send("keyer marked for reconfig\r\n", 27);
 #endif
+}
+
+// --- Macro playback API implementation ---
+void CW_StartMacroPlayback(uint8_t macroIndex)
+{	
+    // Do nothing if recording or playback already in progress
+    if (gCW_Recording || CW_IsMacroPlaybackActive()) return;
+
+    // Load the macro into a local buffer (decoded with spaces)
+    memset(s_playback_buf, 0, sizeof(s_playback_buf));
+    CW_LoadMacro(macroIndex, s_playback_buf, sizeof(s_playback_buf));
+    s_playback_buf_len = (uint16_t)strlen(s_playback_buf);
+    s_playback_pos = 0;
+    s_playback_macro_index = macroIndex;
+    s_play_elem_index = 0;
+    s_play_char_len = 0;
+    s_play_char_pattern = 0;
+
+    // Clear TX display and prime the playback FSM to start immediately
+    CW_ClearTxDisplay();
+    s_play_space_pending = false;
+    s_pb_state = PB_STATE_INTER_CHAR_GAP;
+    s_elem_start_count = (uint16_t)TIMERBASE0_LOW_CNT;
+    s_playback_active = (s_playback_buf_len > 0);
+
+#if CW_KEYER_DEBUG
+    if (s_playback_active) {
+        char buf[80];
+        sprintf_(buf, "Playback started: idx=%u buf='%s'\r\n", macroIndex, s_playback_buf);
+        UART_Send(buf, strlen(buf));
+    }
+#endif
+}
+
+bool CW_IsMacroPlaybackActive(void)
+{
+    return s_playback_active;
+}
+
+// Stop playback immediately
+static void CW_StopPlayback(void)
+{
+    s_playback_active = false;
+    s_pb_state = PB_STATE_IDLE;
+    s_playback_buf_len = 0;
+    s_playback_pos = 0;
+}
+
+// Playback handler - returns CW_Action_t similar to CW_HandleState
+CW_Action_t CW_PlaybackHandleState(void)
+{
+    if (!s_playback_active) return CW_ACTION_NONE;
+
+    const uint16_t cur_count = (uint16_t)TIMERBASE0_LOW_CNT;
+    CW_Input in = {0};
+
+    // If user hits a paddle during playback, stop playback entirely
+    CW_ReadKeys(&in);
+    if (in.dit || in.dah) {
+        CW_StopPlayback();
+        return CW_ACTION_NONE;
+    }
+
+    switch (s_pb_state) {
+    case PB_STATE_ACTIVE_ELEMENT: {
+        const uint16_t target = s_active_is_dit ? s_dit_count : s_dah_count;
+        const uint16_t elapsed = timer_jiffies_since(s_elem_start_count);
+        if (elapsed < target) {
+            return CW_ACTION_CARRIER_HOLD_ON;
+        } else {
+            // End element
+            s_elem_start_count = cur_count;
+            s_pb_state = PB_STATE_INTER_ELEMENT_GAP;
+            return CW_ACTION_CARRIER_OFF;
+        }
+        break;
+    }
+
+    case PB_STATE_INTER_ELEMENT_GAP: {
+        const uint16_t elapsed = timer_jiffies_since(s_elem_start_count);
+        if (elapsed >= s_gap_count) {
+            // Advance to next element in current char
+            s_play_elem_index++;
+            if (s_play_elem_index < s_play_char_len) {
+                // Start next element
+                bool is_dit = (((s_play_char_pattern >> s_play_elem_index) & 1) == 0);
+                s_active_is_dit = is_dit;
+                s_elem_start_count = cur_count;
+                s_pb_state = PB_STATE_ACTIVE_ELEMENT;
+                return CW_ACTION_CARRIER_ON;
+            } else {
+                // Char complete - go to char gap
+                s_pb_state = PB_STATE_INTER_CHAR_GAP;
+                s_elem_start_count = cur_count;
+                return CW_ACTION_NONE;
+            }
+        }
+        return CW_ACTION_NONE;
+        break;
+    }
+
+    case PB_STATE_INTER_CHAR_GAP: {
+        const uint16_t elapsed = timer_jiffies_since(s_elem_start_count);
+        if (elapsed < s_char_gap_count) {
+            return CW_ACTION_NONE;
+        }
+        // Move to next character (if any)
+        if (s_playback_pos >= s_playback_buf_len) {
+            // Done
+            CW_StopPlayback();
+            return CW_ACTION_NONE;
+        }
+        char ch = s_playback_buf[s_playback_pos++];
+        if (ch == ' ') {
+            // set pending space for next visible character and play word gap
+            s_play_space_pending = true;
+            s_pb_state = PB_STATE_INTER_WORD_GAP;
+            s_elem_start_count = cur_count;
+            return CW_ACTION_NONE;
+        }
+        // Update TX centerline display with the next char (respect pending space)
+        CW_AddToTxDisplay(ch, s_play_space_pending);
+        s_play_space_pending = false;
+
+        // Get morse pattern for char 
+        uint8_t patt = 0, len = 0;
+        if (!CW_GetMorseForChar(ch, &patt, &len)) {
+            // Unknown char - skip
+            s_pb_state = PB_STATE_INTER_CHAR_GAP;
+            s_elem_start_count = cur_count;
+            return CW_ACTION_NONE;
+        }
+        s_play_char_pattern = patt;
+        s_play_char_len = len;
+        s_play_elem_index = 0;
+        // Start first element
+        bool is_dit = (((s_play_char_pattern >> s_play_elem_index) & 1) == 0);
+        s_active_is_dit = is_dit;
+        s_elem_start_count = cur_count;
+        s_pb_state = PB_STATE_ACTIVE_ELEMENT;
+        return CW_ACTION_CARRIER_ON;
+        break;
+    }
+
+    case PB_STATE_INTER_WORD_GAP: {
+        const uint16_t elapsed = timer_jiffies_since(s_elem_start_count);
+        if (elapsed >= s_word_gap_count) {
+            // advance to next char
+            s_pb_state = PB_STATE_INTER_CHAR_GAP;
+            s_elem_start_count = cur_count;
+        }
+        return CW_ACTION_NONE;
+        break;
+    }
+
+    case PB_STATE_IDLE:
+    default:
+        return CW_ACTION_NONE;
+    }
+}
+
+
+void CW_PlaybackIndicatorDeadline(void)
+{
+    /* Called from APP_TimeSlice10ms() every 10ms. Use a local 10ms-tick counter
+     * (kept private to the function) and toggle the indicator every 25 ticks
+     * (~250 ms). Keep the indicator off when playback is inactive.
+     */
+    static uint8_t s_tick_count_10ms = 0;
+    const uint8_t TARGET_TICKS = 25; /* ~250 ms */
+
+    if (CW_IsMacroPlaybackActive()) {
+        if (++s_tick_count_10ms >= TARGET_TICKS) {
+            s_tick_count_10ms = 0;
+            gCW_PlayIndicatorOn = !gCW_PlayIndicatorOn;
+            gUpdateDisplay = true;
+        }
+    } else {
+        /* Reset counter and clear indicator when not playing */
+        s_tick_count_10ms = 0;
+        if (gCW_PlayIndicatorOn) {
+            gCW_PlayIndicatorOn = false;
+            gUpdateDisplay = true;
+        }
+    }
 }
 
 // Check keyer inputs before mode change

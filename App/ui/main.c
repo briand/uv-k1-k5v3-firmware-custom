@@ -24,6 +24,9 @@
 #endif
 #ifdef ENABLE_CW_MODULATOR
 	#include "app/cwmacro.h"
+	#include "app/cwkeyer.h"
+	#include "driver/timer.h"
+	#include "bsp/dp32g030/timer.h"  /* for TIMERBASE0_LOW_CNT access */
 #endif
 #include "bitmaps.h"
 #include "board.h"
@@ -244,9 +247,8 @@ void UI_DisplayAudioBar(void)
 #endif
 
 #ifdef ENABLE_CW_MODULATOR
-void DrawCWDecodeBar(bool now)
+void DrawCWDecodeBar(void)
 {
-	now = now;
 	const unsigned int line = 3;
 	uint8_t *p_line = gFrameBuffer[line];
 	char String[20];
@@ -254,18 +256,26 @@ void DrawCWDecodeBar(bool now)
 	if (gScreenToDisplay != DISPLAY_MAIN)
 		return;  // screen is in use
 	
-	// Always do immediate blit when called during CW transmission
-	now = true;
-	
 	memset(p_line, 0, LCD_WIDTH);
 	
 	// Get the last 20 characters from display buffer
 	const unsigned int len = strlen(gCW_TX_Display);
 	const unsigned int idx = (len > 20) ? len - 20 : 0;
-	
+
+	// Print the text shifted right so glyph can be placed at x=0; print text first
 	sprintf(String, "%s", gCW_TX_Display + idx);
-	UI_PrintStringSmallNormal(String, 2, 0, line);
-	
+	UI_PrintStringSmallNormal(String, 10, 0, line);
+
+	// Draw glyph after text so it can't be clobbered (drawn independently of DecodeBar)
+	if (CW_IsMacroPlaybackActive() && (center_line == CENTER_LINE_NONE || center_line == CENTER_LINE_CW_DECODE)) {
+		if (gCW_PlayIndicatorOn) {
+			memcpy(p_line + 0, BITMAP_Play, sizeof(BITMAP_Play));
+		} else {
+			// clear the glyph area
+			memset(p_line + 0, 0, sizeof(BITMAP_Play));
+		}
+	}
+
 	ST7565_BlitLine(line);
 }
 #endif
@@ -1506,7 +1516,7 @@ void UI_DisplayMain(void)
 		if ((gCurrentFunction == FUNCTION_TRANSMIT || gCW_TxDisplayHoldoff_10ms > 0) && gCurrentVfo->Modulation == MODULATION_CW && gCW_TX_Display[0] != 0)
 		{	// show CW characters being transmitted (persists 1 sec after TX ends)
 			center_line = CENTER_LINE_CW_DECODE;
-			DrawCWDecodeBar(false);
+			DrawCWDecodeBar();
 		}
 		else
 #endif

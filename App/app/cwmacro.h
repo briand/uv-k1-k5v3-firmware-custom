@@ -9,12 +9,22 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#define CW_MACRO_MAX_LEN 40  // 41 bytes - 1 for length
+// Keep full 40-character payload and store a checksum byte after the payload
+#define CW_MACRO_MAX_LEN 40  // payload bytes
 #define CW_MACRO_COUNT 2
+// Block layout: [0]=len|SIG, [1..40]=payload bytes (encoded), [41]=checksum
+#define CW_MACRO_BLOCK_SIZE 42
 
-// EEPROM addresses for macros (each 41 bytes)
-#define CW_MACRO1_EEPROM_ADDR 0x0F23
-#define CW_MACRO2_EEPROM_ADDR 0x0F4E
+// Signature is stored in the length byte (high bit). Checksum is stored in the
+// extra byte at the end of the 42-byte block (offset 41).
+#define CW_MACRO_SIG 0x80
+#define CW_MACRO_CHECKSUM_OFFSET (CW_MACRO_BLOCK_SIZE - 1)
+
+// EEPROM addresses for macros (each uses CW_MACRO_BLOCK_SIZE bytes)
+// We reuse the DTMF contacts region (0x1C00..0x1CFF), DTMF calling must be disabled
+
+#define CW_MACRO1_EEPROM_ADDR 0x1C00
+#define CW_MACRO2_EEPROM_ADDR (CW_MACRO1_EEPROM_ADDR + CW_MACRO_BLOCK_SIZE)  /* ensures blocks don't overlap */
 
 // Encoding/Decoding helper macros
 #define CW_MACRO_ENCODE(ch, hasSpace) ((hasSpace) ? ((ch) | 0x80) : (ch))
@@ -37,6 +47,10 @@ bool CW_ValidateChar(char ch);
 // Format macro for display (first N chars)
 // Returns number of characters copied
 uint8_t CW_FormatMacroDisplay(uint8_t macroIndex, char *display, uint8_t maxChars);
+
+// Playback helper: given a decoded character, return pattern (LSB-first) and element length
+// Playback helper: given a decoded character, return pattern (LSB-first) and element length
+bool CW_GetMorseForChar(char ch, uint8_t *pattern, uint8_t *length);
 
 // Morse code encoder - receives element events from keyer FSM
 typedef enum {
