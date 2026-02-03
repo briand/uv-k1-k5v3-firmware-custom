@@ -1,9 +1,7 @@
 NR7Y Beta2 Firmware README
 
-Thanks for beta testing! Please post feedback in the Slack. I'll push this code to GitHub soon and collect issues there as well.
-
 **MOST IMPORTANT**
-This firmware only works on "V1" firmware. How do you know? Well, you kinda don't. If you bought your radio early last year, it's V1. If you bought it late last year, it could be V2. If you bought it in 2026, it could be V3!
+This firmware only works on "V1" firmware. How do you know? Well, you kinda don't. If you bought your radio early last year, it's V1. If you bought it late last year, it could be V2. If you bought it in 2026, it could be V3! Most (all?) V3 radios are marked as such on the label under the battery.
 
 If the flashing process doesn't work, you know you don't have a V1. If the attempt messes up your radio, there are recovery steps listed online. Sorry about that. I will work on a V2/V3 compatible version of the firmware soon. Note: Bootloader version is not the same as radio hardware version; it's ok if you see "bootloader version 2.xx" during flashing.
 
@@ -24,7 +22,7 @@ After flashing, I *strongly advise* resetting the eeprom to ensure there are no 
 - Fix keyer menu naming "sleeve" -> "ring" for port
 - Main screen: show RSSI signal bar in RX mode instead of AGC debug data
 
-# CW (Morse Code) Firmware Guide
+# CW (Morse Code) Firmware Mod Guide
 
 This guide describes the CW (Continuous Wave / Morse Code) menu options added to the UV-K5 firmware when `ENABLE_CW_MODULATOR` is enabled.
 
