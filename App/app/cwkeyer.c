@@ -1,4 +1,20 @@
-// CW Iambic Keyer implementation
+ /* Copyright 2026 NR7Y
+ * https://github.com/briand
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *     Unless required by applicable law or agreed to in writing, software
+ *     distributed under the License is distributed on an "AS IS" BASIS,
+ *     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *     See the License for the specific language governing permissions and
+ *     limitations under the License.
+ */
+
+ // CW Iambic Keyer implementation
 // Lean FSM for iambic A/B with optional reversed mapping
 
 #include <stdint.h>
@@ -26,13 +42,10 @@
 #include "driver/backlight.h"
 #include "ui/welcome.h"
 
+#include "external/printf/printf.h"
+
 // Debug logging control - set to 1 to enable UART debug output
 #define CW_KEYER_DEBUG 0
-
-// Debug: log when a dit is created while only dah is pressed
-#ifndef CW_KEYER_DEBUG_DAH_SEND
-#define CW_KEYER_DEBUG_DAH_SEND 0
-#endif
 
 // Timer scale: 10 kHz tick → 100 µs per tick
 // 16-bit counter rolls over at 6553 ms
@@ -66,8 +79,6 @@ static bool           s_pending_alternate = false; // alternate element queued
 static bool           s_last_handkey_ptt = false; // last PTT state for handkey mode
 
 // Macro playback state
-static bool s_playback_active = false;
-static uint8_t s_playback_macro_index = 0;
 static char s_playback_buf[CW_MACRO_MAX_LEN * 2 + 1]; // decoded with spaces inserted
 static uint16_t s_playback_buf_len = 0; // strlen of the buffer
 static uint16_t s_playback_pos = 0; // index into playback buffer
@@ -88,6 +99,13 @@ static bool s_play_space_pending = false;  // indicates next char should be show
 
 // Reconfigure requested (apply at idle or after gap)
 static volatile bool s_cfg_dirty = true;
+
+// Keyer enabled flag
+static volatile bool s_enable_keyer = false;
+
+#ifdef ENABLE_FLASHLIGHT
+bool gCW_FlashlightSending = false;
+#endif
 
 
 void CW_UpdateWPM()
@@ -111,6 +129,17 @@ void CW_UpdateWPM()
 #endif
 }
 
+// Called when changing to non-CW mode
+static void CW_KeyerDeinit()
+{
+    // ADC does the port ground deinit too
+    CW_ConfigureADCforCECPaddles(false);
+    CW_ConfigurePortRing(false);
+
+    gCW_KeyerUsingSD1 = false;
+    s_enable_keyer = false;
+}
+
 // Initialize keyer from gEeprom settings
 static void CW_KeyerInit()
 {
@@ -121,18 +150,23 @@ static void CW_KeyerInit()
     // Configure port pins based on bit flags
     bool uses_port_ground = (gEeprom.CW_KEY_INPUT & CW_KEY_FLAG_PORT_GROUND);
     bool uses_port_ring = (gEeprom.CW_KEY_INPUT & CW_KEY_FLAG_PORT_RING);
-    
+    bool uses_adc = (gEeprom.CW_KEY_INPUT & CW_KEY_FLAG_ADC);
 #if CW_KEYER_DEBUG
     bool is_handkey = (gEeprom.CW_KEY_INPUT & CW_KEY_FLAG_NO_KEYER);
-    bool uses_buttons = (gEeprom.CW_KEY_INPUT & CW_KEY_FLAG_BUTTONS);
+    bool uses_button = (gEeprom.CW_KEY_INPUT & CW_KEY_FLAG_SIDE1);
     char buf[120];
-    sprintf_(buf, "CW_Init: mode=0x%02X handkey=%d btns=%d pG=%d pR=%d rev=%d\r\n",
-             gEeprom.CW_KEY_INPUT, is_handkey, uses_buttons, uses_port_ground, uses_port_ring, (gEeprom.CW_KEY_INPUT & CW_KEY_FLAG_REVERSED));
+    sprintf_(buf, "CW_Init: mode=0x%02X handkey=%d side=%d pG=%d pR=%d rev=%d\r\n",
+             gEeprom.CW_KEY_INPUT, is_handkey, uses_button, uses_port_ground, uses_port_ring, (gEeprom.CW_KEY_INPUT & CW_KEY_FLAG_REVERSED));
     UART_Send(buf, strlen(buf));
 #endif
-    
-    CW_ConfigurePortGround(uses_port_ground);
+
     CW_ConfigurePortRing(uses_port_ring);
+    CW_ConfigureADCforCECPaddles(uses_adc);
+    // CEC false will turn off ground, so we only need to explicitly enable if not using CEC but do need port ground
+    if(!uses_adc && uses_port_ground)
+        CW_ConfigurePortGround(true);
+
+    gCW_KeyerUsingSD1 = gEeprom.CW_KEY_INPUT & CW_KEY_FLAG_SIDE1;
 
     s_last_count         = (uint16_t)TIMERBASE0_LOW_CNT;
     s_active_is_dit    = false;
@@ -143,10 +177,21 @@ static void CW_KeyerInit()
 #if CW_KEYER_DEBUG
     UART_Send("keyer init done\r\n", 17);
 #endif
+    s_enable_keyer = true;
 }
 
-void CW_KeyerReconfigure(void)
+void CW_KeyerReconfigure(bool enable)
 {
+    if(!enable) {
+        if(!s_enable_keyer) 
+            return;  // already disabled
+
+        // Disable keyer immediately and put ports back to normal if needed
+        s_KeyerFSMState = CWK_STATE_IDLE;
+        CW_KeyerDeinit();
+        s_cfg_dirty = false;
+        return;
+    }
     s_cfg_dirty = true;
 #if CW_KEYER_DEBUG
     UART_Send("keyer marked for reconfig\r\n", 27);
@@ -154,30 +199,34 @@ void CW_KeyerReconfigure(void)
 }
 
 // --- Macro playback API implementation ---
-void CW_StartMacroPlayback(uint8_t macroIndex)
+void CW_StartMacroPlayback(uint8_t macroIndex, bool repeat)
 {	
     // Do nothing if recording or playback already in progress
-    if (gCW_Recording || CW_IsMacroPlaybackActive()) return;
+    if (gCW_Recording || gCW_PlaybackActive) return;
 
     // Load the macro into a local buffer (decoded with spaces)
     memset(s_playback_buf, 0, sizeof(s_playback_buf));
     CW_LoadMacro(macroIndex, s_playback_buf, sizeof(s_playback_buf));
     s_playback_buf_len = (uint16_t)strlen(s_playback_buf);
     s_playback_pos = 0;
-    s_playback_macro_index = macroIndex;
+    gCW_PlaybackMacroIndex = macroIndex;
     s_play_elem_index = 0;
     s_play_char_len = 0;
     s_play_char_pattern = 0;
+
+    // Store repeat flag
+    gCW_PlaybackRepeat = repeat;
+    gCW_MessageRepeatCountdown_500ms = 0;  // Clear any pending countdown
 
     // Clear TX display and prime the playback FSM to start immediately
     CW_ClearTxDisplay();
     s_play_space_pending = false;
     s_pb_state = PB_STATE_INTER_CHAR_GAP;
     s_elem_start_count = (uint16_t)TIMERBASE0_LOW_CNT;
-    s_playback_active = (s_playback_buf_len > 0);
+    gCW_PlaybackActive = (s_playback_buf_len > 0);
 
 #if CW_KEYER_DEBUG
-    if (s_playback_active) {
+    if (gCW_PlaybackActive) {
         char buf[80];
         sprintf_(buf, "Playback started: idx=%u buf='%s'\r\n", macroIndex, s_playback_buf);
         UART_Send(buf, strlen(buf));
@@ -185,15 +234,12 @@ void CW_StartMacroPlayback(uint8_t macroIndex)
 #endif
 }
 
-bool CW_IsMacroPlaybackActive(void)
+// Stop playback immediately (user interrupted)
+void CW_StopPlayback(void)
 {
-    return s_playback_active;
-}
-
-// Stop playback immediately
-static void CW_StopPlayback(void)
-{
-    s_playback_active = false;
+    gCW_PlaybackActive = false;
+    gCW_PlaybackRepeat = false;       // Cancel any pending repeat
+    gCW_MessageRepeatCountdown_500ms = 0;
     s_pb_state = PB_STATE_IDLE;
     s_playback_buf_len = 0;
     s_playback_pos = 0;
@@ -202,7 +248,7 @@ static void CW_StopPlayback(void)
 // Playback handler - returns CW_Action_t similar to CW_HandleState
 CW_Action_t CW_PlaybackHandleState(void)
 {
-    if (!s_playback_active) return CW_ACTION_NONE;
+    if (!gCW_PlaybackActive) return CW_ACTION_NONE;
 
     const uint16_t cur_count = (uint16_t)TIMERBASE0_LOW_CNT;
     CW_Input in = {0};
@@ -259,8 +305,16 @@ CW_Action_t CW_PlaybackHandleState(void)
         }
         // Move to next character (if any)
         if (s_playback_pos >= s_playback_buf_len) {
-            // Done
-            CW_StopPlayback();
+            // Done with current pass
+            if (gCW_PlaybackRepeat && gEeprom.CW_MESSAGE_REPEAT_DELAY > 0) {
+                // Start repeat countdown (value is in 500ms units)
+                gCW_MessageRepeatCountdown_500ms = gEeprom.CW_MESSAGE_REPEAT_DELAY * 2;
+                gCW_PlaybackActive = false;  // Pause playback while counting down
+                s_pb_state = PB_STATE_IDLE;
+            } else {
+                // No repeat or delay is 0 - just stop
+                CW_StopPlayback();
+            }
             return CW_ACTION_NONE;
         }
         char ch = s_playback_buf[s_playback_pos++];
@@ -322,7 +376,7 @@ void CW_PlaybackIndicatorDeadline(void)
     static uint8_t s_tick_count_10ms = 0;
     const uint8_t TARGET_TICKS = 25; /* ~250 ms */
 
-    if (CW_IsMacroPlaybackActive()) {
+    if (gCW_PlaybackActive || gCW_MessageRepeatCountdown_500ms > 0) {
         if (++s_tick_count_10ms >= TARGET_TICKS) {
             s_tick_count_10ms = 0;
             gCW_PlayIndicatorOn = !gCW_PlayIndicatorOn;
@@ -350,12 +404,16 @@ bool CW_CheckKeyerInputs(uint8_t new_mode)
     // Determine if we need to configure port pins for this mode (use bit flags)
     bool uses_port_ground = (new_mode & CW_KEY_FLAG_PORT_GROUND);
     bool uses_port_ring = (new_mode & CW_KEY_FLAG_PORT_RING);
-    
+    bool uses_adc = (new_mode & CW_KEY_FLAG_ADC);
+
     // Button-only modes don't need validation (no port pins to check)
     if (!uses_port_ground && !uses_port_ring) {
         return true;
     }
     
+    // the port keyer modes interact poorly, so we have to deconfigure first
+    CW_KeyerReconfigure(false);
+
 #if CW_KEYER_DEBUG
     UART_Send("Checking CW keyer inputs\r\n", 26);
 #endif
@@ -368,14 +426,18 @@ bool CW_CheckKeyerInputs(uint8_t new_mode)
         CW_ConfigurePortGround(uses_port_ground);
         CW_ConfigurePortRing(uses_port_ring);
         
-        // Allow pins to stabilize after configuration
-        SYSTEM_DelayMs(50);
+    } else if(uses_adc) {
+        CW_ConfigureADCforCECPaddles(true);
     }
+
+    // Allow pins to stabilize after configuration
+    SYSTEM_DelayMs(50);
+
 #if CW_KEYER_DEBUG
     UART_Send("done with config, starting validation\r\n", 40);
 #endif
 
-    // Check inputs with 10ms intervals - consider stuck if key stays down for over 10 consecutive checks
+    // Check inputs with 1ms intervals - consider stuck if key stays down for 3 checks out of 20
     int stuck_count = 0;
     bool any_stuck = false;
 #if CW_KEYER_DEBUG
@@ -398,12 +460,10 @@ bool CW_CheckKeyerInputs(uint8_t new_mode)
         
         if (dit || dah) {
             stuck_count++;
-            if (stuck_count > 10) {
+            if (stuck_count > 2) {  // 3 strikes
                 any_stuck = true;
                 break;
             }
-        } else {
-            stuck_count = 0;  // Reset if keys released
         }
         
         SYSTEM_DelayMs(10);
@@ -427,8 +487,7 @@ bool CW_CheckKeyerInputs(uint8_t new_mode)
     UART_Send("CW keyer inputs stuck\r\n", 24);
 #endif
 
-    CW_ConfigurePortGround(false);
-    CW_ConfigurePortRing(false);
+    CW_KeyerDeinit();  // put ports back, disable keyer
 
     return false;
 }
@@ -470,10 +529,12 @@ CW_Action_t CW_HandleState(void)
     static CW_KeyerFSMState_t last_logged_state = CWK_STATE_IDLE;
 #endif
 
-    // check dirty flag at idle - reconfigure only when safe
     if (s_cfg_dirty && s_KeyerFSMState == CWK_STATE_IDLE) {
         CW_KeyerInit();
     }
+
+    if(!s_enable_keyer)
+        return CW_ACTION_NONE;
 
     const uint16_t cur_count = (uint16_t)TIMERBASE0_LOW_CNT;
     const uint16_t delta_since_last = timer_jiffies_since(s_last_count);

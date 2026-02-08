@@ -1,4 +1,20 @@
-// CW Macro system
+ /* Copyright 2026 NR7Y
+ * https://github.com/briand
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *     Unless required by applicable law or agreed to in writing, software
+ *     distributed under the License is distributed on an "AS IS" BASIS,
+ *     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *     See the License for the specific language governing permissions and
+ *     limitations under the License.
+ */
+
+ // CW Macro system
 // Storage format: first byte = length (0xff = empty), remaining bytes = characters
 // Each character byte: bits 0-6 = character, bit 7 = space before character
 // Supported characters: A-Z, 0-9, '/', '?'
@@ -9,11 +25,11 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-// Keep full 40-character payload and store a checksum byte after the payload
-#define CW_MACRO_MAX_LEN 40  // payload bytes
-#define CW_MACRO_COUNT 2
-// Block layout: [0]=len|SIG, [1..40]=payload bytes (encoded), [41]=checksum
-#define CW_MACRO_BLOCK_SIZE 42
+// Keep full 46-character payload and store a checksum byte after the payload
+#define CW_MACRO_MAX_LEN 46  // payload bytes
+#define CW_MACRO_COUNT 4
+// Block layout: [0]=len|SIG, [1..46]=payload bytes (encoded), [47]=checksum
+#define CW_MACRO_BLOCK_SIZE 48
 
 // Signature is stored in the length byte (high bit). Checksum is stored in the
 // extra byte at the end of the 42-byte block (offset 41).
@@ -24,7 +40,9 @@
 // We reuse the DTMF contacts region (0x1C00..0x1CFF), DTMF calling must be disabled
 
 #define CW_MACRO1_EEPROM_ADDR 0x1C00
-#define CW_MACRO2_EEPROM_ADDR (CW_MACRO1_EEPROM_ADDR + CW_MACRO_BLOCK_SIZE)  /* ensures blocks don't overlap */
+#define CW_MACRO2_EEPROM_ADDR (CW_MACRO1_EEPROM_ADDR + CW_MACRO_BLOCK_SIZE)  /* 0x1C30 */
+#define CW_MACRO3_EEPROM_ADDR (CW_MACRO2_EEPROM_ADDR + CW_MACRO_BLOCK_SIZE)  /* 0x1C60 */
+#define CW_MACRO4_EEPROM_ADDR (CW_MACRO3_EEPROM_ADDR + CW_MACRO_BLOCK_SIZE)  /* 0x1C90 */
 
 // Encoding/Decoding helper macros
 #define CW_MACRO_ENCODE(ch, hasSpace) ((hasSpace) ? ((ch) | 0x80) : (ch))
@@ -65,20 +83,22 @@ void CW_EncoderProcessElement(CW_ElementType_t element);
 
 // Recording state management
 extern bool gCW_Recording;
-extern uint8_t gCW_RecordMacroIndex;  // Which macro (0 or 1)
+extern uint8_t gCW_RecordMacroIndex;  // Which macro (0-3)
 extern uint8_t gCW_RecordBuffer[CW_MACRO_MAX_LEN];  // Encoded characters
 extern uint8_t gCW_RecordLength;  // Current length
 extern bool gCW_RecordNewChar;  // Flag: new character ready for display update
+
+// Playback state (moved from cwkeyer.c static)
+extern bool gCW_PlaybackActive;         // true while macro playback is in progress
+extern bool gCW_PlaybackRepeat;         // true if playback should repeat after completion
+extern uint8_t gCW_PlaybackMacroIndex;  // macro being played (0-3)
+extern uint16_t gCW_MessageRepeatCountdown_500ms;  // countdown timer for repeat delay
 
 // Start recording a macro
 void CW_StartRecording(uint8_t macroIndex);
 
 // Stop recording and save
 void CW_StopRecording(void);
-
-// Get the recording display string (last 9 chars + cursor position)
-// Returns cursor position (0-9)
-uint8_t CW_GetRecordingDisplay(char *display, uint8_t maxChars);
 
 // TX character display buffer (for showing what's being transmitted)
 #define CW_TX_DISPLAY_SIZE 16
@@ -91,5 +111,9 @@ void CW_AddToTxDisplay(char ch, bool hasSpace);
 
 // Clear the TX display buffer
 void CW_ClearTxDisplay(void);
+
+// Get last N characters from TX display buffer
+// Returns number of characters copied
+uint8_t CW_GetTxDisplayTail(char *display, uint8_t maxLen);
 
 #endif

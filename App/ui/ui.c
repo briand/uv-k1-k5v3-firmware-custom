@@ -38,6 +38,9 @@
 #include "ui/menu.h"
 #include "ui/scanner.h"
 #include "ui/ui.h"
+#ifdef ENABLE_CODE_PRACTICE
+	#include "ui/cpo.h"
+#endif
 #include "../misc.h"
 
 GUI_DisplayType_t gScreenToDisplay;
@@ -52,6 +55,10 @@ void (*UI_DisplayFunctions[])(void) = {
     [DISPLAY_MAIN] = &UI_DisplayMain,
     [DISPLAY_MENU] = &UI_DisplayMenu,
     [DISPLAY_SCANNER] = &UI_DisplayScanner,
+
+#ifdef ENABLE_CODE_PRACTICE
+	[DISPLAY_CPO] = &UI_DisplayCPO,
+#endif
 
 #ifdef ENABLE_FMRADIO
     [DISPLAY_FM] = &UI_DisplayFM,

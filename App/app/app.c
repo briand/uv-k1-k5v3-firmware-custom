@@ -78,6 +78,9 @@
 #include "app/cwkeyer.h"
 #include "app/cwmacro.h"
 #endif
+#ifdef ENABLE_CODE_PRACTICE
+#include "app/cpo.h"
+#endif
 
 #ifdef ENABLE_FEAT_F4HWN_SCREENSHOT
     #include "screenshot.h"
@@ -95,6 +98,10 @@ void (*ProcessKeysFunctions[])(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld) 
     [DISPLAY_MAIN] = &MAIN_ProcessKeys,
     [DISPLAY_MENU] = &MENU_ProcessKeys,
     [DISPLAY_SCANNER] = &SCANNER_ProcessKeys,
+
+#ifdef ENABLE_CODE_PRACTICE
+	[DISPLAY_CPO] = &CPO_ProcessKeys,
+#endif
 
 #ifdef ENABLE_FMRADIO
     [DISPLAY_FM] = &FM_ProcessKeys,
@@ -662,8 +669,8 @@ static void CheckRadioInterrupts(void)
         return;
 
 	#ifdef ENABLE_CW_MODULATOR
-		if (gCurrentFunction == FUNCTION_TRANSMIT && gTxVfo->Modulation == MODULATION_CW)
-			return;  // no interrupts during CW TX
+		if (gCW_CpoActive || ( gCurrentFunction == FUNCTION_TRANSMIT && gTxVfo->Modulation == MODULATION_CW))
+			return;  // no interrupts during CW TX or CPO app
 	#endif
 
     while (BK4819_ReadRegister(BK4819_REG_0C) & 1u) { // BK chip interrupt request
@@ -820,11 +827,14 @@ void APP_EndTransmission(void)
     gFlagEndTransmission = true;
 
 #ifdef ENABLE_CW_MODULATOR
-	// Clear CW state when ending transmission entirely
-	gCW_State = CW_INACTIVE;
-	gCW_SuspendCountdown_10ms = 0;
-	// Keep TX display visible for 1 second after TX ends
-	gCW_TxDisplayHoldoff_10ms = 100;
+	if(gCW_State != CW_INACTIVE)
+	{	
+		// Clear CW state when ending transmission entirely
+		gCW_State = CW_INACTIVE;
+		gCW_SuspendCountdown_10ms = 0;
+		// Keep TX display visible for 1 second after TX ends
+		gCW_TxDisplayHoldoff_10ms = 100;
+	}
 #endif
 
     if (gMonitor) {
@@ -1022,17 +1032,24 @@ void APP_Update(void)
 
 #ifdef ENABLE_CW_MODULATOR
 
-// 	static uint32_t local_counter = 0;
-	if (gTxVfo->Modulation == MODULATION_CW) 
+	if (gTxVfo->Modulation == MODULATION_CW
+#ifdef ENABLE_CODE_PRACTICE
+		|| gCW_CpoActive
+#endif
+		)
 	{
 		CW_Action_t action;
-		if (CW_IsMacroPlaybackActive())
+		if (gCW_PlaybackActive)
 			action = CW_PlaybackHandleState();
 		else
 			action = CW_HandleState();
 		
-		// Don't transmit RF if we're recording a macro
-		if (gCW_Recording) {
+		// Don't transmit RF if we're recording a macro, reading ADC, or breakin disabled
+		if (gCW_Recording || gCW_AdcReadActive || !gEeprom.CW_BREAKIN_ENABLE
+#ifdef ENABLE_CODE_PRACTICE
+			|| gCW_CpoActive
+#endif
+			) {
 			switch(action)
 			{
 				case CW_ACTION_CARRIER_ON:
@@ -1043,11 +1060,28 @@ void APP_Update(void)
 						(gEeprom.CW_SIDETONE_LEVEL << BK4819_REG_70_SHIFT_TONE1_TUNING_GAIN));
 					// Set local AF sidetone freq in Hz
 					BK4819_SetScrambleFrequencyControlWord(gEeprom.CW_TONE_FREQUENCY * 10);
+					#ifdef ENABLE_FLASHLIGHT
+					if (gCW_FlashlightSending) {
+						GPIO_SetBit(&GPIOC->DATA, GPIOC_PIN_FLASHLIGHT);
+					}
+					#endif
+					gCW_TxDisplayHoldoff_10ms = 200; // start the centerline decoder
 				break;
 				case CW_ACTION_CARRIER_OFF:
 					// Set TONE1 to 0 Hz - this works better than gain to disable sidetone
 					BK4819_SetScrambleFrequencyControlWord(0);
-					RADIO_SetModulation(gRxVfo->Modulation);  // back to RX audio path
+					#ifdef ENABLE_FLASHLIGHT
+					if (gCW_FlashlightSending) {
+						GPIO_ClearBit(&GPIOC->DATA, GPIOC_PIN_FLASHLIGHT);
+					}
+					#endif
+					#ifdef ENABLE_CODE_PRACTICE
+					if (gCW_CpoActive)
+						BK4819_SetAF(BK4819_AF_MUTE);
+					else
+					#endif
+						RADIO_SetModulation(gRxVfo->Modulation);  // back to RX audio path
+					gCW_TxDisplayHoldoff_10ms = 200; // leave the centerline decoder on for a second
 				break;
 				
 				default:
@@ -1061,6 +1095,7 @@ void APP_Update(void)
 		{
 			case CW_ACTION_CARRIER_ON:
 				gTxTimerCountdown_500ms = 0;
+				gCW_TxDisplayHoldoff_10ms = 200;
 				gPttIsPressed = true;
 
 				if(gCW_State == CW_INACTIVE)
@@ -1079,6 +1114,7 @@ void APP_Update(void)
 				//UART_Send("CW Suspend\r\n", 12);
 				RADIO_CW_Suspend();
 				gCW_SuspendCountdown_10ms = 0;
+				gCW_TxDisplayHoldoff_10ms = 200; // leave the centerline decoder on for a second
 			break;
 
 			case CW_ACTION_CARRIER_HOLD_ON:
@@ -1100,6 +1136,12 @@ void APP_Update(void)
 				}
 			break;
 		}
+	} else if(gCW_State == CW_TRANSMITTING)
+	{
+		// this should basically never happen, but maybe if changing modulation while transmitting?
+		// UART_Send("!!! CW Auto-auto Suspend\r\n", 21);
+		RADIO_CW_Suspend();
+		gCW_SuspendCountdown_10ms = 0;
 	}
 
 #endif
@@ -1286,7 +1328,12 @@ static void CheckKeys(void)
 #ifdef ENABLE_FEAT_F4HWN
     if (gSetting_set_ptt_session)
     {
-        if (GPIO_IsPttPressed() && !SerialConfigInProgress() && gPttOnePushCounter == 0)
+        if (
+            		if (
+#ifdef ENABLE_CW_MODULATOR
+		gCW_KeyerUsesPTT ||
+#endif		
+            GPIO_IsPttPressed() && !SerialConfigInProgress() && gPttOnePushCounter == 0)
         {   // PTT pressed
             if (++gPttDebounceCounter >= 3)     // 30ms
             {   // start transmitting
@@ -1403,15 +1450,6 @@ static void CheckKeys(void)
 	}
 #endif
 
-#ifdef ENABLE_CW_MODULATOR
-	// Decrement TX display holdoff timer (runs every 10ms tick regardless of TX state)
-	if (gCW_TxDisplayHoldoff_10ms > 0)
-	{
-		if (--gCW_TxDisplayHoldoff_10ms == 0)
-			gUpdateDisplay = true;  // Trigger screen refresh to switch away from CW display
-	}
-#endif
-
 // --------------------- OTHER KEYS ----------------------------
 
     // scan the hardware keys
@@ -1512,6 +1550,12 @@ void APP_TimeSlice10ms(void)
 	}
 	// Update playback indicator
 	CW_PlaybackIndicatorDeadline();
+#endif
+
+#ifdef ENABLE_CODE_PRACTICE
+	if (gCW_CpoActive) {
+		CPO_Tick();
+	}
 #endif
 
     if (gReducedService)
@@ -1730,6 +1774,12 @@ void APP_TimeSlice500ms(void)
 		// Don't timeout if recording CW macro
 		if (gCW_Recording) {
 			gMenuCountdown = menu_timeout_500ms;  // Keep resetting the timer
+			gBacklightCountdown_500ms = 2; // keep backlight on
+		} else if (gScreenToDisplay == DISPLAY_MENU && gIsInSubMenu
+				   && UI_MENU_GetCurrentMenuId() == MENU_CW_CRD) {
+			gMenuCountdown = menu_timeout_500ms;  // Keep resetting the timer
+			gBacklightCountdown_500ms = 2; // keep backlight on
+			gUpdateDisplay = true; // refresh CW ADC readout every 500ms
 		} else
 #endif
         if (--gMenuCountdown == 0)
@@ -1812,6 +1862,16 @@ void APP_TimeSlice500ms(void)
     }
 #endif
 
+#ifdef ENABLE_CW_MODULATOR
+	// CW message repeat countdown - when it expires, restart playback
+	if (gCW_MessageRepeatCountdown_500ms > 0) {
+		if (--gCW_MessageRepeatCountdown_500ms == 0 && gCW_PlaybackRepeat) {
+			// Restart playback of the same macro with repeat enabled
+			CW_StartMacroPlayback(gCW_PlaybackMacroIndex, true);
+		}
+	}
+#endif
+
     if (gReducedService)
     {
         BOARD_ADC_GetBatteryInfo(&gBatteryCurrentVoltage, &gBatteryCurrent);
@@ -1864,7 +1924,11 @@ void APP_TimeSlice500ms(void)
 #endif
     ) {
         if (gEeprom.AUTO_KEYPAD_LOCK && gKeyLockCountdown > 0 && !gDTMF_InputMode
-            && gScreenToDisplay != DISPLAY_MENU && --gKeyLockCountdown == 0)
+            && gScreenToDisplay != DISPLAY_MENU
+#ifdef ENABLE_CODE_PRACTICE
+			&& !gCW_CpoActive
+#endif
+			&& --gKeyLockCountdown == 0)
         {
             gEeprom.KEY_LOCK = true;     // lock the keyboard
             gUpdateStatus = true;            // lock symbol needs showing
@@ -1995,6 +2059,17 @@ static void ALARM_Off(void)
 
 static void ProcessKey(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 {
+#ifdef ENABLE_CODE_PRACTICE
+	if (gCW_CpoActive) {
+		if (Key == KEY_EXIT) {
+			CPO_Exit();
+			gRequestDisplayScreen = DISPLAY_MAIN;
+			return;
+		}
+		CPO_ProcessKeys(Key, bKeyPressed, bKeyHeld);
+		return;
+	}
+#endif
     #ifdef ENABLE_FEAT_F4HWN_SLEEP
     if(gWakeUp)
     {
@@ -2197,7 +2272,15 @@ static void ProcessKey(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
         goto Skip;
     }
 
-    if (gCurrentFunction == FUNCTION_TRANSMIT) {
+#ifdef ENABLE_CW_MODULATOR
+	// Allow any key to stop CW macro playback and cancel repeat
+	if ((gCW_PlaybackActive || gCW_PlaybackRepeat) && bKeyPressed && !bKeyHeld) {
+		CW_StopPlayback();
+		gUpdateDisplay = true;
+	}
+#endif
+
+if (gCurrentFunction == FUNCTION_TRANSMIT) {
 #if defined(ENABLE_ALARM) || defined(ENABLE_TX1750)
         if (gAlarmState == ALARM_STATE_OFF)
 #endif
@@ -2209,9 +2292,10 @@ static void ProcessKey(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
                 goto Skip;
             }
 #ifdef ENABLE_CW_MODULATOR
+        if (gCurrentVfo->Modulation == MODULATION_CW) {
             // Disable DTMF/tone transmission when in CW mode
-            if (gCurrentVfo->Modulation == MODULATION_CW)
-                goto Skip;
+            goto Skip;
+        }
 #endif
             if (Key == KEY_SIDE2) { // transmit 1750Hz tone
                 Code = 0xFE;
@@ -2272,7 +2356,9 @@ static void ProcessKey(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 #endif
     }
 #ifdef ENABLE_CW_MODULATOR
-	else if (Key == KEY_SIDE1 && gCW_Recording) {}
+	else if (Key == KEY_SIDE1 && (gCW_KeyerUsingSD1 && (gCW_Recording || (gEeprom.CW_KEY_INPUT & CW_KEY_FLAG_SIDE1)))) {
+		// Block side button 1 if used by keyer during CW macro recording
+	}
 #endif
 #ifdef ENABLE_FEAT_F4HWN // For F + SIDE1 or F + SIDE2
     else if (gWasFKeyPressed && (Key == KEY_SIDE1 || Key == KEY_SIDE2)) {
@@ -2378,8 +2464,8 @@ Skip:
         RADIO_SelectVfos();
 
 #ifdef ENABLE_CW_MODULATOR
-	if(gFlagReconfigureVfos && gTxVfo->Modulation==MODULATION_CW)
-		CW_KeyerReconfigure();
+	if(gFlagReconfigureVfos)
+		CW_KeyerReconfigure(gTxVfo->Modulation==MODULATION_CW);
 #endif
 
 #ifdef ENABLE_NOAA

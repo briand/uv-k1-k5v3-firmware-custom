@@ -259,15 +259,13 @@ void DrawCWDecodeBar(void)
 	memset(p_line, 0, LCD_WIDTH);
 	
 	// Get the last 20 characters from display buffer
-	const unsigned int len = strlen(gCW_TX_Display);
-	const unsigned int idx = (len > 20) ? len - 20 : 0;
+	CW_GetTxDisplayTail(String, sizeof(String));
 
 	// Print the text shifted right so glyph can be placed at x=0; print text first
-	sprintf(String, "%s", gCW_TX_Display + idx);
 	UI_PrintStringSmallNormal(String, 10, 0, line);
 
 	// Draw glyph after text so it can't be clobbered (drawn independently of DecodeBar)
-	if (CW_IsMacroPlaybackActive() && (center_line == CENTER_LINE_NONE || center_line == CENTER_LINE_CW_DECODE)) {
+	if (gCW_PlaybackActive && (center_line == CENTER_LINE_NONE || center_line == CENTER_LINE_CW_DECODE)) {
 		if (gCW_PlayIndicatorOn) {
 			memcpy(p_line + 0, BITMAP_Play, sizeof(BITMAP_Play));
 		} else {
@@ -1513,8 +1511,8 @@ void UI_DisplayMain(void)
 #endif
 
 #ifdef ENABLE_CW_MODULATOR
-		if ((gCurrentFunction == FUNCTION_TRANSMIT || gCW_TxDisplayHoldoff_10ms > 0) && gCurrentVfo->Modulation == MODULATION_CW && gCW_TX_Display[0] != 0)
-		{	// show CW characters being transmitted (persists 1 sec after TX ends)
+		if ((gCW_TxDisplayHoldoff_10ms > 0) && gCW_TX_Display[0] != 0)
+		{	// show decoded CW characters
 			center_line = CENTER_LINE_CW_DECODE;
 			DrawCWDecodeBar();
 		}

@@ -64,6 +64,12 @@ inline static void ACTION_ScanRestart() { ACTION_Scan(true); };
 #ifdef ENABLE_CW_MODULATOR
 static void ACTION_PlayCWMsg1(void);
 static void ACTION_PlayCWMsg2(void);
+static void ACTION_PlayCWMsg3(void);
+static void ACTION_PlayCWMsg4(void);
+static void ACTION_RepeatCWMsg1(void);
+static void ACTION_RepeatCWMsg2(void);
+static void ACTION_RepeatCWMsg3(void);
+static void ACTION_RepeatCWMsg4(void);
 #endif
 
 void (*action_opt_table[])(void) = {
@@ -115,9 +121,12 @@ void (*action_opt_table[])(void) = {
 #ifdef ENABLE_CW_MODULATOR
 	[ACTION_OPT_PLAY_CWMSG1] = &ACTION_PlayCWMsg1,
 	[ACTION_OPT_PLAY_CWMSG2] = &ACTION_PlayCWMsg2,
-#else
-	[ACTION_OPT_PLAY_CWMSG1] = &FUNCTION_NOP,
-	[ACTION_OPT_PLAY_CWMSG2] = &FUNCTION_NOP,
+	[ACTION_OPT_PLAY_CWMSG3] = &ACTION_PlayCWMsg3,
+	[ACTION_OPT_PLAY_CWMSG4] = &ACTION_PlayCWMsg4,
+	[ACTION_OPT_REPEAT_CWMSG1] = &ACTION_RepeatCWMsg1,
+	[ACTION_OPT_REPEAT_CWMSG2] = &ACTION_RepeatCWMsg2,
+	[ACTION_OPT_REPEAT_CWMSG3] = &ACTION_RepeatCWMsg3,
+	[ACTION_OPT_REPEAT_CWMSG4] = &ACTION_RepeatCWMsg4,
 #endif
 
 #ifdef ENABLE_FEAT_F4HWN
@@ -451,12 +460,42 @@ static void ACTION_Scan_FM(bool bRestart)
 #ifdef ENABLE_CW_MODULATOR
 static void ACTION_PlayCWMsg1(void)
 {
-	CW_StartMacroPlayback(0);
+	CW_StartMacroPlayback(0, false);
 }
 
 static void ACTION_PlayCWMsg2(void)
 {
-	CW_StartMacroPlayback(1);
+	CW_StartMacroPlayback(1, false);
+}
+
+static void ACTION_PlayCWMsg3(void)
+{
+	CW_StartMacroPlayback(2, false);
+}
+
+static void ACTION_PlayCWMsg4(void)
+{
+	CW_StartMacroPlayback(3, false);
+}
+
+static void ACTION_RepeatCWMsg1(void)
+{
+	CW_StartMacroPlayback(0, true);
+}
+
+static void ACTION_RepeatCWMsg2(void)
+{
+	CW_StartMacroPlayback(1, true);
+}
+
+static void ACTION_RepeatCWMsg3(void)
+{
+	CW_StartMacroPlayback(2, true);
+}
+
+static void ACTION_RepeatCWMsg4(void)
+{
+	CW_StartMacroPlayback(3, true);
 }
 #endif
 

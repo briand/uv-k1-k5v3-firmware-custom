@@ -26,6 +26,10 @@ enum GUI_DisplayType_t
     DISPLAY_MENU,
     DISPLAY_SCANNER,
 
+#ifdef ENABLE_CODE_PRACTICE
+	DISPLAY_CPO,
+#endif
+
 #ifdef ENABLE_FMRADIO
     DISPLAY_FM,
 #endif

@@ -34,6 +34,9 @@
 #ifdef ENABLE_FEAT_F4HWN_GAME
 #include "app/breakout.h"
 #endif
+#ifdef ENABLE_CODE_PRACTICE
+#include "app/cpo.h"
+#endif
 
 #include "audio.h"
 #include "board.h"
@@ -245,9 +248,13 @@ static void processFKeyFunction(const KEY_Code_t Key, const bool beep)
 #endif
             }
             else {
+
                 toggle_chan_scanlist();
             }
-
+#if defined(ENABLE_CODE_PRACTICE) && !defined(ENABLE_NOAA) && !defined(ENABLE_SPECTRUM)
+				CPO_Enter();
+				gRequestDisplayScreen = DISPLAY_CPO;
+#endif
             break;
 
         case KEY_6:

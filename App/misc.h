@@ -475,8 +475,10 @@ static inline bool SerialConfigInProgress() { return gSerialConfigCountDown_500m
 	} CW_State_t;
 
 	extern volatile CW_State_t            gCW_State;
+	extern volatile bool                  gCW_KeyerUsingSD1;
+	extern volatile bool				  gCW_KeyerUsesPTT;
 	extern volatile uint16_t     gCW_SuspendCountdown_10ms;
-	extern volatile uint8_t      gCW_TxDisplayHoldoff_10ms;
+	extern volatile uint16_t      gCW_TxDisplayHoldoff_10ms;
 	extern const uint16_t        cw_suspend_count_10ms;
 #endif
 

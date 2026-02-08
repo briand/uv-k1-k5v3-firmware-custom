@@ -21,6 +21,7 @@
 #include "../app/menu.h"
 #ifdef ENABLE_CW_MODULATOR
 	#include "../app/cwmacro.h"
+	#include "../app/cwhardware.h"
 #endif
 #include "../bitmaps.h"
 #include "../board.h"
@@ -171,13 +172,17 @@ const t_menu_item MenuList[] =
 #endif
 #endif
 #ifdef ENABLE_CW_MODULATOR
-	{"CWfreq", VOICE_ID_INVALID,                       MENU_CW_FREQ       },
-	{"CWvol", VOICE_ID_INVALID,                      MENU_CW_SIDETONE_LEVEL},
-	{"CWkmod", VOICE_ID_INVALID,                      MENU_CW_KEYER_MODE },
-	{"CWwpm", VOICE_ID_INVALID,                       MENU_CW_KEY_WPM	  },
-	{"CWkin", VOICE_ID_INVALID,                        MENU_CW_KEY_INPUT  },
-	{"CWmsg1", VOICE_ID_INVALID,                        MENU_CW_MSG1       },
-	{"CWmsg2", VOICE_ID_INVALID,                        MENU_CW_MSG2       },
+	{"CWfreq",      MENU_CW_FREQ       },
+	{"CWvol",       MENU_CW_SIDETONE_LEVEL},
+	{"CWkmod",      MENU_CW_KEYER_MODE },
+	{"CWwpm",       MENU_CW_KEY_WPM    },
+	{"CWkin",       MENU_CW_KEY_INPUT  },
+	{"CWmsg1",      MENU_CW_MSG1       },
+	{"CWmsg2",      MENU_CW_MSG2       },
+	{"CWmsg3",      MENU_CW_MSG3       },
+	{"CWmsg4",      MENU_CW_MSG4       },
+	{"CWmrpt",      MENU_CW_MSG_REPEAT },
+	{"CWbkin",      MENU_CW_BKIN       },
 #endif
 
     // hidden menu items from here on
@@ -197,6 +202,11 @@ const t_menu_item MenuList[] =
 #endif
     {"BatCal",      MENU_BATCAL        }, // battery voltage calibration
     {"BatTyp",      MENU_BATTYP        }, // battery type 1600/2200mAh
+	#ifdef ENABLE_CW_MODULATOR
+	{"CWcrd",       MENU_CW_CRD        },
+	{"CWcLo",       MENU_CW_ADC_LO_20K },
+	{"CWcHi",       MENU_CW_ADC_HI_10K },
+	#endif
     {"SetNav",      MENU_SET_NAV       }, // set navigation (LEFT / RIGHT or UP / DOWN)
     {"Reset",       MENU_RESET         }, // might be better to move this to the hidden menu items ?
 
@@ -495,6 +505,12 @@ const t_sidefunction gSubMenu_SIDEFUNCTIONS[] =
 #ifdef ENABLE_CW_MODULATOR
 	{"PLAY\nCW MSG1", ACTION_OPT_PLAY_CWMSG1},
 	{"PLAY\nCW MSG2", ACTION_OPT_PLAY_CWMSG2},
+	{"PLAY\nCW MSG3", ACTION_OPT_PLAY_CWMSG3},
+	{"PLAY\nCW MSG4", ACTION_OPT_PLAY_CWMSG4},
+	{"REPEAT\nCW MSG1", ACTION_OPT_REPEAT_CWMSG1},
+	{"REPEAT\nCW MSG2", ACTION_OPT_REPEAT_CWMSG2},
+	{"REPEAT\nCW MSG3", ACTION_OPT_REPEAT_CWMSG3},
+	{"REPEAT\nCW MSG4", ACTION_OPT_REPEAT_CWMSG4},
 #endif
 #ifdef ENABLE_FEAT_F4HWN
     {"RX MODE",         ACTION_OPT_RXMODE},
@@ -524,19 +540,22 @@ const char* gSubMenu_CW_KEYER_MODE[] =
 const char* gSubMenu_CW_KEY_INPUT[] =
 {
 	"PTT\nHandKey",
-	"PTT+port\nHandKey",
+	"PTT+TIP\nHandKey",
 	"PTT dah\nSD1 dit",
 	"PTT dit\nSD1 dah",
-	"PTT+tip\ndah\nring\ndit",
-	"PTT+tip\ndit\nring\ndah",
-	"PTT+tip\ndah\nSD1+rng\ndit",
-	"PTT+tip\ndit\nSD1+rng\ndah"
+	"PTT+TIP\ndah\nRING\ndit",
+	"PTT+TIP\ndit\nRING\ndah",
+	"PTT+TIP\ndah\nSD1+RING\ndit",
+	"PTT+TIP\ndit\nSD1+RING\ndah",
+	"CEC\nCable",
+	"CEC\nCable\nReversed"
 };
 
 const char* gSubMenu_CW_MSG[] =
 {
 	"Record\nnew?",
-	"Play"
+	"Play",
+	"Repeat"
 };
 
 #endif
@@ -1176,30 +1195,36 @@ void UI_DisplayMenu(void)
 			strcpy(String, gSubMenu_CW_KEY_INPUT[gSubMenuSelection]);
 			break;
 
+		case MENU_CW_BKIN:
+			strcpy(String, gSubMenu_OFF_ON[gSubMenuSelection]);
+			break;
+
+		case MENU_CW_MSG_REPEAT:
+			sprintf(String, "%d s", gSubMenuSelection);
+			break;
+
 		case MENU_CW_MSG1:
 		case MENU_CW_MSG2:
+		case MENU_CW_MSG3:
+		case MENU_CW_MSG4:
 			{
-				uint8_t macroIdx = (UI_MENU_GetCurrentMenuId() == MENU_CW_MSG1) ? 0 : 1;
-				uint8_t len = CW_GetMacroLength(macroIdx);
-				
 				// Check if we're in recording mode
 				if (gIsInSubMenu && edit_index >= 0 && gCW_Recording) {
+
 					// Recording mode - show accumulated characters
-					char display[16];
-					uint8_t cursor_pos = CW_GetRecordingDisplay(display, sizeof(display));
+					char display[10];
+					const uint8_t display_len = CW_GetTxDisplayTail(display, sizeof(display));
 					
 					// Display the recording text on line 2
-					UI_PrintString(display, menu_item_x1, menu_item_x2, 2, 8);
+					UI_PrintString(display, menu_item_x1, 0, 2, 8);
 					
-					// Show cursor under current position (cursor_pos is the index in display string)
-					if (cursor_pos < strlen(display)) {
-						char cursor[2] = "^";
-						UI_PrintString(cursor, menu_item_x1 + (cursor_pos * 8), 0, 4, 8);
-					}
+					// Show cursor under next position
+					char cursor[2] = "^";
+					UI_PrintString(cursor, menu_item_x1 + (display_len * 8), 0, 4, 8);
 					
 					// Show recording count on line 5 (not 6 which gets cut off)
 					if (gCW_RecordLength >= CW_MACRO_MAX_LEN) {
-						sprintf(String, "FULL %u/%u", gCW_RecordLength, CW_MACRO_MAX_LEN);
+						sprintf(String, "FULL! %u", gCW_RecordLength);
 					} else {
 						sprintf(String, "REC %u/%u", gCW_RecordLength, CW_MACRO_MAX_LEN);
 					}
@@ -1207,16 +1232,34 @@ void UI_DisplayMenu(void)
 					
 					already_printed = true;
 				} else if (gSubMenuSelection == 0) {
-					// Show current macro (use 9 char width for 4 lines = 36 chars)
+					uint8_t macroIdx = UI_MENU_GetCurrentMenuId() - MENU_CW_MSG1;
+					uint8_t len = CW_GetMacroLength(macroIdx);
 					if (len == 0) {
 						strcpy(String, "empty");
 					} else {
 						CW_FormatMacroDisplay(macroIdx, String, 9);
 					}
 				} else {
-					// record/play
+					// record/play/repeat
 					strcpy(String, gSubMenu_CW_MSG[gSubMenuSelection-1]);
 				}
+			}
+			break;
+
+		case MENU_CW_ADC_LO_20K:
+			sprintf(String, "%u", gSubMenuSelection);
+			break;
+
+		case MENU_CW_ADC_HI_10K:
+			sprintf(String, "%u", gSubMenuSelection);
+			break;
+
+		case MENU_CW_CRD:
+			if (gIsInSubMenu) {
+				uint16_t adc = CW_ReadCH3();
+				sprintf(String, "%u", adc);
+			} else {
+				strcpy(String, "ADC\nRead\nCheck");
 			}
 			break;
 #endif
@@ -1464,7 +1507,7 @@ void UI_DisplayMenu(void)
 		UI_PrintString("KEY ERR", menu_item_x1, menu_item_x2, 5, 8);
 	}
 	
-	if ((UI_MENU_GetCurrentMenuId() == MENU_CW_MSG1 || UI_MENU_GetCurrentMenuId() == MENU_CW_MSG2) && gCwNoKeyerError)
+	if ((UI_MENU_GetCurrentMenuId() >= MENU_CW_MSG1 && UI_MENU_GetCurrentMenuId() <= MENU_CW_MSG4) && gCwNoKeyerError)
 	{	// display error when trying to record without keyer enabled
 		UI_PrintString("no keyer!", menu_item_x1, menu_item_x2, 5, 8);
 	}

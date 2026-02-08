@@ -328,7 +328,9 @@ uint8_t           gIsLocked = 0xFF;
 #ifdef ENABLE_CW_MODULATOR
 	volatile uint16_t gCW_SuspendCountdown_10ms;
 	volatile CW_State_t        gCW_State = CW_INACTIVE;
-	volatile uint8_t  gCW_TxDisplayHoldoff_10ms = 0;
+	volatile bool     gCW_KeyerUsingSD1 = false;
+	volatile bool     gCW_KeyerUsesPTT = false;
+	volatile uint16_t  gCW_TxDisplayHoldoff_10ms = 0;
 	volatile bool     gCW_PlayIndicatorOn = false;  /* toggled periodically to blink indicator */
 #endif
 

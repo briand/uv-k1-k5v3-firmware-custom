@@ -28,6 +28,7 @@ extern uint8_t gUnlockAllTxConfCnt;
 #ifdef ENABLE_CW_MODULATOR
 extern bool gCwKeyInputCheckFailed;
 extern bool gCwNoKeyerError;
+extern bool gCW_AdcReadActive;
 #endif
 
 int MENU_GetLimits(uint8_t menu_id, int32_t *pMin, int32_t *pMax);
