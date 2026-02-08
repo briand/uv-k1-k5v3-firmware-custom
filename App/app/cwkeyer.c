@@ -180,9 +180,13 @@ static void CW_KeyerInit()
     s_enable_keyer = true;
 }
 
+// public entrypoint to cause configuration
 void CW_KeyerReconfigure(bool enable)
 {
     if(!enable) {
+#ifdef CW_KEYER_DEBUG
+         UART_Send("CW_KeyerReconfigure: disable requested\r\n", 38);
+#endif
         if(!s_enable_keyer) 
             return;  // already disabled
 
@@ -407,7 +411,7 @@ bool CW_CheckKeyerInputs(uint8_t new_mode)
     bool uses_adc = (new_mode & CW_KEY_FLAG_ADC);
 
     // Button-only modes don't need validation (no port pins to check)
-    if (!uses_port_ground && !uses_port_ring) {
+    if (!uses_port_ground && !uses_port_ring && !uses_adc) {
         return true;
     }
     
@@ -427,6 +431,9 @@ bool CW_CheckKeyerInputs(uint8_t new_mode)
         CW_ConfigurePortRing(uses_port_ring);
         
     } else if(uses_adc) {
+#if CW_KEYER_DEBUG
+        UART_Send("Configuring ADC for CW keyer check\r\n", 38);
+#endif
         CW_ConfigureADCforCECPaddles(true);
     }
 
@@ -529,7 +536,8 @@ CW_Action_t CW_HandleState(void)
     static CW_KeyerFSMState_t last_logged_state = CWK_STATE_IDLE;
 #endif
 
-    if (s_cfg_dirty && s_KeyerFSMState == CWK_STATE_IDLE) {
+    // don't start the keyer if we're in tech (hidden menu) mode
+    if (s_cfg_dirty && s_KeyerFSMState == CWK_STATE_IDLE && !gF_LOCK) {
         CW_KeyerInit();
     }
 
@@ -591,9 +599,6 @@ CW_Action_t CW_HandleState(void)
             UART_Send("keyer is idle\r\n", 15);
 #endif
         if (in.dit || in.dah) {
-#if CW_KEYER_DEBUG
-            UART_Send("entered if block\r\n", 18);
-#endif
             // Explicit handling when both paddles are pressed:
             // If both pressed and previous element was a dit, choose dah; otherwise choose dit.
             if (in.dit && !in.dah) {
