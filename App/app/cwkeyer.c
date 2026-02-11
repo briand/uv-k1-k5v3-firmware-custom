@@ -132,12 +132,13 @@ void CW_UpdateWPM()
 // Called when changing to non-CW mode
 static void CW_KeyerDeinit()
 {
-    // ADC does the port ground deinit too
+    // ADC deinit performs the port ground deinit too
     CW_ConfigureADCforCECPaddles(false);
     CW_ConfigurePortRing(false);
 
     gCW_KeyerUsingSD1 = false;
     s_enable_keyer = false;
+    s_last_handkey_ptt = false;
 }
 
 // Initialize keyer from gEeprom settings
@@ -193,6 +194,7 @@ void CW_KeyerReconfigure(bool enable)
         // Disable keyer immediately and put ports back to normal if needed
         s_KeyerFSMState = CWK_STATE_IDLE;
         CW_KeyerDeinit();
+        gCW_KeyerUsesPTT = false;
         s_cfg_dirty = false;
         return;
     }
@@ -401,7 +403,7 @@ void CW_PlaybackIndicatorDeadline(void)
 bool CW_CheckKeyerInputs(uint8_t new_mode)
 {
     // Handkey mode doesn't need validation (no keyer flag set)
-    if (new_mode & CW_KEY_FLAG_NO_KEYER) {
+    if (new_mode == CW_KEY_INPUT_HANDKEY) {
         return true;
     }
     
@@ -423,11 +425,17 @@ bool CW_CheckKeyerInputs(uint8_t new_mode)
 #endif
     
     // Temporarily configure port pins if needed
-    if (uses_port_ground || uses_port_ring) {
+    if (uses_port_ground)
+    {        
 #if CW_KEYER_DEBUG
-        UART_Send("Configuring port pins for CW keyer check\r\n", 42);
+        UART_Send("Configuring port ground for CW keyer check\r\n", 44);
 #endif
         CW_ConfigurePortGround(uses_port_ground);
+    }
+    if( uses_port_ring) {
+#if CW_KEYER_DEBUG
+        UART_Send("Configuring port ring for CW keyer check\r\n", 42);
+#endif
         CW_ConfigurePortRing(uses_port_ring);
         
     } else if(uses_adc) {
@@ -483,6 +491,8 @@ bool CW_CheckKeyerInputs(uint8_t new_mode)
     UART_Send(buf, strlen(buf));
 #endif
 
+    CW_KeyerDeinit();  // put ports back, disable keyer
+
     // If no stuck keys detected, mode is valid
     if (!any_stuck) {
 #if CW_KEYER_DEBUG
@@ -494,7 +504,6 @@ bool CW_CheckKeyerInputs(uint8_t new_mode)
     UART_Send("CW keyer inputs stuck\r\n", 24);
 #endif
 
-    CW_KeyerDeinit();  // put ports back, disable keyer
 
     return false;
 }
@@ -541,15 +550,12 @@ CW_Action_t CW_HandleState(void)
         CW_KeyerInit();
     }
 
-    if(!s_enable_keyer)
-        return CW_ACTION_NONE;
-
     const uint16_t cur_count = (uint16_t)TIMERBASE0_LOW_CNT;
     const uint16_t delta_since_last = timer_jiffies_since(s_last_count);
     if (delta_since_last < TICKS_PER_MS) {
         // Not enough time has passed - return appropriate action for current state
         // ACTIVE states: hold carrier on, GAP/IDLE states: no action (carrier off)
-        if (s_KeyerFSMState == CWK_STATE_ACTIVE_ELEMENT) {
+        if (s_KeyerFSMState == CWK_STATE_ACTIVE_ELEMENT || s_last_handkey_ptt) {
             return CW_ACTION_CARRIER_HOLD_ON;
         }
         return CW_ACTION_NONE;

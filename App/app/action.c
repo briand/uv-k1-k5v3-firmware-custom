@@ -313,6 +313,22 @@ void ACTION_SwitchDemodul(void)
         gTxVfo->Modulation = MODULATION_FM;
 }
 
+void ACTION_SwitchFilter(void)
+{
+	gRequestSaveChannel = 1;
+
+	uint8_t next = gTxVfo->CHANNEL_BANDWIDTH + 1;
+#ifdef ENABLE_EXTRA_FILTER
+	if (next > BK4819_FILTER_BW_1p7K)
+		next = BK4819_FILTER_BW_WIDE;
+#else
+	if (next > BK4819_FILTER_BW_6K)
+		next = BK4819_FILTER_BW_WIDE;
+#endif
+
+	gTxVfo->CHANNEL_BANDWIDTH = next;
+}
+
 
 void ACTION_Handle(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 {

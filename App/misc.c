@@ -330,6 +330,7 @@ uint8_t           gIsLocked = 0xFF;
 	volatile CW_State_t        gCW_State = CW_INACTIVE;
 	volatile bool     gCW_KeyerUsingSD1 = false;
 	volatile bool     gCW_KeyerUsesPTT = false;
+	volatile bool     gCW_CrossMode = false;
 	volatile uint16_t  gCW_TxDisplayHoldoff_10ms = 0;
 	volatile bool     gCW_PlayIndicatorOn = false;  /* toggled periodically to blink indicator */
 #endif

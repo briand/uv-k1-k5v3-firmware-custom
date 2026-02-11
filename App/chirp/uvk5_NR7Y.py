@@ -1,22 +1,31 @@
 # uvk5_NR7Y.py
-# CHIRP driver for Quansheng UV-K5 with NR7Y CW firmware
+# chirp driver for Quansheng UV-K5 with NR7Y CW firmware
 # Supports CW modulator settings and 4 macro memories
 
-import re
 import logging
 import struct
 
-from chirp import directory, bitwise, memmap, errors, chirp_common
+from chirp import directory
 from chirp.settings import (
     RadioSetting, RadioSettingGroup, RadioSettingValueBoolean,
     RadioSettingValueInteger, RadioSettingValueString, RadioSettingValueList,
     RadioSettings
 )
 
-# Import the official UV-K5 driver from CHIRP
+# Import the official UV-K5 drivers from CHIRP
 from chirp.drivers import uvk5
+from chirp.drivers import uvk5_egzumer
 
 LOG = logging.getLogger(__name__)
+
+# Modulation values from firmware (radio.h ModulationMode_t)
+MODULATION_FM = 0
+MODULATION_AM = 1
+MODULATION_USB = 2
+MODULATION_CW = 3
+
+# Channel bandwidth options (radio.h)
+CHANNEL_BANDWIDTH_OPTIONS = ["Wide", "Narrow", "6K", "1.7K"]
 
 # CW Macro constants
 CW_MACRO_ADDRS = [0x1C00, 0x1C30, 0x1C60, 0x1C90]
@@ -71,7 +80,7 @@ KEYACTIONS_LIST = [
 
 @directory.register
 @directory.detected_by(uvk5.UVK5Radio)
-class UVK5_NR7Y(uvk5.UVK5RadioBase):
+class UVK5_NR7Y(uvk5_egzumer.UVK5RadioEgzumer):
     """Quansheng UV-K5 with NR7Y CW firmware"""
 
     VENDOR = "Quansheng"
@@ -115,14 +124,32 @@ class UVK5_NR7Y(uvk5.UVK5RadioBase):
     def _is_nr7y_cw_firmware(self) -> bool:
         """Check if firmware has CW modulator enabled"""
         try:
-            # Read build options from 0x1FF0-0x1FF1
-            build_opts = bytes(self._mmap[0x1FF0:0x1FF2])
+            build_opt1 = self._get_build_opt_byte1()
             # Bit 6 of byte 1 indicates ENABLE_CW_MODULATOR
-            has_cw = (build_opts[1] & 0x40) != 0
-            LOG.info(f"CW modulator flag: {has_cw} (0x1FF1=0x{build_opts[1]:02x})")
+            has_cw = (build_opt1 & 0x40) != 0
+            LOG.info(f"CW modulator flag: {has_cw} (0x1FF1=0x{build_opt1:02x})")
             return has_cw
         except Exception as e:
             LOG.error(f"Error checking CW firmware flag: {e}")
+            return False
+
+    def _get_build_opt_byte1(self) -> int:
+        """Read build options byte 1 from EEPROM (0x1FF1)."""
+        try:
+            val = self._mmap[0x1FF1]
+            if isinstance(val, (bytes, bytearray)):
+                val = val[0]
+            return int(val) & 0xFF
+        except Exception:
+            return 0
+
+    def _has_extra_filter(self) -> bool:
+        """Check if firmware has extra filter enabled"""
+        try:
+            build_opt1 = self._get_build_opt_byte1()
+            return (build_opt1 & 0x80) != 0
+        except Exception as e:
+            LOG.error(f"Error checking extra filter flag: {e}")
             return False
 
     def _update_key_actions(self, rs: RadioSettings) -> None:
@@ -210,9 +237,6 @@ class UVK5_NR7Y(uvk5.UVK5RadioBase):
             return rs
 
         LOG.info("CW modulator detected - adding CW settings")
-
-        # Remove DTMF contacts if present (conflicts with CW macros)
-        self._remove_dtmf_contacts(rs)
 
         # Add CW settings group
         cw = RadioSettingGroup("cw", "CW Settings")
@@ -330,6 +354,203 @@ class UVK5_NR7Y(uvk5.UVK5RadioBase):
         LOG.info(f"Added CW settings group with {len(list(cw))} settings")
         return rs
 
+    def get_features(self):
+        rf = super().get_features()
+
+        # Allow CW + USB (SSB) in addition to base modes
+        rf.valid_modes = ["FM", "NFM", "AM", "NAM", "USB", "CW"]
+
+        if hasattr(rf, "has_extra"):
+            rf.has_extra = True
+
+        return rf
+
+    def _get_mem_mode(self, _mem):
+        """Map firmware modulation to CHIRP mode without using bandwidth."""
+        modulation = int(_mem.modulation)
+        if modulation == MODULATION_AM:
+            return "AM"
+        if modulation == MODULATION_USB:
+            return "USB"
+        if modulation == MODULATION_CW:
+            return "CW"
+        return "FM"
+
+    def _set_mem_mode(self, _mem, mode):
+        """Set firmware modulation from CHIRP mode without changing filter bits."""
+        modulation = self._chirp_mode_to_modulation(mode)
+        if modulation is None:
+            modulation = MODULATION_FM
+        _mem.modulation = int(modulation)
+
+    def get_memory_extra_fields(self):
+        filter_opts = CHANNEL_BANDWIDTH_OPTIONS if self._has_extra_filter() else CHANNEL_BANDWIDTH_OPTIONS[:2]
+        return [
+            RadioSetting(
+                "bandwidth",
+                "Filter",
+                RadioSettingValueList(filter_opts, current_index=0)
+            )
+        ]
+
+    def get_extra_fields(self):
+        """Compatibility with CHIRP builds that expect get_extra_fields()."""
+        return self.get_memory_extra_fields()
+
+    def _get_memory_bounds(self):
+        try:
+            rf = self.get_features()
+            if rf and rf.memory_bounds:
+                return rf.memory_bounds
+        except Exception:
+            pass
+        return (1, 200)
+
+    def _get_channel_offset(self, number):
+        if not isinstance(number, int):
+            return None
+        if number is None:
+            return None
+
+        low, high = self._get_memory_bounds()
+        if number < low or number > high:
+            return None
+
+        offset = (number - low) * 16
+        if offset + 11 >= len(self._mmap):
+            return None
+
+        return offset
+
+    def _get_channel_modulation(self, number):
+        offset = self._get_channel_offset(number)
+        if offset is None:
+            return None
+
+        byte = self._mmap[offset + 11]
+        if isinstance(byte, (bytes, bytearray)):
+            byte = byte[0]
+        return (byte >> 4) & 0x0F
+
+    def _set_channel_modulation(self, number, modulation):
+        offset = self._get_channel_offset(number)
+        if offset is None:
+            return
+
+        byte = self._mmap[offset + 11]
+        if isinstance(byte, (bytes, bytearray)):
+            byte = byte[0]
+        self._mmap[offset + 11] = (byte & 0x0F) | ((modulation & 0x0F) << 4)
+
+    def _chirp_mode_to_modulation(self, mode):
+        if not mode:
+            return None
+
+        mode = str(mode).upper()
+        if mode in ("FM", "NFM", "NAM"):
+            return MODULATION_FM
+        if mode == "AM":
+            return MODULATION_AM
+        if mode == "USB":
+            return MODULATION_USB
+        if mode == "CW":
+            return MODULATION_CW
+        return None
+
+    def _get_channel_attr_byte(self, number):
+        offset = self._get_channel_offset(number)
+        if offset is None:
+            return None
+
+        byte = self._mmap[offset + 8 + 4]
+        if isinstance(byte, (bytes, bytearray)):
+            byte = byte[0]
+        return byte
+
+    def _set_channel_attr_byte(self, number, value):
+        offset = self._get_channel_offset(number)
+        if offset is None:
+            return
+
+        self._mmap[offset + 8 + 4] = value & 0xFF
+
+    def _get_channel_bandwidth_idx(self, number):
+        attr = self._get_channel_attr_byte(number)
+        if attr is None:
+            return None
+        if self._has_extra_filter():
+            return (attr >> 5) & 0x03
+        return (attr >> 1) & 0x01
+
+    def _set_channel_bandwidth_idx(self, number, idx):
+        attr = self._get_channel_attr_byte(number)
+        if attr is None:
+            return
+
+        if self._has_extra_filter():
+            attr = (attr & ~0x60) | ((idx & 0x03) << 5)
+        else:
+            attr = (attr & ~0x02) | ((idx & 0x01) << 1)
+        self._set_channel_attr_byte(number, attr)
+
+    def get_memory(self, number):
+        mem = super().get_memory(number)
+
+        filter_opts = CHANNEL_BANDWIDTH_OPTIONS if self._has_extra_filter() else CHANNEL_BANDWIDTH_OPTIONS[:2]
+        bw_idx = self._get_channel_bandwidth_idx(number)
+        if bw_idx is None:
+            bw_idx = 0
+        if bw_idx >= len(filter_opts):
+            bw_idx = 0
+        bw_setting = RadioSetting(
+            "bandwidth",
+            "Filter",
+            RadioSettingValueList(filter_opts, current_index=bw_idx)
+        )
+        if mem.extra is None:
+            mem.extra = RadioSettingGroup("extra", "Extra")
+        else:
+            try:
+                existing = mem.extra.get("bandwidth")
+                if existing is not None:
+                    mem.extra.remove(existing)
+            except Exception:
+                pass
+        mem.extra.append(bw_setting)
+
+        if getattr(mem, "empty", False):
+            return mem
+
+        modulation = self._get_channel_modulation(number)
+        if modulation == MODULATION_USB:
+            mem.mode = "USB"
+        elif modulation == MODULATION_CW:
+            mem.mode = "CW"
+
+        return mem
+
+    def set_memory(self, mem):
+        if getattr(mem, "empty", False):
+            return super().set_memory(mem)
+
+        super().set_memory(mem)
+
+        if isinstance(mem.number, int):
+            modulation = self._chirp_mode_to_modulation(mem.mode)
+            if modulation is not None:
+                self._set_channel_modulation(mem.number, modulation)
+
+            if mem.extra is not None:
+                try:
+                    bw_setting = mem.extra.get("bandwidth")
+                except Exception:
+                    bw_setting = None
+                if bw_setting is not None:
+                    filter_opts = CHANNEL_BANDWIDTH_OPTIONS if self._has_extra_filter() else CHANNEL_BANDWIDTH_OPTIONS[:2]
+                    bw_idx = filter_opts.index(str(bw_setting.value))
+                    self._set_channel_bandwidth_idx(mem.number, bw_idx)
+        
+
     def set_settings(self, settings):
         """Apply settings to radio - follows base class pattern with CW support"""
         _mem = self._memobj
@@ -424,20 +645,6 @@ class UVK5_NR7Y(uvk5.UVK5RadioBase):
                 _mem.mic_gain = int(setting.value)
             # ... base class handles all other settings through its implementation
             # We'll just let anything else pass through by calling parent on groups
-
-    def _remove_dtmf_contacts(self, rs: RadioSettings) -> None:
-        """Remove DTMF contacts group to prevent conflicts"""
-        removed = []
-        for group in list(rs):
-            if hasattr(group, 'get_name'):
-                name = group.get_name()
-                # Remove any DTMF contact groups
-                if 'contact' in name.lower() and 'dtmf' in name.lower():
-                    rs.remove(group)
-                    removed.append(name)
-        
-        if removed:
-            LOG.info(f"Removed DTMF contact groups: {removed}")
 
     # ======== CW Settings Encode/Decode ========
     

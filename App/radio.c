@@ -504,7 +504,7 @@ void RADIO_ConfigureSquelchAndOutputPower(VFO_Info_t *pInfo)
 
     if (gEeprom.SQUELCH_LEVEL == 0
 	#ifdef ENABLE_CW_MODULATOR
-		|| pInfo->Modulation == MODULATION_CW   // briand - TODO revisit squelch
+		|| pInfo->Modulation == MODULATION_CW || pInfo->Modulation == MODULATION_USB  // briand - TODO revisit squelch
 	#endif
 	)
     {   // squelch == 0 (off)
@@ -835,7 +835,7 @@ void RADIO_SetupRegisters(bool switchToForeground)
     #else
         Frequency = gRxVfo->pRX->Frequency
 	#if ENABLE_CW_MODULATOR
-		- (gRxVfo->Modulation == MODULATION_CW ? gEeprom.CW_TONE_FREQUENCY : 0) // CW BFO offset
+		- (gRxVfo->Modulation == MODULATION_CW && !gCW_CrossMode ? gEeprom.CW_TONE_FREQUENCY : 0) // CW BFO offset
 		;
 			// char buf[64];
 			// sprintf_(buf, "RX freq: %d Hz, offset: %d Hz\r\n", gRxVfo->pRX->Frequency * 10, (10 * gEeprom.CW_TONE_FREQUENCY));
@@ -1064,7 +1064,13 @@ void RADIO_SetTxParameters(void)
 	#endif
 	}	
 
-	BK4819_SetFrequency(gCurrentVfo->pTX->Frequency);
+	uint32_t tx_frequency = gCurrentVfo->pTX->Frequency;
+#ifdef ENABLE_CW_MODULATOR
+	if (gTxVfo->Modulation == MODULATION_CW && gCW_CrossMode) {
+		tx_frequency += gEeprom.CW_TONE_FREQUENCY;
+	}
+#endif
+	BK4819_SetFrequency(tx_frequency);
 
     // TX compressor
     BK4819_SetCompander((gRxVfo->Modulation == MODULATION_FM && (gRxVfo->Compander == 1 || gRxVfo->Compander >= 3)) ? gRxVfo->Compander : 0);
@@ -1126,7 +1132,7 @@ void RADIO_SetModulation(ModulationMode_t modulation)
             break;
 #ifdef ENABLE_CW_MODULATOR
 		case MODULATION_CW:
-			gMonitor = true;
+			gMonitor = true;  // keep the audio from turning off at the TX->RX transition, so we don't hit mute sending bug
 			[[fallthrough]];
 #endif
 	    case MODULATION_USB:
@@ -1392,8 +1398,14 @@ void RADIO_SendCssTail(void)
 
 void RADIO_SendEndOfTransmission(void)
 {
+#ifdef ENABLE_CW_MODULATOR
+	if (gCurrentVfo->Modulation != MODULATION_CW) {
+#endif
     BK4819_PlayRoger();
     DTMF_SendEndOfTransmission();
+#ifdef ENABLE_CW_MODULATOR
+	}
+#endif
 
     // send the CTCSS/DCS tail tone - allows the receivers to mute the usual FM squelch tail/crash
     if(gEeprom.TAIL_TONE_ELIMINATION)

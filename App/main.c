@@ -207,8 +207,8 @@ void Main(void)
     }
 
 #ifdef ENABLE_CW_MODULATOR
-	// Check CW keyer inputs at startup - if stuck, fall back to handkey mode
-	if (!CW_CheckKeyerInputs(gEeprom.CW_KEY_INPUT)) {
+	// Check CW keyer inputs at startup - if stuck, fall back to handkey mode - skip during hidden mode boot
+	if (gF_LOCK != true && !CW_CheckKeyerInputs(gEeprom.CW_KEY_INPUT)) {
 		gEeprom.CW_KEY_INPUT = CW_KEY_INPUT_HANDKEY;
 		gEeprom.CW_KEY_INPUT_MENU = 0;
 		gRequestSaveSettings = true;
@@ -223,7 +223,7 @@ void Main(void)
 			if (KEYBOARD_Poll() != KEY_INVALID) {
 				break;
 			}
-			
+			boot_counter_10ms++;
 			SYSTEM_DelayMs(10);
 		}
 		gKeyReading0 = KEY_INVALID;

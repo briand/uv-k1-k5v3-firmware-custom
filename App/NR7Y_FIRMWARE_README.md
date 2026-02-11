@@ -14,6 +14,17 @@ Upload using your favorite Quansheng flash tool. I use k5tool (https://github.co
  2. Release buttons, menu will be automatically presented.
  3. Go up to Reset and pick ALL. 
 
+## Changelist from beta3 -> beta4
+Beta3 was not very healthy. If you had CEC cable mode set, and turned the radio off in a non-CW mode, it would boot in a broken repeating TX death spiral. Also, PTT handkey mode didn't even work! Fixed all that.
+
+- CHIRP driver fields for Mode, Step, and Filter (need to check "show extra fields" to see Filter)
+- Toggle Cross-mode on long-press 8 (talk to SSB operators with injected sidetone so they hear your sending and you hear them on-frequency)
+- Cycle filters on long-press 7
+- Don't do Roger on TX tail in CW
+- Hold open squelch on SSB modulation
+- Fixed beta3 TX-boot-bug
+- Fixed PTT handkey mode
+
 ## Changelist from beta2 -> beta3
 - CHIRP module for loading and storing all CW settings and messages (Thanks @u77345!)
 - Code Practice Oscillator mode
