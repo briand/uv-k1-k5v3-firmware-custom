@@ -53,7 +53,7 @@ const t_menu_item MenuList[] =
     {"TxCTCS",      MENU_T_CTCS        }, // was "T_CTCS"
     {"TxODir",      MENU_SFT_D         }, // was "SFT_D"
     {"TxOffs",      MENU_OFFSET        }, // was "OFFSET"
-    {"W/N",         MENU_W_N           },
+    {"Filter",      MENU_W_N           }, // was "W/N"
 #ifndef ENABLE_FEAT_F4HWN
     {"Scramb",      MENU_SCR           }, // was "SCR"
 #endif
@@ -213,8 +213,9 @@ const char gSubMenu_SFT_D[][4] =
 
 const char gSubMenu_W_N[][7] =
 {
-    "WIDE",
-    "NARROW"
+	"WIDE",
+	"NARROW",
+	"TIGHT"
 };
 
 const char gSubMenu_OFF_ON[][4] =

@@ -29,8 +29,9 @@ enum {
 };
 
 enum {
-    BANDWIDTH_WIDE = 0,
-    BANDWIDTH_NARROW
+	BANDWIDTH_WIDE = 0,
+	BANDWIDTH_NARROW,
+	BANDWIDTH_TIGHT
 };
 
 enum PTT_ID_t {
@@ -55,10 +56,17 @@ enum VfoState_t
 };
 typedef enum VfoState_t VfoState_t;
 
+// briand debug
+#define ENABLE_CW_MODULATOR 1
+
 typedef enum {
     MODULATION_FM,
     MODULATION_AM,
     MODULATION_USB,
+
+#ifdef ENABLE_CW_MODULATOR
+	MODULATION_CW,
+#endif
 
 #ifdef ENABLE_BYP_RAW_DEMODULATORS
     MODULATION_BYP,

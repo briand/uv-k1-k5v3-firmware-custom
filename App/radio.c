@@ -47,6 +47,10 @@ const char gModulationStr[MODULATION_UKNOWN][4] = {
     [MODULATION_AM]="AM",
     [MODULATION_USB]="USB",
 
+#ifdef ENABLE_CW_MODULATOR
+	[MODULATION_CW]="CW",
+#endif
+
 #ifdef ENABLE_BYP_RAW_DEMODULATORS
     [MODULATION_BYP]="BYP",
     [MODULATION_RAW]="RAW"
@@ -1006,6 +1010,7 @@ void RADIO_SetTxParameters(void)
         case BK4819_FILTER_BW_WIDE:
         case BK4819_FILTER_BW_NARROW:
         case BK4819_FILTER_BW_NARROWER:
+		case BK4819_FILTER_BANDWIDTH_TIGHT:
             #ifdef ENABLE_AM_FIX
 //              BK4819_SetFilterBandwidth(Bandwidth, gCurrentVfo->Modulation == MODULATION_AM && gSetting_AM_fix);
                 BK4819_SetFilterBandwidth(Bandwidth, true);
@@ -1022,7 +1027,7 @@ void RADIO_SetTxParameters(void)
 
     BK4819_PrepareTransmit();
 
-    SYSTEM_DelayMs(10);
+	SYSTEM_DelayMs(5);   /// briand - 10);
 
     BK4819_PickRXFilterPathBasedOnFrequency(gCurrentVfo->pTX->Frequency);
 
@@ -1066,6 +1071,13 @@ void RADIO_SetModulation(ModulationMode_t modulation)
         case MODULATION_USB:
             mod = BK4819_AF_BASEBAND2;
             break;
+
+#ifdef ENABLE_CW_MODULATOR
+		case MODULATION_CW:
+			// Use USB/baseband2 demod path for CW
+			mod = BK4819_AF_BASEBAND2;
+			break;
+#endif
 
 #ifdef ENABLE_BYP_RAW_DEMODULATORS
         case MODULATION_BYP:
@@ -1119,11 +1131,18 @@ void RADIO_SetModulation(ModulationMode_t modulation)
 
         BK4819_SetFilterBandwidth(BK4819_FILTER_BW_AM, true);
     }
-    
+        
     BK4819_SetRegValue(afDacGainRegSpec, 0xF);
-    BK4819_WriteRegister(BK4819_REG_3D, modulation == MODULATION_USB ? 0 : 0x2AAB);
+	BK4819_WriteRegister(
+		BK4819_REG_3D,
+	#ifdef ENABLE_CW_MODULATOR
+		(modulation == MODULATION_USB || modulation == MODULATION_CW) ? 0 : 0x2AAB
+	#else
+		(modulation == MODULATION_USB) ? 0 : 0x2AAB
+	#endif
+	    );
+	
     BK4819_SetRegValue(afcDisableRegSpec, modulation != MODULATION_FM);
-
     //RADIO_SetupAGC(modulation == MODULATION_AM, false);
     RADIO_SetupAGC(false, false);
 }
