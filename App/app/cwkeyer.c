@@ -1,4 +1,4 @@
- /* Copyright 2026 NR7Y
+/* Copyright 2026 NR7Y
  * https://github.com/briand
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -47,11 +47,11 @@
 // Debug logging control - set to 1 to enable UART debug output
 #define CW_KEYER_DEBUG 0
 
-// Timer scale: 10 kHz tick → 100 µs per tick
-// 16-bit counter rolls over at 6553 ms
+// Timer scale: 1 kHz tick → 1 ms per tick
+// 32-bit counter rolls over at 4294967295 ms (~49.7 days)
 #define DITS_PER_WORD 50
-#define TICKS_PER_MS 10
-#define TICKS_PER_MINUTE (60 * 1000 * TICKS_PER_MS)  // 600,000
+#define TICKS_PER_MS 1
+#define TICKS_PER_MINUTE (60 * 1000 * TICKS_PER_MS)  // 60,000
 
 // Keyer FSM states
 typedef enum {
@@ -60,6 +60,7 @@ typedef enum {
     CWK_STATE_INTER_ELEMENT_GAP,
     CWK_STATE_INTER_CHAR_GAP,    // Extended gap = end of character
     CWK_STATE_INTER_WORD_GAP,    // Long gap = inter-word space
+    CWK_STATE_EMIT_NONE,         // Force a NONE action from the keyer
 } CW_KeyerFSMState_t;
 
 static CW_KeyerFSMState_t s_KeyerFSMState = CWK_STATE_IDLE;
@@ -71,8 +72,7 @@ static uint16_t       s_gap_count  = 0;      // inter-element gap in ticks (1 di
 static uint16_t       s_ext_gap_count = 0;       // tick count when auto-char extension kicks in (16-bit)
 static uint16_t       s_char_gap_count = 0;  // inter-char gap in ticks (3 dits)
 static uint16_t       s_word_gap_count = 0;  // inter-word gap in ticks (7 dits)
-static uint16_t       s_last_count = 0;      // last TIMERBASE0_LOW_COUNT sample (16-bit)
-static uint16_t       s_elem_start_count = 0;// element start counter (16-bit)
+static uint16_t       s_elem_start_count = 0;// element start counter (16-bit millis)
 static bool           s_active_is_dit = false;
 static bool           s_pending_alternate = false; // alternate element queued
 /* last sampled paddles moved to app/cwhardware.c */
@@ -100,17 +100,70 @@ static bool s_play_space_pending = false;  // indicates next char should be show
 // Reconfigure requested (apply at idle or after gap)
 static volatile bool s_cfg_dirty = true;
 
-// Keyer enabled flag
+// Keyer enabled flag - this means ALL CW keying, not just paddle FSM.
 static volatile bool s_enable_keyer = false;
+
+// Last fully configured key input mode. 0xFF means "not configured".
+static uint8_t s_last_key_input_mode = 0xFF;
 
 #ifdef ENABLE_FLASHLIGHT
 bool gCW_FlashlightSending = false;
 #endif
 
+void CW_KeyerResetRuntime(void)
+{
+    s_KeyerFSMState = CWK_STATE_EMIT_NONE;
+
+    s_elem_start_count = timer_millis_low16();
+
+    s_active_is_dit = false;
+    s_pending_alternate = false;
+    s_last_handkey_ptt = false;
+
+    // clear any stale edge memory
+    CW_HW_ResetKeySamples();
+}
+
+// Called when changing to non-CW mode
+static void CW_KeyerDeinit()
+{
+    CW_KeyerResetRuntime();
+
+    // ADC deinit performs the port ground deinit too
+    CW_ConfigureADCforCECPaddles(false);
+    CW_ConfigurePortRing(false); // make sure PB15 is an input with no pullup, to avoid affecting the line if shorted to mic (keyer rework)
+
+    gCW_KeyerManagesPtt = false;
+    gCW_KeyerUsingSD1 = false;
+    s_enable_keyer = false;
+    s_last_key_input_mode = 0xFF;
+}
+
+void CW_KeyerReconfigure(bool enable)
+{
+#if CW_KEYER_DEBUG
+    if (enable) {
+        UART_Send("reconfig true\r\n", 14);
+    } else {
+        UART_Send("reconfig false\r\n", 15);
+    }
+#endif
+
+    if (!enable) { 
+        CW_KeyerDeinit();
+        s_cfg_dirty = false;
+        return;
+    }
+
+    // take over PTT and SIDE1 (if was or is in the INPUT set) immediately
+    gCW_KeyerManagesPtt = true;
+    gCW_KeyerUsingSD1 |= gEeprom.CW_KEY_INPUT & CW_KEY_FLAG_SIDE1;
+    CW_KeyerResetRuntime();
+    s_cfg_dirty = true; // Defer init until idle or gap
+}
 
 void CW_UpdateWPM()
 {
-    // TIMERBASE0_LOW_COUNT is 16-bit 10 kHz tick and rolls over at 0xFFFF (~6553 ms)
     const uint32_t wpm = gEeprom.CW_KEY_WPM;
     const uint32_t dit_ticks = TICKS_PER_MINUTE / (wpm * DITS_PER_WORD);
 
@@ -129,79 +182,39 @@ void CW_UpdateWPM()
 #endif
 }
 
-// Called when changing to non-CW mode
-static void CW_KeyerDeinit()
-{
-    // ADC deinit performs the port ground deinit too
-    CW_ConfigureADCforCECPaddles(false);
-    CW_ConfigurePortRing(false);
-
-    gCW_KeyerUsingSD1 = false;
-    s_enable_keyer = false;
-    s_last_handkey_ptt = false;
-}
-
 // Initialize keyer from gEeprom settings
 static void CW_KeyerInit()
 {
-    CW_UpdateWPM();
+    const uint8_t key_input_mode = gEeprom.CW_KEY_INPUT;
 
-    // Load settings from gEeprom
-
-    // Configure port pins based on bit flags
-    bool uses_port_ground = (gEeprom.CW_KEY_INPUT & CW_KEY_FLAG_PORT_GROUND);
-    bool uses_port_ring = (gEeprom.CW_KEY_INPUT & CW_KEY_FLAG_PORT_RING);
-    bool uses_adc = (gEeprom.CW_KEY_INPUT & CW_KEY_FLAG_ADC);
 #if CW_KEYER_DEBUG
-    bool is_handkey = (gEeprom.CW_KEY_INPUT & CW_KEY_FLAG_NO_KEYER);
-    bool uses_button = (gEeprom.CW_KEY_INPUT & CW_KEY_FLAG_SIDE1);
-    char buf[120];
-    sprintf_(buf, "CW_Init: mode=0x%02X handkey=%d side=%d pG=%d pR=%d rev=%d\r\n",
-             gEeprom.CW_KEY_INPUT, is_handkey, uses_button, uses_port_ground, uses_port_ring, (gEeprom.CW_KEY_INPUT & CW_KEY_FLAG_REVERSED));
+    char buf[80];
+    sprintf_(buf, "CW_KeyerInit: enabled:%u WPM=%u last_mode=%u key_input_mode=%u\r\n", 
+             s_enable_keyer, gEeprom.CW_KEY_WPM, s_last_key_input_mode, key_input_mode);
     UART_Send(buf, strlen(buf));
 #endif
 
-    CW_ConfigurePortRing(uses_port_ring);
-    CW_ConfigureADCforCECPaddles(uses_adc);
-    // CEC false will turn off ground, so we only need to explicitly enable if not using CEC but do need port ground
-    if(!uses_adc && uses_port_ground)
-        CW_ConfigurePortGround(true);
-
-    gCW_KeyerUsingSD1 = gEeprom.CW_KEY_INPUT & CW_KEY_FLAG_SIDE1;
-
-    s_last_count         = (uint16_t)TIMERBASE0_LOW_CNT;
-    s_active_is_dit    = false;
-    CW_HW_ResetKeySamples();
-
-    s_KeyerFSMState = CWK_STATE_IDLE;
+    CW_UpdateWPM();
+    CW_KeyerResetRuntime();
     s_cfg_dirty = false;
-#if CW_KEYER_DEBUG
-    UART_Send("keyer init done\r\n", 17);
-#endif
-    s_enable_keyer = true;
-}
-
-// public entrypoint to cause configuration
-void CW_KeyerReconfigure(bool enable)
-{
-    if(!enable) {
-#ifdef CW_KEYER_DEBUG
-         UART_Send("CW_KeyerReconfigure: disable requested\r\n", 38);
-#endif
-        if(!s_enable_keyer) 
-            return;  // already disabled
-
-        // Disable keyer immediately and put ports back to normal if needed
-        s_KeyerFSMState = CWK_STATE_IDLE;
-        CW_KeyerDeinit();
-        gCW_KeyerUsesPTT = false;
-        s_cfg_dirty = false;
+    // Keyer is already enabled with this mode
+    if (s_enable_keyer && s_last_key_input_mode == key_input_mode) {
         return;
     }
-    s_cfg_dirty = true;
-#if CW_KEYER_DEBUG
-    UART_Send("keyer marked for reconfig\r\n", 27);
-#endif
+
+    bool uses_port_ground = (key_input_mode & CW_KEY_FLAG_PORT_GROUND) != 0;
+    bool uses_port_ring   = (key_input_mode & CW_KEY_FLAG_PORT_RING) != 0;
+    bool uses_adc         = (key_input_mode & CW_KEY_FLAG_ADC) != 0;
+
+    CW_ConfigurePortRing(uses_port_ring);
+    CW_ConfigureADCforCECPaddles(uses_adc);
+    if (!uses_adc && uses_port_ground)
+        CW_ConfigurePortGround(true);
+
+    gCW_KeyerUsingSD1 = (key_input_mode & CW_KEY_FLAG_SIDE1) != 0;
+    s_last_key_input_mode = key_input_mode;
+    s_enable_keyer = true;
+    gCW_KeyerManagesPtt = true;
 }
 
 // --- Macro playback API implementation ---
@@ -228,7 +241,7 @@ void CW_StartMacroPlayback(uint8_t macroIndex, bool repeat)
     CW_ClearTxDisplay();
     s_play_space_pending = false;
     s_pb_state = PB_STATE_INTER_CHAR_GAP;
-    s_elem_start_count = (uint16_t)TIMERBASE0_LOW_CNT;
+    s_elem_start_count = timer_millis_low16();
     gCW_PlaybackActive = (s_playback_buf_len > 0);
 
 #if CW_KEYER_DEBUG
@@ -256,7 +269,7 @@ CW_Action_t CW_PlaybackHandleState(void)
 {
     if (!gCW_PlaybackActive) return CW_ACTION_NONE;
 
-    const uint16_t cur_count = (uint16_t)TIMERBASE0_LOW_CNT;
+    const uint16_t cur_count = timer_millis_low16();
     CW_Input in = {0};
 
     // If user hits a paddle during playback, stop playback entirely
@@ -269,7 +282,7 @@ CW_Action_t CW_PlaybackHandleState(void)
     switch (s_pb_state) {
     case PB_STATE_ACTIVE_ELEMENT: {
         const uint16_t target = s_active_is_dit ? s_dit_count : s_dah_count;
-        const uint16_t elapsed = timer_jiffies_since(s_elem_start_count);
+        const uint16_t elapsed = timer_millis_low16_since(s_elem_start_count);
         if (elapsed < target) {
             return CW_ACTION_CARRIER_HOLD_ON;
         } else {
@@ -282,7 +295,7 @@ CW_Action_t CW_PlaybackHandleState(void)
     }
 
     case PB_STATE_INTER_ELEMENT_GAP: {
-        const uint16_t elapsed = timer_jiffies_since(s_elem_start_count);
+        const uint16_t elapsed = timer_millis_low16_since(s_elem_start_count);
         if (elapsed >= s_gap_count) {
             // Advance to next element in current char
             s_play_elem_index++;
@@ -305,7 +318,7 @@ CW_Action_t CW_PlaybackHandleState(void)
     }
 
     case PB_STATE_INTER_CHAR_GAP: {
-        const uint16_t elapsed = timer_jiffies_since(s_elem_start_count);
+        const uint16_t elapsed = timer_millis_low16_since(s_elem_start_count);
         if (elapsed < s_char_gap_count) {
             return CW_ACTION_NONE;
         }
@@ -356,7 +369,7 @@ CW_Action_t CW_PlaybackHandleState(void)
     }
 
     case PB_STATE_INTER_WORD_GAP: {
-        const uint16_t elapsed = timer_jiffies_since(s_elem_start_count);
+        const uint16_t elapsed = timer_millis_low16_since(s_elem_start_count);
         if (elapsed >= s_word_gap_count) {
             // advance to next char
             s_pb_state = PB_STATE_INTER_CHAR_GAP;
@@ -401,9 +414,12 @@ void CW_PlaybackIndicatorDeadline(void)
 // Check keyer inputs before mode change
 // Returns true if inputs are valid (released), false to abort mode change
 bool CW_CheckKeyerInputs(uint8_t new_mode)
-{
-    // Handkey mode doesn't need validation (no keyer flag set)
-    if (new_mode == CW_KEY_INPUT_HANDKEY) {
+{    
+    // hard deconfig, get all pins in a known state
+    CW_KeyerDeinit();
+    
+    // Handkey mode without port ground doesn't need further validation
+    if (new_mode & CW_KEY_FLAG_NO_KEYER && !(new_mode & CW_KEY_FLAG_PORT_GROUND)) {
         return true;
     }
     
@@ -417,9 +433,6 @@ bool CW_CheckKeyerInputs(uint8_t new_mode)
         return true;
     }
     
-    // the port keyer modes interact poorly, so we have to deconfigure first
-    CW_KeyerReconfigure(false);
-
 #if CW_KEYER_DEBUG
     UART_Send("Checking CW keyer inputs\r\n", 26);
 #endif
@@ -536,51 +549,26 @@ CW_Action_t ptt_action(void)
     return action;
 }
 
+// Manage CW sending - called via main->CW_AppUpdate() every 1 ms.
+// Uses timer_millis() to manage deadlines for element duration and spacing.
 CW_Action_t CW_HandleState(void)
 {
     // Default action: carrier is off and stays off (gap or idle)
     CW_Action_t action = CW_ACTION_NONE;
 
-#if CW_KEYER_DEBUG
-    static CW_KeyerFSMState_t last_logged_state = CWK_STATE_IDLE;
-#endif
-
-    // don't start the keyer if we're in tech (hidden menu) mode
-    if (s_cfg_dirty && s_KeyerFSMState == CWK_STATE_IDLE && !gF_LOCK) {
+    // Apply pending init if needed.
+    if (s_cfg_dirty && s_KeyerFSMState == CWK_STATE_IDLE) {
         CW_KeyerInit();
-    }
-
-    const uint16_t cur_count = (uint16_t)TIMERBASE0_LOW_CNT;
-    const uint16_t delta_since_last = timer_jiffies_since(s_last_count);
-    if (delta_since_last < TICKS_PER_MS) {
-        // Not enough time has passed - return appropriate action for current state
-        // ACTIVE states: hold carrier on, GAP/IDLE states: no action (carrier off)
-        if (s_KeyerFSMState == CWK_STATE_ACTIVE_ELEMENT || s_last_handkey_ptt) {
-            return CW_ACTION_CARRIER_HOLD_ON;
-        }
+        return CW_ACTION_NONE;
+    } else if(s_KeyerFSMState == CWK_STATE_EMIT_NONE || !s_enable_keyer) {
+        s_KeyerFSMState = CWK_STATE_IDLE;
         return CW_ACTION_NONE;
     }
-    s_last_count = cur_count;
 
-#if CW_KEYER_DEBUG
-    // Log state changes
-    if (s_KeyerFSMState != last_logged_state) {
-        const char* state_names[] = {"IDLE", "ACTIVE_ELEMENT", "INTER_ELEM", "INTER_CHAR", "INTER_WORD"};
-        char buf[60];
-        sprintf_(buf, "STATE: %s -> %s (%s)\r\n", state_names[last_logged_state], state_names[s_KeyerFSMState], s_active_is_dit ? "dit" : "dah");
-        UART_Send(buf, strlen(buf));
-        last_logged_state = s_KeyerFSMState;
-    }
-#endif
+    const uint16_t cur_count = timer_millis_low16();
 
     // Check if keyer is disabled (handkey modes have NO_KEYER flag set)
     if (gEeprom.CW_KEY_INPUT & CW_KEY_FLAG_NO_KEYER) {
-#if CW_KEYER_DEBUG
-        static uint32_t handkey_log_count = 0;
-        if (++handkey_log_count % 1000 == 0) {
-            UART_Send("CW in handkey mode\r\n", 20);
-        }
-#endif
         return ptt_action();
     }
 
@@ -630,8 +618,8 @@ CW_Action_t CW_HandleState(void)
     ///  ACTIVE
     ///
     case CWK_STATE_ACTIVE_ELEMENT:
-        const uint16_t target = s_active_is_dit ? s_dit_count : s_dah_count;
-        const uint16_t elapsed_elem = timer_jiffies_since(s_elem_start_count);
+        const uint32_t target = s_active_is_dit ? s_dit_count : s_dah_count;
+        const uint32_t elapsed_elem = timer_millis_low16_since(s_elem_start_count);
 
 #if CW_KEYER_DEBUG
         {
@@ -691,7 +679,7 @@ CW_Action_t CW_HandleState(void)
     ///   ELEMENT GAP
     ///
     case CWK_STATE_INTER_ELEMENT_GAP: {
-        const uint16_t elapsed_gap = timer_jiffies_since(s_elem_start_count);
+        const uint16_t elapsed_gap = timer_millis_low16_since(s_elem_start_count);
         
         // Read only if needed
         if(!s_pending_alternate) // briand - lets try doing this regardless of mode // && (gEeprom.CW_KEYER_MODE == CW_IAMBIC_MODE_A))
@@ -768,7 +756,7 @@ CW_Action_t CW_HandleState(void)
     ///    CHAR GAP
     ///
 	case CWK_STATE_INTER_CHAR_GAP: {
-		const uint16_t elapsed_gap = timer_jiffies_since(s_elem_start_count);
+		const uint16_t elapsed_gap = timer_millis_low16_since(s_elem_start_count);
 
 		if (elapsed_gap < s_char_gap_count) {  // until char gap complete
 
@@ -820,7 +808,7 @@ CW_Action_t CW_HandleState(void)
     ///
 	case CWK_STATE_INTER_WORD_GAP: {
 		// Post char-gap: monitor and send immediately, or goto idle at word_gap
-		const uint16_t elapsed_gap = timer_jiffies_since(s_elem_start_count);
+		const uint16_t elapsed_gap = timer_millis_low16_since(s_elem_start_count);
 		CW_ReadKeys(&in);
 		
 		if (in.dit || in.dah) {

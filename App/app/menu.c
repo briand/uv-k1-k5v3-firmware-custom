@@ -1109,10 +1109,12 @@ void MENU_AcceptSetting(void)
 					gEeprom.CW_KEY_INPUT = CW_KEY_INPUT_HANDKEY; // Revert to safe default
 					gEeprom.CW_KEY_INPUT_MENU = 0;
 					gRequestDisplayScreen = DISPLAY_MENU;
+				} else 
+				{
+					gCwKeyInputCheckFailed = false;
+					gEeprom.CW_KEY_INPUT = new_mode;
+					gEeprom.CW_KEY_INPUT_MENU = gSubMenuSelection;
 				}
-				gCwKeyInputCheckFailed = false;
-				gEeprom.CW_KEY_INPUT_MENU = gSubMenuSelection;
-				gEeprom.CW_KEY_INPUT = new_mode;
 			}
 			gFlagReconfigureVfos = true;  // Reconfigure VFOs to apply new key input settings
 			break;

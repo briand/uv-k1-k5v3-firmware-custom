@@ -58,6 +58,10 @@ void AUDIO_PlayBeep(BEEP_Type_t Beep)
     if (gScreenToDisplay == DISPLAY_AIRCOPY)
         return;
 #endif
+#ifdef ENABLE_CW_MODULATOR
+	if(gCurrentVfo->Modulation == MODULATION_CW || gCurrentVfo->Modulation == MODULATION_USB)
+		return;
+#endif
 
     if (gCurrentFunction == FUNCTION_RECEIVE)
         return;

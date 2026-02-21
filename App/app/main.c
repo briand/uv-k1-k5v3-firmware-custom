@@ -157,8 +157,6 @@ static void processFKeyFunction(const KEY_Code_t Key, const bool beep)
                     RADIO_ConfigureSquelchAndOutputPower(gRxVfo);
                     RADIO_SetupRegisters(true);
 
-                    //SETTINGS_SaveChannel(channel, gEeprom.RX_VFO, gRxVfo, 1);
-
                     gRequestSaveChannel = 1;
                     gRequestSaveVFO = true;
                     gUpdateDisplay = true;
@@ -978,12 +976,13 @@ static void MAIN_Key_UP_DOWN(bool bKeyPressed, bool bKeyHeld, int8_t Direction)
                     return;
                 }
                 gTxVfo->freq_config_RX.Frequency = frequency;
-                BK4819_SetFrequency(frequency
-				#ifdef ENABLE_CW_MODULATOR
-					- (gTxVfo->Modulation == MODULATION_CW && !gCW_CrossMode)? 
-						(gEeprom.CW_TONE_FREQUENCY * 10) : 0 // CW BFO offset (10s of hz)
-				#endif
-				);
+                uint32_t rx_frequency = frequency;
+#ifdef ENABLE_CW_MODULATOR
+				if (gTxVfo->Modulation == MODULATION_CW && !gCW_CrossMode)
+					rx_frequency -= gEeprom.CW_TONE_FREQUENCY; // CW BFO offset (10s of Hz)
+#endif
+				
+				BK4819_SetFrequency(rx_frequency);
                 BK4819_RX_TurnOn();
                 gRequestSaveChannel = 1;
                 return;

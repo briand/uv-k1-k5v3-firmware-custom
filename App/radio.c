@@ -410,6 +410,30 @@ void RADIO_ConfigureChannel(const unsigned int VFO, const unsigned int configure
             pVfo->DTMF_PTT_ID_TX_MODE  = pttId < ARRAY_SIZE(gSubMenu_PTT_ID) ? pttId : PTT_ID_OFF;
         }
 
+		#ifdef ENABLE_CW_MODULATOR
+			// CW memory channels do not use these features; ignore stored values.
+			if (pVfo->Modulation == MODULATION_CW)
+			{
+				// No CTCSS/DCS in CW
+				pVfo->freq_config_RX.CodeType = CODE_TYPE_OFF;
+				pVfo->freq_config_TX.CodeType = CODE_TYPE_OFF;
+				pVfo->freq_config_RX.Code     = 0;
+				pVfo->freq_config_TX.Code     = 0;
+
+				// No scrambler in CW
+				pVfo->SCRAMBLING_TYPE = 0;
+
+				// No PTT ID or DTMF decode in CW
+				pVfo->DTMF_PTT_ID_TX_MODE = PTT_ID_OFF;
+				#ifdef ENABLE_DTMF_CALLING
+					pVfo->DTMF_DECODING_ENABLE = false;
+				#endif
+
+				// No reverse-frequency mode in CW
+				pVfo->FrequencyReverse = false;
+			}
+		#endif
+
         // ***************
 
         struct {
@@ -474,7 +498,12 @@ void RADIO_ConfigureChannel(const unsigned int VFO, const unsigned int configure
             pConfig->Frequency = 43300000;
     }
 
-    pVfo->Compander = att->compander;
+	#ifdef ENABLE_CW_MODULATOR
+		if (pVfo->Modulation == MODULATION_CW)
+			pVfo->Compander = 0;
+		else
+	#endif
+	    pVfo->Compander = att->compander;
 
     #ifdef ENABLE_FEAT_F4HWN_RESCUE_OPS
     if(gRemoveOffset)
@@ -504,7 +533,8 @@ void RADIO_ConfigureSquelchAndOutputPower(VFO_Info_t *pInfo)
 
     if (gEeprom.SQUELCH_LEVEL == 0
 	#ifdef ENABLE_CW_MODULATOR
-		|| pInfo->Modulation == MODULATION_CW || pInfo->Modulation == MODULATION_USB  // briand - TODO revisit squelch
+		|| pInfo->Modulation == MODULATION_CW
+		|| pInfo->Modulation == MODULATION_USB
 	#endif
 	)
     {   // squelch == 0 (off)
@@ -777,9 +807,9 @@ void RADIO_SetupRegisters(bool switchToForeground)
     #endif
 
 #ifdef ENABLE_CW_MODULATOR
-	if (gRxVfo->Modulation == MODULATION_CW)
-		AUDIO_AudioPathOff();
+	if (gRxVfo->Modulation != MODULATION_CW)
 #endif
+	    AUDIO_AudioPathOff();
     gEnableSpeaker = false;
 
     BK4819_ToggleGpioOut(BK4819_GPIO6_PIN2_GREEN, false);
@@ -821,6 +851,7 @@ void RADIO_SetupRegisters(bool switchToForeground)
         BK4819_WriteRegister(BK4819_REG_02, 0);
         SYSTEM_DelayMs(1);
     }
+	// no interrupts enabled
     BK4819_WriteRegister(BK4819_REG_3F, 0);
 
     // mic gain 0.5dB/step 0 to 31
@@ -852,7 +883,7 @@ void RADIO_SetupRegisters(bool switchToForeground)
 
     BK4819_PickRXFilterPathBasedOnFrequency(Frequency);
 
-    // what does this in do ?
+    // top level RX bias enable - allows the VHF/UHF LNA paths to work
     BK4819_ToggleGpioOut(BK4819_GPIO0_PIN28_RX_ENABLE, true);
 
     // AF RX Gain and DAC
@@ -1029,19 +1060,14 @@ void RADIO_SetTxParameters(void)
         }
     #endif
 
-	#ifdef ENABLE_CW_MODULATOR
-	if((gTxVfo->Modulation != MODULATION_CW) || (gEeprom.CW_SIDETONE_LEVEL == 0))
-	#endif
-	    AUDIO_AudioPathOff();
+#ifdef ENABLE_CW_MODULATOR
+	if(gTxVfo->Modulation != MODULATION_CW)
+#endif
+    AUDIO_AudioPathOff();
 
     gEnableSpeaker = false;
 
     BK4819_ToggleGpioOut(BK4819_GPIO0_PIN28_RX_ENABLE, false);
-
-	#ifdef ENABLE_CW_MODULATOR
-	RADIO_SetModulation(gTxVfo->Modulation);
-	#endif
-	
 
 	switch (Bandwidth)
 	{
@@ -1072,34 +1098,44 @@ void RADIO_SetTxParameters(void)
 #endif
 	BK4819_SetFrequency(tx_frequency);
 
+#ifdef ENABLE_CW_MODULATOR
+	if(gTxVfo->Modulation == MODULATION_CW)
+		BK4819_WriteRegister(BK4819_REG_31, 0);  // all off
+	else
+#endif
     // TX compressor
     BK4819_SetCompander((gRxVfo->Modulation == MODULATION_FM && (gRxVfo->Compander == 1 || gRxVfo->Compander >= 3)) ? gRxVfo->Compander : 0);
 
     BK4819_PrepareTransmit();
 
-	#ifdef ENABLE_CW_MODULATOR
-		SYSTEM_DelayMs(1);
-	#else
-		SYSTEM_DelayMs(10);
-	#endif
+#ifdef ENABLE_CW_MODULATOR
+	
+	/// Let's talk about delays at TX startup. Why were these delays so big in the original code? Not sure.
+	/// Perhaps the transciever and PA really do need long delays to make these transitions correctly,
+	/// but in testing I haven't seen that to be the case. I'm leaving the original ones for non-CW anyway.
+
+	SYSTEM_DelayMs(gTxVfo->Modulation == MODULATION_CW ? 1 : 10);
+#else
+	SYSTEM_DelayMs(10);
+#endif
 
     BK4819_PickRXFilterPathBasedOnFrequency(gCurrentVfo->pTX->Frequency);
 
     BK4819_ToggleGpioOut(BK4819_GPIO1_PIN29_PA_ENABLE, true);
 
-	#ifdef ENABLE_CW_MODULATOR
-		SYSTEM_DelayMs(1);
-	#else
-	    SYSTEM_DelayMs(5);
-	#endif
+#ifdef ENABLE_CW_MODULATOR
+	SYSTEM_DelayMs(gTxVfo->Modulation == MODULATION_CW ? 1 : 5);
+#else
+    SYSTEM_DelayMs(5);
+#endif
 
     BK4819_SetupPowerAmplifier(gCurrentVfo->TXP_CalculatedSetting, gCurrentVfo->pTX->Frequency);
 
-	#ifdef ENABLE_CW_MODULATOR
-		SYSTEM_DelayMs(1);
-	#else
-	    SYSTEM_DelayMs(10);
-	#endif
+#ifdef ENABLE_CW_MODULATOR
+	SYSTEM_DelayMs(gTxVfo->Modulation == MODULATION_CW ? 1 : 10);
+#else
+    SYSTEM_DelayMs(10);
+#endif
 
     switch (gCurrentVfo->pTX->CodeType)
     {
@@ -1132,8 +1168,6 @@ void RADIO_SetModulation(ModulationMode_t modulation)
             break;
 #ifdef ENABLE_CW_MODULATOR
 		case MODULATION_CW:
-			gMonitor = true;  // keep the audio from turning off at the TX->RX transition, so we don't hit mute sending bug
-			[[fallthrough]];
 #endif
 	    case MODULATION_USB:
             mod = BK4819_AF_BASEBAND2;
@@ -1399,17 +1433,17 @@ void RADIO_SendCssTail(void)
 void RADIO_SendEndOfTransmission(void)
 {
 #ifdef ENABLE_CW_MODULATOR
-	if (gCurrentVfo->Modulation != MODULATION_CW) {
+	if (gTxVfo->Modulation != MODULATION_CW) {
 #endif
     BK4819_PlayRoger();
     DTMF_SendEndOfTransmission();
-#ifdef ENABLE_CW_MODULATOR
-	}
-#endif
 
     // send the CTCSS/DCS tail tone - allows the receivers to mute the usual FM squelch tail/crash
     if(gEeprom.TAIL_TONE_ELIMINATION)
         RADIO_SendCssTail();
+#ifdef ENABLE_CW_MODULATOR
+	}
+#endif
     RADIO_SetupRegisters(false);
 }
 
@@ -1429,14 +1463,17 @@ void RADIO_PrepareCssTX(void)
 void RADIO_CW_BeginResume(void)
 {
 	gCW_State = CW_TRANSMITTING;
+
 	// Setup and begin CW transmission, either first time or resuming after suspend
 	BK4819_SetupPowerAmplifier(gCurrentVfo->TXP_CalculatedSetting, gCurrentVfo->pTX->Frequency);
 
-	// Setup the Tx/Rx blocks for CW transmission
-	BK4819_EnableTXLink();
-
 	// Set local AF sidetone freq in Hz
 	BK4819_SetScrambleFrequencyControlWord(gEeprom.CW_TONE_FREQUENCY * 10);
+
+	// Setup the Tx/Rx blocks for CW transmission
+	BK4819_EnableTXLink();
+	
+	BK4819_SetAF(BK4819_AF_ALAM);
 
 	// Turn on the red LED
 	BK4819_ToggleGpioOut(BK4819_GPIO5_PIN1_RED, true);
@@ -1450,11 +1487,11 @@ void RADIO_CW_Suspend(void)
 	// Set PA bias to 0
 	BK4819_SetupPowerAmplifier(0, 0);
 
-	// 0 gain on tone1
-	//BK4819_WriteRegister(BK4819_REG_70,	BK4819_REG_70_ENABLE_TONE1 );
-
-	// Set TONE1 to 0 Hz - this works better than gain to disable sidetone
+	// Set TONE1 to 0 Hz - this works better than gain 0 to disable sidetone
 	BK4819_SetScrambleFrequencyControlWord(0);
+
+	// by doing this right after dropping tone, we don't hear a pop when going to RX
+	BK4819_SetAF(BK4819_AF_BASEBAND2);
 	
 	// Turn off the red LED
 	BK4819_ToggleGpioOut(BK4819_GPIO5_PIN1_RED, false);

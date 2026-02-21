@@ -76,7 +76,6 @@
 #include "ui/ui.h"
 #ifdef ENABLE_CW_MODULATOR
 #include "app/cwkeyer.h"
-#include "app/cwmacro.h"
 #endif
 #ifdef ENABLE_CODE_PRACTICE
 #include "app/cpo.h"
@@ -252,7 +251,15 @@ static void HandleIncoming(void)
     }
 #endif
 
-    APP_StartListening(gMonitor ? FUNCTION_MONITOR : FUNCTION_RECEIVE);
+#ifdef ENABLE_CW_MODULATOR
+	gMonitorTemp = (gCurrentVfo->Modulation == MODULATION_CW ||
+			       gCurrentVfo->Modulation == MODULATION_USB);
+#endif
+    APP_StartListening(gMonitor
+#ifdef ENABLE_CW_MODULATOR
+			|| gMonitorTemp
+#endif
+		? FUNCTION_MONITOR : FUNCTION_RECEIVE);
 }
 
 static void HandleReceive(void)
@@ -826,17 +833,6 @@ void APP_EndTransmission(void)
 
     gFlagEndTransmission = true;
 
-#ifdef ENABLE_CW_MODULATOR
-	if(gCW_State != CW_INACTIVE)
-	{	
-		// Clear CW state when ending transmission entirely
-		gCW_State = CW_INACTIVE;
-		gCW_SuspendCountdown_10ms = 0;
-		// Keep TX display visible for 1 second after TX ends
-		gCW_TxDisplayHoldoff_10ms = 100;
-	}
-#endif
-
     if (gMonitor) {
          //turn the monitor back on
         gFlagReconfigureVfos = true;
@@ -980,9 +976,9 @@ void APP_Update(void)
     }
 #endif
 
-    if (gCurrentFunction == FUNCTION_TRANSMIT && (gTxTimeoutReached || SerialConfigInProgress()))
-    {   // transmitter timed out or must de-key
-        gTxTimeoutReached = false;
+	if (gCurrentFunction == FUNCTION_TRANSMIT && (gTxTimeoutReached || SerialConfigInProgress()))
+	{	// transmitter timed out or must de-key
+		gTxTimeoutReached = false;
 
 #ifdef ENABLE_FEAT_F4HWN
         if(gBacklightCountdown_500ms > 0 || gEeprom.BACKLIGHT_TIME == 61)
@@ -1027,123 +1023,42 @@ void APP_Update(void)
     if (gReducedService)
         return;
 
-    if (gCurrentFunction != FUNCTION_TRANSMIT)
-        HandleFunction();
+	if (gCurrentFunction != FUNCTION_TRANSMIT)
+		HandleFunction();
 
-#ifdef ENABLE_CW_MODULATOR
+    if (gCurrentFunction == FUNCTION_TRANSMIT && (gTxTimeoutReached || SerialConfigInProgress()))
+    {   // transmitter timed out or must de-key
+        gTxTimeoutReached = false;
 
-	if (gTxVfo->Modulation == MODULATION_CW
-#ifdef ENABLE_CODE_PRACTICE
-		|| gCW_CpoActive
-#endif
-		)
-	{
-		CW_Action_t action;
-		if (gCW_PlaybackActive)
-			action = CW_PlaybackHandleState();
-		else
-			action = CW_HandleState();
-		
-		// Don't transmit RF if we're recording a macro, reading ADC, or breakin disabled
-		if (gCW_Recording || gCW_AdcReadActive || !gEeprom.CW_BREAKIN_ENABLE
-#ifdef ENABLE_CODE_PRACTICE
-			|| gCW_CpoActive
-#endif
-			) {
-			switch(action)
-			{
-				case CW_ACTION_CARRIER_ON:
-					AUDIO_AudioPathOn();
-					BK4819_SetAF(BK4819_AF_ALAM);	
-					BK4819_WriteRegister(BK4819_REG_70,
-						BK4819_REG_70_ENABLE_TONE1 |
-						(gEeprom.CW_SIDETONE_LEVEL << BK4819_REG_70_SHIFT_TONE1_TUNING_GAIN));
-					// Set local AF sidetone freq in Hz
-					BK4819_SetScrambleFrequencyControlWord(gEeprom.CW_TONE_FREQUENCY * 10);
-					#ifdef ENABLE_FLASHLIGHT
-					if (gCW_FlashlightSending) {
-						GPIO_SetBit(&GPIOC->DATA, GPIOC_PIN_FLASHLIGHT);
-					}
-					#endif
-					gCW_TxDisplayHoldoff_10ms = 200; // start the centerline decoder
-				break;
-				case CW_ACTION_CARRIER_OFF:
-					// Set TONE1 to 0 Hz - this works better than gain to disable sidetone
-					BK4819_SetScrambleFrequencyControlWord(0);
-					#ifdef ENABLE_FLASHLIGHT
-					if (gCW_FlashlightSending) {
-						GPIO_ClearBit(&GPIOC->DATA, GPIOC_PIN_FLASHLIGHT);
-					}
-					#endif
-					#ifdef ENABLE_CODE_PRACTICE
-					if (gCW_CpoActive)
-						BK4819_SetAF(BK4819_AF_MUTE);
-					else
-					#endif
-						RADIO_SetModulation(gRxVfo->Modulation);  // back to RX audio path
-					gCW_TxDisplayHoldoff_10ms = 200; // leave the centerline decoder on for a second
-				break;
-				
-				default:
-				break;
-			}
-			// don't let RF happen
-			action = CW_ACTION_NONE;
-		}
-		
-		switch(action)
-		{
-			case CW_ACTION_CARRIER_ON:
-				gTxTimerCountdown_500ms = 0;
-				gCW_TxDisplayHoldoff_10ms = 200;
-				gPttIsPressed = true;
+#ifdef ENABLE_FEAT_F4HWN
+        if(gBacklightCountdown_500ms > 0 || gEeprom.BACKLIGHT_TIME == 61)
+        {
+            //BACKLIGHT_TurnOn();
+            BACKLIGHT_SetBrightness(gEeprom.BACKLIGHT_MAX);
+        }
 
-				if(gCW_State == CW_INACTIVE)
-				{	
-					// UART_Send("CW Start\r\n", 10);
-					RADIO_PrepareTX();
-				}
-				else
-				{
-					// UART_Send("CW Resume\r\n", 11);
-					RADIO_CW_BeginResume();
-				}
-			break;
+        gTxTimeoutReachedAlert = false;
+        gTxTimeoutToneAlert = 800;
 
-			case CW_ACTION_CARRIER_OFF:
-				//UART_Send("CW Suspend\r\n", 12);
-				RADIO_CW_Suspend();
-				gCW_SuspendCountdown_10ms = 0;
-				gCW_TxDisplayHoldoff_10ms = 200; // leave the centerline decoder on for a second
-			break;
-
-			case CW_ACTION_CARRIER_HOLD_ON:
-				gPttIsPressed = true;
-				//gDebounceCounter = 0;
-				gCW_SuspendCountdown_10ms = 0;
-				gTxTimerCountdown_500ms = 0;
-			break;
-
-			case CW_ACTION_NONE:
-			default:
-				// Suspend timeout is handled by PTT processing code (lines 1078-1084)
-				// paranoia: if transmitting but the keyer didn't request any action, suspend it
-				if(gCW_State == CW_TRANSMITTING)
-				{
-					// UART_Send("!!! CW Auto Suspend\r\n", 21);
-					RADIO_CW_Suspend();
-					gCW_SuspendCountdown_10ms = 0;
-				}
-			break;
-		}
-	} else if(gCW_State == CW_TRANSMITTING)
-	{
-		// this should basically never happen, but maybe if changing modulation while transmitting?
-		// UART_Send("!!! CW Auto-auto Suspend\r\n", 21);
-		RADIO_CW_Suspend();
-		gCW_SuspendCountdown_10ms = 0;
-	}
-
+        if (gSetting_set_ptt_session) // Improve OnePush if TOT
+        {
+            if(gPttOnePushCounter == 1)
+            {
+                gPttOnePushCounter = 3;
+            }
+            else if(gPttOnePushCounter == 2)
+            {
+                ProcessKey(KEY_PTT, false, false);
+                gPttIsPressed = false;
+                gPttOnePushCounter = 0;
+                gPttWasReleased = true;
+                //if (gKeyReading1 != KEY_INVALID)
+                //  gPttWasReleased = true;
+            }
+            #if defined(ENABLE_FEAT_F4HWN_CTR) || defined(ENABLE_FEAT_F4HWN_INV)
+            ST7565_ContrastAndInv();
+            #endif
+        }
 #endif
 
 #ifdef ENABLE_FMRADIO
@@ -2070,6 +1985,13 @@ static void ProcessKey(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 		return;
 	}
 #endif
+
+#ifdef ENABLE_CW_MODULATOR
+	if (Key == KEY_SIDE1 && gCW_KeyerUsingSD1) {
+		return;
+	}
+#endif
+
     #ifdef ENABLE_FEAT_F4HWN_SLEEP
     if(gWakeUp)
     {
@@ -2355,11 +2277,7 @@ if (gCurrentFunction == FUNCTION_TRANSMIT) {
         }
 #endif
     }
-#ifdef ENABLE_CW_MODULATOR
-	else if (Key == KEY_SIDE1 && (gCW_KeyerUsingSD1 && (gCW_Recording || (gEeprom.CW_KEY_INPUT & CW_KEY_FLAG_SIDE1)))) {
-		// Block side button 1 if used by keyer during CW macro recording
-	}
-#endif
+
 #ifdef ENABLE_FEAT_F4HWN // For F + SIDE1 or F + SIDE2
     else if (gWasFKeyPressed && (Key == KEY_SIDE1 || Key == KEY_SIDE2)) {
         ProcessKeysFunctions[gScreenToDisplay](Key, bKeyPressed, bKeyHeld);
@@ -2464,7 +2382,6 @@ Skip:
         RADIO_SelectVfos();
 
 #ifdef ENABLE_CW_MODULATOR
-	if(gFlagReconfigureVfos)
 		CW_KeyerReconfigure(gTxVfo->Modulation==MODULATION_CW);
 #endif
 

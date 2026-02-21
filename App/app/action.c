@@ -311,6 +311,17 @@ void ACTION_SwitchDemodul(void)
 
     if(gTxVfo->Modulation == MODULATION_UKNOWN)
         gTxVfo->Modulation = MODULATION_FM;
+
+#ifdef ENABLE_CW_MODULATOR
+	// Arm/dearm keyer ownership immediately so a very quick PTT press after
+	// switching to CW cannot beat deferred reconfigure/save paths.
+	CW_KeyerReconfigure(gTxVfo->Modulation == MODULATION_CW);
+    
+	// Reconfigure radio path now (not only on later key release/save handling).
+	gFlagReconfigureVfos = true;
+#endif
+
+
 }
 
 void ACTION_SwitchFilter(void)

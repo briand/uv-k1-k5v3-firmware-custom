@@ -18,28 +18,28 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#ifdef disabled
-extern uint8_t TIM0_CNT;
+#ifdef ENABLE_MILLIS
+	// 1 ms ISR flag – set by TIMERBASE0 interrupt, consumed in main loop
+	extern volatile bool gNextTimeslice_1ms;
 #endif
 
 void TIM0_INIT(void);
 
+// Returns low 16-bit milliseconds from TIMERBASE0 low counter.
+uint16_t timer_millis_low16(void);
+
+// Returns elapsed milliseconds based on low 16-bit counter (wrap-safe modulo 16 bits).
+uint16_t timer_millis_low16_since(uint16_t prev);
+
 #ifdef ENABLE_MILLIS
-// Returns timer count in 100µs ticks (10kHz)
-// WARNING: Rolls over every ~6.5 seconds (16-bit counter)
-uint16_t timer_jiffies(void);
+	// Returns 32-bit milliseconds:
+	// lower 16 bits are TIMERBASE0 low counter,
+	// upper 16 bits are maintained by TIMERBASE0 overflow ISR.
+	uint32_t timer_millis(void);
 
-// Returns milliseconds since boot
-// WARNING: Rolls over every ~6.5 seconds (16-bit counter at 10kHz = 6553ms)
-uint16_t timer_millis(void);
-
-// Returns ticks elapsed since previous jiffy value with rollover protection
-// prev: Previous jiffy value from timer_jiffies()
-uint16_t timer_jiffies_since(uint16_t prev);
-
-// Returns milliseconds elapsed since previous millis value with rollover protection
-// prev: Previous millis value from timer_millis()
-uint16_t timer_millis_since(uint16_t prev);
+	// Returns milliseconds elapsed since previous millis value with rollover protection
+	// prev: Previous millis value from timer_millis()
+	uint32_t timer_millis_since(uint32_t prev);
 #endif
 
 #endif

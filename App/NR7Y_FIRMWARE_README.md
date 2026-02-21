@@ -1,6 +1,6 @@
 NR7Y CW firmware README
 
-# Beta3
+# Beta5
 > [!IMPORTANT]
 > This firmware only works on "V1" firmware. How do you know? Well, you kinda don't. If you bought your radio early last year, it's V1. If you bought it late last year, it could be V2. If you bought it in 2026, it could be V3! Most (all?) V3 radios are marked as such on the label under the battery.
 > 
@@ -13,6 +13,19 @@ Upload using your favorite Quansheng flash tool. I use k5tool (https://github.co
  1. Hold down PTT and Side Button 1 while turning the radio on.
  2. Release buttons, menu will be automatically presented.
  3. Go up to Reset and pick ALL. 
+
+## Changelist from beta4 -> beta5
+The "smooth operator" release - the only feature here is an improvement in audio behavior when going between RX/TX, switching frequencies, and modes like menu and keyer changes. These previously caused popping noises, and I've been able to eliminate most or all of them. After that, we're down to polishing and bugfixes; this is likely last beta before I call it 1.0.
+
+There are no changes to the Chirp module - the one attached to this release is the same as beta4, either will work.
+
+- Reduce or eliminate most audio pops while going between RX/TX and other operations in CW
+- Correctly remove and apply keyer config when changing between modulations
+- Correctly remove and apply keyer config going in/out of CPO, regardless of prior modulation
+- Fix some stuck key or weird transmission states when changing modes and immediately hitting PTT or a paddle key
+- Turn off all the transmission settings that don't apply to CW when in CW (compander, scramble, roger, pttid)
+- Correctly test for stuck key when enabling the PTT+tip handkey mode
+- Code refactor; cleaned up the CW integration so it's more modular, and use a 1ms deadline timer
 
 ## Changelist from beta3 -> beta4
 Beta3 was not very healthy. If you had CEC cable mode set, and turned the radio off in a non-CW mode, it would boot in a broken repeating TX death spiral. Also, PTT handkey mode didn't even work! Fixed all that.

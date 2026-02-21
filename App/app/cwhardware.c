@@ -180,7 +180,7 @@ static void CW_ReadADCkeys(bool *tip_out, bool *ring_out)
 bool CW_ReadKeysForMode(uint8_t mode, bool *dit_out, bool *dah_out)
 {
     // Check if keyer is disabled (handkey modes)
-    if (mode & CW_KEY_FLAG_NO_KEYER) {
+    if (mode & CW_KEY_FLAG_NO_KEYER && !(mode & CW_KEY_FLAG_PORT_GROUND)) {
         return false;
     }
 
@@ -288,9 +288,9 @@ void CW_ConfigurePortGround(bool enable)
 #endif
 }
 
-// Configure port ring pin (PB15) for paddle input
-// When enabled: PB15 becomes GPIO input for paddle ring
-// When disabled: PB15 becomes GPIO output high (BK1080 control pin)
+// FM Radio is disabled on this firmware, we *always* configure
+// PB15 as an input, because the radio might have the line reworked
+// onto the mic input, and we don't want to affect that.
 void CW_ConfigurePortRing(bool enable)
 {
     if (enable) {
@@ -299,13 +299,10 @@ void CW_ConfigurePortRing(bool enable)
         PORTCON_PORTB_IE |= PORTCON_PORTB_IE_B15_BITS_ENABLE; // Enable input buffer
         PORTCON_PORTB_PU |= PORTCON_PORTB_PU_B15_BITS_ENABLE; // activate the PB15 pullup
     } else {
-        // Configure PB15 as GPIO output, set high
-        PORTCON_PORTB_IE &= ~PORTCON_PORTB_IE_B15_MASK; // Disable input buffer
-        PORTCON_PORTB_PU &= ~PORTCON_PORTB_PU_B15_MASK; // disable the PB15 pullup
-        PORTCON_PORTB_SEL1 &= ~PORTCON_PORTB_SEL1_B15_MASK;
-        PORTCON_PORTB_SEL1 |= PORTCON_PORTB_SEL1_B15_BITS_GPIOB15;
-        GPIO_SetBit(&GPIOB->DATA, GPIOB_PIN_BK1080); // Set PB15 high
-        GPIOB->DIR |= GPIO_DIR_15_BITS_OUTPUT; // Then switch to output
+        // we want to avoid affecting the line if shorted to mic, so float it
+        GPIOB->DIR &= ~GPIO_DIR_15_MASK; // PB15 *still* as INPUT
+        PORTCON_PORTB_IE &= ~PORTCON_PORTB_IE_B15_BITS_ENABLE; // Disable input buffer
+        PORTCON_PORTB_PU &= ~PORTCON_PORTB_PU_B15_BITS_ENABLE; // deactivate the PB15 pullup
     }
 #if ENABLE_KEYER_DEBUG
     char buf[50];
@@ -318,7 +315,6 @@ void CW_ConfigureADCforCECPaddles(bool enable)
 {
     //UART_Send("adc init...", strlen("adc init..."));
     if (enable) {
-        gCW_KeyerUsesPTT = true;
 
         // Enable ADC on PA8 (SARADC CH3) and configure input buffer/pulldown
         PORTCON_PORTA_SEL1 = (PORTCON_PORTA_SEL1 & ~PORTCON_PORTA_SEL1_A8_MASK) | PORTCON_PORTA_SEL1_A8_BITS_SARADC_CH3;
@@ -327,9 +323,6 @@ void CW_ConfigureADCforCECPaddles(bool enable)
         GPIOC->DIR = (GPIOC->DIR & ~GPIO_DIR_5_MASK) | GPIO_DIR_5_BITS_OUTPUT;
         GPIO_ClearBit(&GPIOC->DATA, GPIOC_PIN_PTT);
     } else {
-
-        gCW_KeyerUsesPTT = false;
-
         // return PA8 to UART
         CW_ConfigurePortGround(false);
 

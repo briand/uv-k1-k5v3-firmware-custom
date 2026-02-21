@@ -37,6 +37,9 @@ CW_Action_t CW_HandleState(void);
 // Set CW keyer speed from EEPROM; updates internal timing parameters
 void CW_UpdateWPM();
 
+// Reset keyer state, to transition modes like CPO safely
+void CW_KeyerResetRuntime(void);
+
 // Optional: request reconfigure at next safe boundary (applied at gap or idle)
 void CW_KeyerReconfigure(bool enable);
 
@@ -56,7 +59,7 @@ void CW_StopPlayback(void);
 CW_Action_t CW_PlaybackHandleState(void);
 
 // Periodic deadline handler to refresh CW playback UI indicator (blinker).
-// Call from a periodic context (e.g., APP_TimeSlice10ms). Uses timer_jiffies/millis.
+// Call from a periodic context (e.g., APP_TimeSlice10ms). Uses timer_millis.
 void CW_PlaybackIndicatorDeadline(void);
 
 #ifdef ENABLE_FLASHLIGHT

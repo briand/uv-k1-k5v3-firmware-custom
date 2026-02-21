@@ -52,12 +52,13 @@ void CPO_Enter(void)
     wpm_changed = false;
     gCW_FlashlightSending = s_flashlight_sending;
 	BK4819_ToggleGpioOut(BK4819_GPIO6_PIN2_GREEN, false);
-	BK4819_SetAF(BK4819_AF_MUTE);
+	BK4819_WriteRegister(BK4819_REG_3F, 0x0000);        // Disable interrupts
+	BK4819_SetAF(BK4819_AF_ALAM);
+	AUDIO_AudioPathOn();
 }
 
 void CPO_Exit(void)
 {
-    CW_KeyerReconfigure(false);
 #ifdef ENABLE_FLASHLIGHT
 	gCW_FlashlightSending = false;
 	GPIO_ClearBit(&GPIOC->DATA, GPIOC_PIN_FLASHLIGHT);
@@ -66,7 +67,10 @@ void CPO_Exit(void)
 	gRequestDisplayScreen = DISPLAY_MAIN;
 	gUpdateDisplay = true;
 	gUpdateStatus = true;
-	gFlagReconfigureVfos = true;  // keyer will be turned back on if we're in CW modulation
+	// Reconfigure radio/UI back to normal path, but do not force a keyer deinit here.
+	// This avoids a brief window where generic PTT can race before CW keyer resumes ownership.
+	gFlagReconfigureVfos = true;
+	CW_KeyerResetRuntime();
     if( wpm_changed ) {
         gRequestSaveSettings = true;
     }
