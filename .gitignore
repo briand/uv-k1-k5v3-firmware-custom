@@ -1,5 +1,6 @@
 *.d
 *.o
+*.rej
 firmware
 /firmware.packed.bin
 /firmware.bin
