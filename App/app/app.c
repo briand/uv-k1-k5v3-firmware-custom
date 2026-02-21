@@ -74,6 +74,9 @@
 #include "ui/menu.h"
 #include "ui/status.h"
 #include "ui/ui.h"
+#ifdef ENABLE_CW_MODULATOR
+#include "app/cwkeyer.h"
+#endif
 
 #ifdef ENABLE_FEAT_F4HWN_SCREENSHOT
     #include "screenshot.h"
@@ -658,7 +661,7 @@ static void CheckRadioInterrupts(void)
 
 	#ifdef ENABLE_CW_MODULATOR
 		if (gCurrentFunction == FUNCTION_TRANSMIT && gTxVfo->Modulation == MODULATION_CW)
-			return;
+			return;  // no interrupts during CW TX
 	#endif
 
     while (BK4819_ReadRegister(BK4819_REG_0C) & 1u) { // BK chip interrupt request
@@ -1012,6 +1015,14 @@ void APP_Update(void)
 
     if (gCurrentFunction != FUNCTION_TRANSMIT)
         HandleFunction();
+
+#ifdef ENABLE_CW_MODULATOR
+	if (gTxVfo->Modulation == MODULATION_CW && gCW_KeyerMode != CW_KEYER_MODE_OFF) {
+		CW_Action_t act = CW_HandleState();
+		if (act & CW_ACTION_KEY_DOWN) RADIO_CW_BeginResume();
+		if (act & CW_ACTION_KEY_UP)   RADIO_CW_Suspend();
+	}
+#endif
 
 #ifdef ENABLE_FMRADIO
 //  if (gFmRadioCountdown_500ms > 0)

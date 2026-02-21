@@ -350,7 +350,7 @@ void Main(void)
         #endif
     #endif
         
-    while (true) {
+    while (true) {  // on average, about 80 loops per mS
         APP_Update();
 
         if (gNextTimeslice) {

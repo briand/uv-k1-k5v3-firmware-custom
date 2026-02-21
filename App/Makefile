@@ -109,6 +109,7 @@ ifeq ($(ENABLE_UART),1)
 endif
 ifeq ($(ENABLE_CW_MODULATOR),1)
 	OBJS += driver/timer.o
+    OBJS += app/cwkeyer.o
 endif
 # Main
 OBJS += app/action.o

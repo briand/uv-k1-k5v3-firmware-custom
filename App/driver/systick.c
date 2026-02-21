@@ -27,30 +27,20 @@ void SYSTICK_Init(void)
 }
 void SYSTICK_DelayUs(uint32_t Delay)
 {
-    const uint32_t ticks = Delay * gTickMultiplier;
-    uint32_t elapsed_ticks = 0;
-    uint32_t Start = SysTick->LOAD;
-    uint32_t Previous = SysTick->VAL;
-    
-    // FIX: Simplified loop - removed inner "wait for change" loop
-    while (elapsed_ticks < ticks)
-    {
-        uint32_t Current = SysTick->VAL;
-        
-        // FIX: Corrected wraparound detection (was: "Current < Previous - 10")
-        if (Current < Previous)
-        {
-            // Normal countdown case
-            uint32_t Delta = Previous - Current;
-            elapsed_ticks += Delta;
-        }
-        else if (Current > Previous)
-        {
-            // Wraparound case: SysTick went 0 → LOAD → Current
-            uint32_t Delta = Previous + (Start - Current);
-            elapsed_ticks += Delta;
-        }
-        
-        Previous = Current;
-    }
+	const uint32_t ticks = Delay * gTickMultiplier; // target CPU cycles
+	const uint32_t reload = SysTick->LOAD;          // current reload value (period = reload + 1)
+	uint32_t elapsed = 0;
+	uint32_t prev = SysTick->VAL;
+
+	while (elapsed < ticks) {
+		uint32_t cur = SysTick->VAL;
+		if (cur != prev) {
+			// SysTick counts down; handle wrap: when counter reloads, cur > prev
+			uint32_t delta = (cur <= prev)
+							   ? (prev - cur)
+							   : (prev + ((reload + 1U) - cur));
+			elapsed += delta;
+			prev = cur;
+		}
+	}
 }
