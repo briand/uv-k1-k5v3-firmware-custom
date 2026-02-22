@@ -26,7 +26,7 @@
 #include "ui/ui.h"
 #ifdef ENABLE_FLASHLIGHT
 #include "driver/gpio.h"
-#include "bsp/dp32g030/gpio.h"
+#include "py32f071_ll_gpio.h"
 #endif
 #ifdef ENABLE_CW_MODULATOR
 #include "app/cwkeyer.h"

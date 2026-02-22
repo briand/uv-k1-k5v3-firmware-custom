@@ -21,7 +21,6 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#ifdef ENABLE_UART
 extern uint8_t UART_DMA_Buffer[256];
 
 void UART_Init(void);

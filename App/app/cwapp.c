@@ -30,7 +30,7 @@
 #include "driver/bk4819-regs.h"
 #include "driver/gpio.h"
 #include "driver/uart.h"
-#include "bsp/dp32g030/gpio.h"
+#include "py32f071_ll_gpio.h"
 #include "functions.h"
 #include "misc.h"
 #include "radio.h"

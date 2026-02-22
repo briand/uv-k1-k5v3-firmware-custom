@@ -796,7 +796,6 @@ void RADIO_SelectVfos(void)
 
 void RADIO_SetupRegisters(bool switchToForeground)
 {
-{
     BK4819_FilterBandwidth_t Bandwidth = gRxVfo->CHANNEL_BANDWIDTH;
 
     #ifdef ENABLE_FEAT_F4HWN_NARROWER
@@ -825,7 +824,7 @@ void RADIO_SetupRegisters(bool switchToForeground)
                 [[fallthrough]];
             case BK4819_FILTER_BW_WIDE:
             case BK4819_FILTER_BW_NARROW:
-		    case BK4819_FILTER_BW_1p7K:
+		    case BK4819_FILTER_BW_NARROWER:
                 #ifdef ENABLE_AM_FIX
     //              BK4819_SetFilterBandwidth(Bandwidth, gRxVfo->Modulation == MODULATION_AM && gSetting_AM_fix);
                     BK4819_SetFilterBandwidth(Bandwidth, true);

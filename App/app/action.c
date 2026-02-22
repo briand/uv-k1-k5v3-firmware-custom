@@ -328,16 +328,9 @@ void ACTION_SwitchFilter(void)
 {
 	gRequestSaveChannel = 1;
 
-	uint8_t next = gTxVfo->CHANNEL_BANDWIDTH + 1;
-#ifdef ENABLE_EXTRA_FILTER
-	if (next > BK4819_FILTER_BW_1p7K)
-		next = BK4819_FILTER_BW_WIDE;
-#else
-	if (next > BK4819_FILTER_BW_6K)
-		next = BK4819_FILTER_BW_WIDE;
-#endif
-
-	gTxVfo->CHANNEL_BANDWIDTH = next;
+	gTxVfo->CHANNEL_BANDWIDTH++;
+    if(gTxVfo->CHANNEL_BANDWIDTH == BK4819_FILTER_BW_UNKNOWN)
+		gTxVfo->CHANNEL_BANDWIDTH = BK4819_FILTER_BW_WIDE;
 }
 
 

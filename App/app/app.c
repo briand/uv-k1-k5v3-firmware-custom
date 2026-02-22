@@ -1021,45 +1021,14 @@ void APP_Update(void)
     }
 
     if (gReducedService)
+    {
         return;
+    }
 
 	if (gCurrentFunction != FUNCTION_TRANSMIT)
+    {
 		HandleFunction();
-
-    if (gCurrentFunction == FUNCTION_TRANSMIT && (gTxTimeoutReached || SerialConfigInProgress()))
-    {   // transmitter timed out or must de-key
-        gTxTimeoutReached = false;
-
-#ifdef ENABLE_FEAT_F4HWN
-        if(gBacklightCountdown_500ms > 0 || gEeprom.BACKLIGHT_TIME == 61)
-        {
-            //BACKLIGHT_TurnOn();
-            BACKLIGHT_SetBrightness(gEeprom.BACKLIGHT_MAX);
-        }
-
-        gTxTimeoutReachedAlert = false;
-        gTxTimeoutToneAlert = 800;
-
-        if (gSetting_set_ptt_session) // Improve OnePush if TOT
-        {
-            if(gPttOnePushCounter == 1)
-            {
-                gPttOnePushCounter = 3;
-            }
-            else if(gPttOnePushCounter == 2)
-            {
-                ProcessKey(KEY_PTT, false, false);
-                gPttIsPressed = false;
-                gPttOnePushCounter = 0;
-                gPttWasReleased = true;
-                //if (gKeyReading1 != KEY_INVALID)
-                //  gPttWasReleased = true;
-            }
-            #if defined(ENABLE_FEAT_F4HWN_CTR) || defined(ENABLE_FEAT_F4HWN_INV)
-            ST7565_ContrastAndInv();
-            #endif
-        }
-#endif
+    }
 
 #ifdef ENABLE_FMRADIO
 //  if (gFmRadioCountdown_500ms > 0)
@@ -1244,10 +1213,9 @@ static void CheckKeys(void)
     if (gSetting_set_ptt_session)
     {
         if (
-            		if (
-#ifdef ENABLE_CW_MODULATOR
+    #ifdef ENABLE_CW_MODULATOR
 		gCW_KeyerUsesPTT ||
-#endif		
+    #endif		
             GPIO_IsPttPressed() && !SerialConfigInProgress() && gPttOnePushCounter == 0)
         {   // PTT pressed
             if (++gPttDebounceCounter >= 3)     // 30ms

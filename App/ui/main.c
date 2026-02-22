@@ -1430,6 +1430,7 @@ void UI_DisplayMain(void)
 		else if (vfoInfo->CHANNEL_BANDWIDTH == BANDWIDTH_1p7K)
 			UI_PrintStringSmallNormal("1.7k", LCD_WIDTH + 70, 0, line + 1);
 #endif
+#endif
 
 #ifdef ENABLE_DTMF_CALLING
         // show the DTMF decoding symbol
