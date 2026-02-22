@@ -167,6 +167,40 @@ enable_feature(ENABLE_BYP_RAW_DEMODULATORS)
 enable_feature(ENABLE_BLMIN_TMP_OFF)
 enable_feature(ENABLE_SCAN_RANGES)
 
+# ---- NR7Y / CW Features ----
+# CW modulator sources and timer
+enable_feature(ENABLE_FEAT_NR7Y_CW
+    app/cwapp.c
+    app/cwkeyer.c
+    app/cwhardware.c
+    app/cwmacro.c
+    driver/timer.c
+)
+
+# Code practice (requires CW)
+enable_feature(ENABLE_FEAT_NR7Y_CPO
+    app/cpo.c
+    ui/cpo.c
+)
+
+# Millis / timer support
+enable_feature(ENABLE_FEAT_NR7Y_MILLIS
+    driver/timer.c
+)
+
+# Backwards-compatibility: map new feature flags to legacy defines
+if(ENABLE_FEAT_NR7Y_CW)
+    target_compile_definitions(App INTERFACE ENABLE_CW_MODULATOR)
+endif()
+
+if(ENABLE_FEAT_NR7Y_CPO)
+    target_compile_definitions(App INTERFACE ENABLE_CODE_PRACTICE)
+endif()
+
+if(ENABLE_FEAT_NR7Y_MILLIS)
+    target_compile_definitions(App INTERFACE ENABLE_MILLIS)
+endif()
+
 # ---- CONTRIB MODS ----
 
 # Thank you @markusb

@@ -22,9 +22,9 @@ EXTRA_ARGS=("$@")
 # ---------------------------------------------
 # Validate preset name
 # ---------------------------------------------
-if [[ ! "$PRESET" =~ ^(Custom|Bandscope|Broadcast|Basic|RescueOps|Game|Fusion|All)$ ]]; then
+if [[ ! "$PRESET" =~ ^(Custom|Bandscope|Broadcast|Basic|RescueOps|Game|Fusion|CW|All)$ ]]; then
   echo "❌ Unknown preset: '$PRESET'"
-  echo "Valid presets are: Custom, Bandscope, Broadcast, Basic, RescueOps, Game, Fusion, All"
+  echo "Valid presets are: Custom, Bandscope, Broadcast, Basic, RescueOps, Game, Fusion, CW, All"
   exit 1
 fi
 
@@ -49,11 +49,13 @@ build_preset() {
   echo ""
   echo "=== 🚀 Building preset: ${preset} ==="
   echo "---------------------------------------------"
+  # Map container /src paths back to host workspace path in compiler diagnostics
+  # so VSCode can open files from error messages (rewrites /src/... -> $PWD/...).
   docker run --rm \
     -u $(id -u):$(id -g) \
-    -it -v "$PWD":/src -w /src "$IMAGE" \
+    -it -v "$PWD":"$PWD" -w "$PWD" "$IMAGE" \
     bash -c "which arm-none-eabi-gcc && arm-none-eabi-gcc --version && \
-             cmake --preset ${preset} ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"} && \
+             cmake --preset ${preset} ${EXTRA_ARGS[@]+\"${EXTRA_ARGS[@]}\"} && \
              cmake --build --preset ${preset} -j"
   echo "✅ Done: ${preset}"
 }
@@ -62,7 +64,7 @@ build_preset() {
 # Handle 'All' preset
 # ---------------------------------------------
 if [[ "$PRESET" == "All" ]]; then
-  PRESETS=(Bandscope Broadcast Basic RescueOps Game Fusion)
+  PRESETS=(Bandscope Broadcast Basic RescueOps Game Fusion CW)
   for p in "${PRESETS[@]}"; do
     build_preset "$p"
   done

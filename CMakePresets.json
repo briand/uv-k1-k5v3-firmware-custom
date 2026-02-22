@@ -193,6 +193,19 @@
                 "TARGET": "f4hwn.fusion"
             }
         }
+        ,
+        {
+            "name": "CW",
+            "inherits": "Fusion",
+            "cacheVariables": {
+                "EDITION_STRING": "NR7Y-CW",
+                "TARGET": "nr7y.cw",
+                "ENABLE_CW_MODULATOR": true,
+                "ENABLE_FEAT_NR7Y_CW": true,
+                "ENABLE_FEAT_NR7Y_CPO": true,
+                "ENABLE_FEAT_NR7Y_MILLIS": true
+            }
+        }
     ],
     "buildPresets": [
         {
@@ -222,6 +235,11 @@
         {
             "name": "Fusion",
             "configurePreset": "Fusion"
+        }
+        ,
+        {
+            "name": "CW",
+            "configurePreset": "CW"
         }
     ]
 }
