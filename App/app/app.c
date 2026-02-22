@@ -37,11 +37,15 @@
 #include "app/main.h"
 #include "app/menu.h"
 #include "app/scanner.h"
+#ifdef ENABLE_CW_MODULATOR
+    #include "app/cwapp.h"
+#endif
 #if defined(ENABLE_UART) || defined(ENABLE_USB)
     #include "app/uart.h"
     #include "scheduler.h"
 #endif
 #include "py32f0xx.h"
+#include "bsp/dp32g030/gpio.h"
 #include "audio.h"
 #include "board.h"
 #ifdef ENABLE_FEAT_F4HWN_SLEEP
@@ -1209,14 +1213,14 @@ static void CheckKeys(void)
 #endif
 
 // -------------------- PTT ------------------------
+#ifdef ENABLE_CW_MODULATOR
+	if (!gCW_KeyerManagesPtt)   // CW keyer owns PTT entirely when active
+    {
+#endif
 #ifdef ENABLE_FEAT_F4HWN
     if (gSetting_set_ptt_session)
     {
-        if (
-    #ifdef ENABLE_CW_MODULATOR
-		gCW_KeyerUsesPTT ||
-    #endif		
-            GPIO_IsPttPressed() && !SerialConfigInProgress() && gPttOnePushCounter == 0)
+        if (GPIO_IsPttPressed() && !SerialConfigInProgress() && gPttOnePushCounter == 0)
         {   // PTT pressed
             if (++gPttDebounceCounter >= 3)     // 30ms
             {   // start transmitting
@@ -1295,6 +1299,10 @@ static void CheckKeys(void)
             gPttDebounceCounter = 0;        
     }
 #else
+#ifdef ENABLE_CW_MODULATOR
+	if (!gCW_KeyerManagesPtt)   // CW keyer owns PTT entirely when active
+    {
+#endif
     if (gPttIsPressed)
     {
         if (GPIO_CheckBit(&GPIOC->DATA, GPIOC_PIN_PTT) || SerialConfigInProgress())
@@ -1322,15 +1330,12 @@ static void CheckKeys(void)
     }
     else
         gPttDebounceCounter = 0;
-#endif
-
 #ifdef ENABLE_CW_MODULATOR
-	// Decrement TX display holdoff timer (runs every 10ms tick regardless of TX state)
-	if (gCW_TxDisplayHoldoff_10ms > 0)
-	{
-		if (--gCW_TxDisplayHoldoff_10ms == 0)
-			gUpdateDisplay = true;  // Trigger screen refresh to switch away from CW display
-	}
+    } // !gCW_KeyerManagesPtt (non-F4HWN)
+#endif
+#endif
+#ifdef ENABLE_CW_MODULATOR
+    } // !gCW_KeyerManagesPtt
 #endif
 
 // --------------------- OTHER KEYS ----------------------------
@@ -1426,13 +1431,7 @@ void APP_TimeSlice10ms(void)
 #endif
 
 #ifdef ENABLE_CW_MODULATOR
-	// Handle CW macro recording updates
-	if (gCW_Recording && gCW_RecordNewChar) {
-		gCW_RecordNewChar = false;
-		gUpdateDisplay = true;
-	}
-	// Update playback indicator
-	CW_PlaybackIndicatorDeadline();
+    CW_TimeSlice10ms();
 #endif
 
 #ifdef ENABLE_CODE_PRACTICE

@@ -200,10 +200,11 @@
             "cacheVariables": {
                 "EDITION_STRING": "NR7Y-CW",
                 "TARGET": "nr7y.cw",
-                "ENABLE_CW_MODULATOR": true,
+                "ENABLE_FMRADIO": false,
+                "ENABLE_FEAT_F4HWN_GMRS_FRS_MURS": false,
                 "ENABLE_FEAT_NR7Y_CW": true,
                 "ENABLE_FEAT_NR7Y_CPO": true,
-                "ENABLE_FEAT_NR7Y_MILLIS": true
+                "ENABLE_LPTIM": true
             }
         }
     ],

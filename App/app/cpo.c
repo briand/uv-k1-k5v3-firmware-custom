@@ -61,7 +61,7 @@ void CPO_Exit(void)
 {
 #ifdef ENABLE_FLASHLIGHT
 	gCW_FlashlightSending = false;
-	GPIO_ClearBit(&GPIOC->DATA, GPIOC_PIN_FLASHLIGHT);
+	GPIO_ResetOutputPin(GPIO_PIN_FLASHLIGHT);
 #endif
 	gCW_CpoActive = false;
 	gRequestDisplayScreen = DISPLAY_MAIN;

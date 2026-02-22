@@ -784,11 +784,11 @@ void RADIO_SelectVfos(void)
     gRxVfo = &gEeprom.VfoInfo[gEeprom.RX_VFO];
 
     #ifdef ENABLE_CW_MODULATOR
-	if(gTxVfo->Modulation==MODULATION_CW)
-	{
-		CW_KeyerReconfigure();
-		gMonitor = true;
-	}
+    if(gTxVfo->Modulation==MODULATION_CW)
+    {
+        CW_KeyerReconfigure(true);
+        gMonitor = true;
+    }
 #endif
 
     RADIO_SelectCurrentVfo();
@@ -1337,13 +1337,20 @@ void RADIO_PrepareTX(void)
         // over voltage .. this is being a pain
         State = VFO_STATE_VOLTAGE_HIGH;
     }
-#ifndef ENABLE_TX_WHEN_AM
-    else if (gCurrentVfo->Modulation != MODULATION_FM) {
-        // not allowed to TX if in AM mode
-        State = VFO_STATE_TX_DISABLE;
-    }
-#endif
-
+    #ifdef ENABLE_CW_MODULATOR
+    #ifndef ENABLE_TX_WHEN_AM
+        else if (gCurrentVfo->Modulation == MODULATION_AM) {
+            State = VFO_STATE_TX_DISABLE;
+        }
+    #endif
+    #else
+    #ifndef ENABLE_TX_WHEN_AM
+        else if (gCurrentVfo->Modulation != MODULATION_FM) {
+            // not allowed to TX in AM mode
+            State = VFO_STATE_TX_DISABLE;
+        }
+    #endif
+    #endif
     if (State != VFO_STATE_NORMAL) {
         // TX not allowed
         RADIO_SetVfoState(State);

@@ -42,8 +42,11 @@ static bool s_last_dit = false;
 static bool s_last_dah = false;
 
 // Read button ring input (SIDE1)
+#ifdef CW_STAGE2
 static void CW_ReadSideButton(bool *ring_out)
 {
+    // Side button / ring support disabled in CW_STAGE2 minimal build
+
     // Read SIDE1 button (PA3) as ring with de-noise
     // Set keyboard matrix pins high
     GPIOA->DATA |= (1U << GPIOA_PIN_KEYBOARD_4) |
@@ -78,9 +81,11 @@ static void CW_ReadSideButton(bool *ring_out)
 
     *ring_out = ring;
 }
+#endif
 
 // Generic GPIO deglitch function - reads with de-noise
 // Returns true if pin is active (low), false if inactive (high)
+#ifdef CW_STAGE2
 static bool CW_ReadGpioDeglitched(volatile uint32_t *gpio_data, uint8_t pin_bit, bool heavy)
 {
     bool result = false;
@@ -103,11 +108,15 @@ static bool CW_ReadGpioDeglitched(volatile uint32_t *gpio_data, uint8_t pin_bit,
 
     return result;
 }
+#endif
 
 // Read the PTT/tip with de-noise
 static void CW_ReadPtt(bool *ptt_out)
 {
-    *ptt_out = CW_ReadGpioDeglitched(&GPIOC->DATA, GPIOC_PIN_PTT, false);
+    // TODO: add back the de-glitch routine
+    *ptt_out = GPIO_IsPttPressed();
+    // *ptt_out = CW_ReadGpioDeglitched(&GPIOC->DATA, GPIOC_PIN_PTT, false);
+
 }
 
 // static uint16_t ReadCH3()
@@ -125,14 +134,18 @@ static void CW_ReadPtt(bool *ptt_out)
 //     // 12-bit data (0x400BA02C = CH3 DATA register)
 //     return (uint16_t)((*(volatile uint32_t *)0x400BA02CU) & 0xFFFU);
 // }
+#ifdef CW_STAGE2
 uint16_t CW_ReadCH3()
-{    
+{
+    // ADC/paddle support disabled in CW_STAGE2 minimal build
     ADC_Start();
     while (!ADC_CheckEndOfConversion(ADC_CH3)) {}
     return ADC_GetValue(ADC_CH3);
 }
+#endif
 
-
+// ADC paddle detection disabled in CW_STAGE2 minimal build
+#ifdef CW_STAGE2
 static void CW_ReadADCkeys(bool *tip_out, bool *ring_out)
 {
     // Take baseline ADC sample with timing
@@ -174,6 +187,7 @@ static void CW_ReadADCkeys(bool *tip_out, bool *ring_out)
     else if (val < gEeprom.CW_ADC_CABLE_10K + CW_ADC_RANGE_LIMIT) *tip_out  = true;  // 10k ohm
     else *tip_out = *ring_out = true;
 }
+#endif
 
 // Read raw paddle inputs for a specific mode
 // Returns true if mode is valid, false otherwise
@@ -183,7 +197,7 @@ bool CW_ReadKeysForMode(uint8_t mode, bool *dit_out, bool *dah_out)
     if (mode & CW_KEY_FLAG_NO_KEYER && !(mode & CW_KEY_FLAG_PORT_GROUND)) {
         return false;
     }
-
+#ifdef CW_STAGE2
     if (mode & CW_KEY_FLAG_ADC) {
         // ADC (CEC cable) input
         bool adc_tip = false;
@@ -224,6 +238,7 @@ bool CW_ReadKeysForMode(uint8_t mode, bool *dit_out, bool *dah_out)
     *dah_out = reverse ? hw_ring : hw_tip;
 
     return true;
+#endif
 }
 
 // Read GPIO inputs based on configured mode
@@ -252,8 +267,11 @@ void CW_ReadKeys(CW_Input *in)
 // Configure port ground pin (PA8) for tip/ring paddle input
 // When enabled: PA8 becomes GPIO output low (acts as ground for paddle port)
 // When disabled: PA8 returns to UART1 RX function with DMA
+#ifdef CW_STAGE2
 void CW_ConfigurePortGround(bool enable)
 {
+    (void)enable;
+    // Port ground config disabled in CW_STAGE2 minimal build
     if (enable) {
         // Disable UART RX and RX DMA to prevent unwanted DMA transfers while PA8 is GPIO
         UART1->CTRL &= ~(UART_CTRL_RXEN_MASK | UART_CTRL_RXDMAEN_MASK);
@@ -285,12 +303,15 @@ void CW_ConfigurePortGround(bool enable)
     char buf[50];
     sprintf_(buf, "Port Ground %s\r\n", enable ? "Enabled" : "Disabled");
     UART_Send(buf, strlen(buf));
-#endif
+
 }
+#endif
+#endif
 
 // FM Radio is disabled on this firmware, we *always* configure
 // PB15 as an input, because the radio might have the line reworked
 // onto the mic input, and we don't want to affect that.
+#ifdef CW_STAGE2
 void CW_ConfigurePortRing(bool enable)
 {
     if (enable) {
@@ -310,7 +331,9 @@ void CW_ConfigurePortRing(bool enable)
     UART_Send(buf, strlen(buf));
 #endif
 }
+#endif
 
+#ifdef CW_STAGE2
 void CW_ConfigureADCforCECPaddles(bool enable)
 {
     //UART_Send("adc init...", strlen("adc init..."));
@@ -336,6 +359,7 @@ void CW_ConfigureADCforCECPaddles(bool enable)
     UART_Send(buf, strlen(buf));
 #endif
 }
+#endif
 
 // Reset sampled key states (used from keyer init)
 void CW_HW_ResetKeySamples(void)
@@ -343,3 +367,27 @@ void CW_HW_ResetKeySamples(void)
     s_last_dit = false;
     s_last_dah = false;
 }
+
+#ifndef CW_STAGE2
+// Minimal-build stubs for symbols referenced elsewhere when full keyer support
+// is disabled. These are intentionally trivial to keep linking happy.
+void CW_ConfigurePortGround(bool enable)
+{
+    (void)enable;
+}
+
+void CW_ConfigurePortRing(bool enable)
+{
+    (void)enable;
+}
+
+void CW_ConfigureADCforCECPaddles(bool enable)
+{
+    (void)enable;
+}
+
+uint16_t CW_ReadCH3()
+{
+    return 0;
+}
+#endif

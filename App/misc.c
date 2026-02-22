@@ -329,7 +329,7 @@ volatile uint8_t  boot_counter_10ms;
 uint8_t           gIsLocked = 0xFF;
 
 #ifdef ENABLE_CW_MODULATOR
-	volatile uint16_t gCW_SuspendCounter_1ms;
+    volatile uint32_t gCW_SuspendCounter_1ms;
 	volatile CW_State_t        gCW_State = CW_INACTIVE;
 	volatile bool     gCW_KeyerUsingSD1 = false;
 	volatile bool     gCW_KeyerManagesPtt = false;

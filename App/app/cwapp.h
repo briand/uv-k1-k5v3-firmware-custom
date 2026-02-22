@@ -28,4 +28,8 @@ void CW_AppUpdate(void);
 // (Repeater Tail Tone Elimination is invalid for CW).
 void CW_EndTxNow(void);
 
+// Called from the 10ms timeslice to perform CW-related periodic updates
+// (macro recording state, playback indicator deadline, TX display holdoff).
+void CW_TimeSlice10ms(void);
+
 #endif // APP_CWAPP_H

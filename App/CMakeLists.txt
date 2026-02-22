@@ -174,7 +174,6 @@ enable_feature(ENABLE_FEAT_NR7Y_CW
     app/cwkeyer.c
     app/cwhardware.c
     app/cwmacro.c
-    driver/timer.c
 )
 
 # Code practice (requires CW)
@@ -184,11 +183,10 @@ enable_feature(ENABLE_FEAT_NR7Y_CPO
 )
 
 # Millis / timer support
-enable_feature(ENABLE_FEAT_NR7Y_MILLIS
+enable_feature(ENABLE_LPTIM
     driver/timer.c
 )
 
-# Backwards-compatibility: map new feature flags to legacy defines
 if(ENABLE_FEAT_NR7Y_CW)
     target_compile_definitions(App INTERFACE ENABLE_CW_MODULATOR)
 endif()
@@ -197,8 +195,8 @@ if(ENABLE_FEAT_NR7Y_CPO)
     target_compile_definitions(App INTERFACE ENABLE_CODE_PRACTICE)
 endif()
 
-if(ENABLE_FEAT_NR7Y_MILLIS)
-    target_compile_definitions(App INTERFACE ENABLE_MILLIS)
+if(ENABLE_LPTIM OR ENABLE_FEAT_NR7Y_CW)
+    target_compile_definitions(App INTERFACE ENABLE_LPTIM)
 endif()
 
 # ---- CONTRIB MODS ----

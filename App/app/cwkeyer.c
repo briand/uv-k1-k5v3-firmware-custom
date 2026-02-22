@@ -72,7 +72,7 @@ static uint16_t       s_gap_count  = 0;      // inter-element gap in ticks (1 di
 static uint16_t       s_ext_gap_count = 0;       // tick count when auto-char extension kicks in (16-bit)
 static uint16_t       s_char_gap_count = 0;  // inter-char gap in ticks (3 dits)
 static uint16_t       s_word_gap_count = 0;  // inter-word gap in ticks (7 dits)
-static uint16_t       s_elem_start_count = 0;// element start counter (16-bit millis)
+static uint32_t       s_elem_start_count = 0;// element start counter (32-bit millis)
 static bool           s_active_is_dit = false;
 static bool           s_pending_alternate = false; // alternate element queued
 /* last sampled paddles moved to app/cwhardware.c */
@@ -114,7 +114,7 @@ void CW_KeyerResetRuntime(void)
 {
     s_KeyerFSMState = CWK_STATE_EMIT_NONE;
 
-    s_elem_start_count = timer_millis_low16();
+    s_elem_start_count = timer_millis();
 
     s_active_is_dit = false;
     s_pending_alternate = false;
@@ -241,7 +241,7 @@ void CW_StartMacroPlayback(uint8_t macroIndex, bool repeat)
     CW_ClearTxDisplay();
     s_play_space_pending = false;
     s_pb_state = PB_STATE_INTER_CHAR_GAP;
-    s_elem_start_count = timer_millis_low16();
+    s_elem_start_count = timer_millis();
     gCW_PlaybackActive = (s_playback_buf_len > 0);
 
 #if CW_KEYER_DEBUG
@@ -269,7 +269,7 @@ CW_Action_t CW_PlaybackHandleState(void)
 {
     if (!gCW_PlaybackActive) return CW_ACTION_NONE;
 
-    const uint16_t cur_count = timer_millis_low16();
+    const uint32_t cur_count = timer_millis();
     CW_Input in = {0};
 
     // If user hits a paddle during playback, stop playback entirely
@@ -281,8 +281,8 @@ CW_Action_t CW_PlaybackHandleState(void)
 
     switch (s_pb_state) {
     case PB_STATE_ACTIVE_ELEMENT: {
-        const uint16_t target = s_active_is_dit ? s_dit_count : s_dah_count;
-        const uint16_t elapsed = timer_millis_low16_since(s_elem_start_count);
+        const uint32_t target = s_active_is_dit ? s_dit_count : s_dah_count;
+        const uint32_t elapsed = timer_millis_since(s_elem_start_count);
         if (elapsed < target) {
             return CW_ACTION_CARRIER_HOLD_ON;
         } else {
@@ -295,7 +295,7 @@ CW_Action_t CW_PlaybackHandleState(void)
     }
 
     case PB_STATE_INTER_ELEMENT_GAP: {
-        const uint16_t elapsed = timer_millis_low16_since(s_elem_start_count);
+        const uint32_t elapsed = timer_millis_since(s_elem_start_count);
         if (elapsed >= s_gap_count) {
             // Advance to next element in current char
             s_play_elem_index++;
@@ -318,7 +318,7 @@ CW_Action_t CW_PlaybackHandleState(void)
     }
 
     case PB_STATE_INTER_CHAR_GAP: {
-        const uint16_t elapsed = timer_millis_low16_since(s_elem_start_count);
+        const uint32_t elapsed = timer_millis_since(s_elem_start_count);
         if (elapsed < s_char_gap_count) {
             return CW_ACTION_NONE;
         }
@@ -369,7 +369,7 @@ CW_Action_t CW_PlaybackHandleState(void)
     }
 
     case PB_STATE_INTER_WORD_GAP: {
-        const uint16_t elapsed = timer_millis_low16_since(s_elem_start_count);
+        const uint32_t elapsed = timer_millis_since(s_elem_start_count);
         if (elapsed >= s_word_gap_count) {
             // advance to next char
             s_pb_state = PB_STATE_INTER_CHAR_GAP;
@@ -525,8 +525,8 @@ CW_Action_t ptt_action(void)
 {
     CW_Action_t action = CW_ACTION_NONE;
 
-    // Read PTT button (PC5) - active low
-    bool ptt = !(GPIOC->DATA & (1U << GPIOC_PIN_PTT));
+    // Read PTT button (PC5) via wrapper (active low)
+    bool ptt = GPIO_IsPttPressed();
 
     if (ptt && !s_last_handkey_ptt) {
         // PTT pressed
@@ -565,7 +565,7 @@ CW_Action_t CW_HandleState(void)
         return CW_ACTION_NONE;
     }
 
-    const uint16_t cur_count = timer_millis_low16();
+    const uint32_t cur_count = timer_millis();
 
     // Check if keyer is disabled (handkey modes have NO_KEYER flag set)
     if (gEeprom.CW_KEY_INPUT & CW_KEY_FLAG_NO_KEYER) {
@@ -619,7 +619,7 @@ CW_Action_t CW_HandleState(void)
     ///
     case CWK_STATE_ACTIVE_ELEMENT:
         const uint32_t target = s_active_is_dit ? s_dit_count : s_dah_count;
-        const uint32_t elapsed_elem = timer_millis_low16_since(s_elem_start_count);
+        const uint32_t elapsed_elem = timer_millis_since(s_elem_start_count);
 
 #if CW_KEYER_DEBUG
         {
@@ -679,7 +679,7 @@ CW_Action_t CW_HandleState(void)
     ///   ELEMENT GAP
     ///
     case CWK_STATE_INTER_ELEMENT_GAP: {
-        const uint16_t elapsed_gap = timer_millis_low16_since(s_elem_start_count);
+        const uint32_t elapsed_gap = timer_millis_since(s_elem_start_count);
         
         // Read only if needed
         if(!s_pending_alternate) // briand - lets try doing this regardless of mode // && (gEeprom.CW_KEYER_MODE == CW_IAMBIC_MODE_A))
@@ -756,7 +756,7 @@ CW_Action_t CW_HandleState(void)
     ///    CHAR GAP
     ///
 	case CWK_STATE_INTER_CHAR_GAP: {
-		const uint16_t elapsed_gap = timer_millis_low16_since(s_elem_start_count);
+		const uint32_t elapsed_gap = timer_millis_since(s_elem_start_count);
 
 		if (elapsed_gap < s_char_gap_count) {  // until char gap complete
 
@@ -808,7 +808,7 @@ CW_Action_t CW_HandleState(void)
     ///
 	case CWK_STATE_INTER_WORD_GAP: {
 		// Post char-gap: monitor and send immediately, or goto idle at word_gap
-		const uint16_t elapsed_gap = timer_millis_low16_since(s_elem_start_count);
+		const uint32_t elapsed_gap = timer_millis_since(s_elem_start_count);
 		CW_ReadKeys(&in);
 		
 		if (in.dit || in.dah) {

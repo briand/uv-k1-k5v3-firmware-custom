@@ -115,7 +115,7 @@ void CW_AppUpdate(void)
 				BK4819_SetScrambleFrequencyControlWord(gEeprom.CW_TONE_FREQUENCY * 10);
 				#ifdef ENABLE_FLASHLIGHT
 				if (gCW_FlashlightSending) {
-					GPIO_SetBit(&GPIOC->DATA, GPIOC_PIN_FLASHLIGHT);
+					GPIO_SetOutputPin(GPIO_PIN_FLASHLIGHT);
 				}
 				#endif
 				gCW_TxDisplayHoldoff_10ms = 200;
@@ -125,7 +125,7 @@ void CW_AppUpdate(void)
 				BK4819_SetScrambleFrequencyControlWord(0);
 				#ifdef ENABLE_FLASHLIGHT
 				if (gCW_FlashlightSending) {
-					GPIO_ClearBit(&GPIOC->DATA, GPIOC_PIN_FLASHLIGHT);
+					GPIO_ResetOutputPin(GPIO_PIN_FLASHLIGHT);
 				}
 				#endif
 				#ifdef ENABLE_CODE_PRACTICE
@@ -165,7 +165,7 @@ void CW_AppUpdate(void)
 			// only suspend once, from active TX
 			if (gCW_State == CW_TRANSMITTING) {
 				RADIO_CW_Suspend();
-				gCW_SuspendCounter_1ms = timer_millis_low16();
+				gCW_SuspendCounter_1ms = timer_millis();
 			}
 			gCW_TxDisplayHoldoff_10ms = 200;
 		break;
@@ -179,14 +179,14 @@ void CW_AppUpdate(void)
 			if (gCW_State == CW_SUSPENDED) {
 				RADIO_CW_BeginResume();
 			}
-			gCW_SuspendCounter_1ms = timer_millis_low16();
+			gCW_SuspendCounter_1ms = timer_millis();
 		break;
 
 		case CW_ACTION_NONE:
 			if(gCW_State == CW_TRANSMITTING) {
 				// if we've been transmitting but now have no carrier, suspend
 				RADIO_CW_Suspend();
-				gCW_SuspendCounter_1ms = timer_millis_low16();
+				gCW_SuspendCounter_1ms = timer_millis();
 			}
 		default:
 		break;
@@ -195,11 +195,30 @@ void CW_AppUpdate(void)
 	// ---- suspend timeout → end TX ----
 	if (gCW_State == CW_SUSPENDED)
 	{
-		if (timer_millis_low16_since(gCW_SuspendCounter_1ms) >= cw_suspend_limit_1ms) {
+		if (timer_millis_since(gCW_SuspendCounter_1ms) >= cw_suspend_limit_1ms) {
             gCW_SuspendCounter_1ms = 0;
             gCW_TxDisplayHoldoff_10ms = 200;
             gPttIsPressed = false;
 			CW_EndTxNow();
 		}
+	}
+}
+
+// Perform CW-derived 10ms timeslice work previously located in app.c
+void CW_TimeSlice10ms(void)
+{
+	// Handle CW macro recording updates
+	if (gCW_Recording && gCW_RecordNewChar) {
+		gCW_RecordNewChar = false;
+		gUpdateDisplay = true;
+	}
+
+	// Update playback indicator
+	CW_PlaybackIndicatorDeadline();
+
+	// Decrement TX display holdoff timer (runs every 10ms tick regardless of TX state)
+	if (gCW_TxDisplayHoldoff_10ms > 0) {
+		if (--gCW_TxDisplayHoldoff_10ms == 0)
+			gUpdateDisplay = true;  // Trigger screen refresh to switch away from CW display
 	}
 }

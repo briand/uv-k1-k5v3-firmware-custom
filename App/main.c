@@ -60,8 +60,8 @@
 #include "driver/vcp.h"
 #endif
 
-#if defined(ENABLE_MILLIS) || defined(ENABLE_CW_MODULATOR)
-	#include "driver/timer.h"
+#if defined(ENABLE_CW_MODULATOR) || defined(ENABLE_LPTIM)
+    #include "driver/timer.h"
 #endif
 
 #include "helper/battery.h"
@@ -88,9 +88,9 @@ void Main(void)
 	SYSTICK_Init();
 	BOARD_Init();
 
-	#if defined(ENABLE_MILLIS) || defined(ENABLE_CW_MODULATOR)
-	TIM0_INIT();
-	#endif
+#if defined(ENABLE_CW_MODULATOR) || defined(ENABLE_LPTIM)
+    timer_init();
+#endif
 
     boot_counter_10ms = 250;   // 2.5 sec
 
@@ -394,12 +394,13 @@ void Main(void)
         APP_Update();
 
 #ifdef ENABLE_CW_MODULATOR
-		static uint16_t s_last_millis = 0;
-		const uint16_t current_millis = timer_millis_low16();
-		if (timer_millis_low16_since(s_last_millis) > 0) {
-			s_last_millis = current_millis;
-			CW_AppUpdate();
-		}
+        static uint32_t s_last_millis = 0;
+        // const uint32_t current_millis = timer_millis();
+        // if (timer_millis_since(s_last_millis) > 0) {
+        //     s_last_millis = current_millis;
+        //     CW_AppUpdate();
+        // }
+            CW_AppUpdate();
 #endif
 
         if (gNextTimeslice) {
