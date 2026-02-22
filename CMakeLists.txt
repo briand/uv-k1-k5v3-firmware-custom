@@ -103,6 +103,14 @@ add_custom_command(
     COMMENT "Generating .hex file"
 )
 
+# Generate .uf2 file (requires python available in build container)
+add_custom_command(
+    TARGET ${EXE_NAME}
+    POST_BUILD
+    COMMAND python ${CMAKE_SOURCE_DIR}/tools/UF2/uf2conv.py -c -b 0x08002800 -o ${EXE_NAME}.uf2 ${EXE_NAME}.bin
+    COMMENT "Generating .uf2 file"
+)
+
 # Pack
 # TODO: Incorparate venv?
 # if(ENABLE_FEAT_F4HWN)
