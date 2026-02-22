@@ -278,33 +278,6 @@ void DrawCWDecodeBar(void)
 }
 #endif
 
-#ifdef ENABLE_CW_MODULATOR
-void DrawCWDecodeBar(bool now)
-{
-	now = now;
-	const unsigned int line = 3;
-	uint8_t *p_line = gFrameBuffer[line];
-	char String[20];
-	
-	if (gScreenToDisplay != DISPLAY_MAIN)
-		return;  // screen is in use
-	
-	// Always do immediate blit when called during CW transmission
-	now = true;
-	
-	memset(p_line, 0, LCD_WIDTH);
-	
-	// Get the last 20 characters from display buffer
-	const unsigned int len = strlen(gCW_TX_Display);
-	const unsigned int idx = (len > 20) ? len - 20 : 0;
-	
-	sprintf(String, "%s", gCW_TX_Display + idx);
-	UI_PrintStringSmallNormal(String, 2, 0, line);
-	
-	ST7565_BlitLine(line);
-}
-#endif
-
 void DisplayRSSIBar(const bool now)
 {
 #if defined(ENABLE_RSSI_BAR)
@@ -1513,7 +1486,7 @@ void UI_DisplayMain(void)
 		if (gCurrentFunction == FUNCTION_TRANSMIT && gCurrentVfo->Modulation == MODULATION_CW && gCW_TX_Display[0] != 0)
 		{	// show CW characters being transmitted
 			center_line = CENTER_LINE_CW_DECODE;
-			DrawCWDecodeBar(false);
+                        DrawCWDecodeBar();
 		}
 		else
 #endif
