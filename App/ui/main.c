@@ -25,8 +25,7 @@
 #ifdef ENABLE_CW_MODULATOR
 	#include "app/cwmacro.h"
 	#include "app/cwkeyer.h"
-	#include "driver/timer.h"
-	#include "bsp/dp32g030/timer.h"  /* for TIMERBASE0_LOW_CNT access */
+    #include "driver/millis.h"
 #endif
 #include "bitmaps.h"
 #include "board.h"

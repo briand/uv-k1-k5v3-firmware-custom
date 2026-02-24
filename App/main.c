@@ -61,7 +61,7 @@
 #endif
 
 #if defined(ENABLE_CW_MODULATOR) || defined(ENABLE_LPTIM)
-    #include "driver/timer.h"
+    #include "driver/millis.h"
 #endif
 
 #include "helper/battery.h"
@@ -88,10 +88,6 @@ void Main(void)
 	SYSTICK_Init();
 	BOARD_Init();
 
-#if defined(ENABLE_CW_MODULATOR) || defined(ENABLE_LPTIM)
-    timer_init();
-#endif
-
     boot_counter_10ms = 250;   // 2.5 sec
 
 #ifdef ENABLE_UART
@@ -100,6 +96,9 @@ void Main(void)
 #endif
 #ifdef ENABLE_USB
     VCP_Init();
+#endif
+#if defined(ENABLE_CW_MODULATOR) || defined(ENABLE_LPTIM)
+    millis_init();
 #endif
 
     // Not implementing authentic device checks
@@ -395,12 +394,11 @@ void Main(void)
 
 #ifdef ENABLE_CW_MODULATOR
         static uint32_t s_last_millis = 0;
-        // const uint32_t current_millis = timer_millis();
-        // if (timer_millis_since(s_last_millis) > 0) {
-        //     s_last_millis = current_millis;
-        //     CW_AppUpdate();
-        // }
-            CW_AppUpdate();
+        const uint32_t current_millis = millis();
+        if (millis_since(s_last_millis) > 0) {
+            s_last_millis = current_millis;
+            CW_AppUpdate(); 
+        }
 #endif
 
         if (gNextTimeslice) {

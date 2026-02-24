@@ -181,10 +181,9 @@ enable_feature(ENABLE_FEAT_NR7Y_CPO
     app/cpo.c
     ui/cpo.c
 )
-
-# Millis / timer support
-enable_feature(ENABLE_LPTIM
-    driver/timer.c
+# Millis support
+enable_feature(ENABLE_MILLIS
+    driver/millis.c
 )
 
 if(ENABLE_FEAT_NR7Y_CW)
@@ -195,8 +194,8 @@ if(ENABLE_FEAT_NR7Y_CPO)
     target_compile_definitions(App INTERFACE ENABLE_CODE_PRACTICE)
 endif()
 
-if(ENABLE_LPTIM OR ENABLE_FEAT_NR7Y_CW)
-    target_compile_definitions(App INTERFACE ENABLE_LPTIM)
+if(ENABLE_MILLIS OR ENABLE_FEAT_NR7Y_CW)
+    target_compile_definitions(App INTERFACE ENABLE_MILLIS)
 endif()
 
 # ---- CONTRIB MODS ----

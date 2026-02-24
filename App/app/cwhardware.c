@@ -26,13 +26,13 @@
 #include "py32f071_ll_gpio.h"
 #include "py32f071_ll_rcc.h"
 #include "py32f071_ll_usart.h"
+#include "py32f071_ll_adc.h"
 #include "driver/gpio.h"
 #include "driver/systick.h"
 #include "driver/i2c.h"
 #include "driver/uart.h"
 #include "driver/adc.h"
-#include "py32f071_ll_adc.h"
-#include "driver/timer.h"
+#include "driver/millis.h"
 #include "external/printf/printf.h"
 
 #define ENABLE_CEC_KEYER_DEBUG 0

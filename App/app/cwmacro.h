@@ -38,6 +38,9 @@
 
 // EEPROM addresses for macros (each uses CW_MACRO_BLOCK_SIZE bytes)
 // We reuse the DTMF contacts region (0x1C00..0x1CFF), DTMF calling must be disabled
+#if defined(ENABLE_DTMF_CALLING) && defined(ENABLE_CW_MODULATOR)
+#error "ENABLE_DTMF_CALLING and ENABLE_CW_MODULATOR both enabled; CW macros overlap DTMF contacts (0x1C00). Disable one or change CW macro base."
+#endif
 
 #define CW_MACRO1_EEPROM_ADDR 0x1C00
 #define CW_MACRO2_EEPROM_ADDR (CW_MACRO1_EEPROM_ADDR + CW_MACRO_BLOCK_SIZE)  /* 0x1C30 */

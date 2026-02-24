@@ -36,7 +36,7 @@
 #include "radio.h"
 #include "settings.h"
 #include "driver/system.h"
-#include "driver/timer.h"
+#include "driver/millis.h"
 #ifdef ENABLE_CODE_PRACTICE
 #include "app/cpo.h"
 #endif
@@ -165,7 +165,7 @@ void CW_AppUpdate(void)
 			// only suspend once, from active TX
 			if (gCW_State == CW_TRANSMITTING) {
 				RADIO_CW_Suspend();
-				gCW_SuspendCounter_1ms = timer_millis();
+				gCW_SuspendCounter_1ms = millis();
 			}
 			gCW_TxDisplayHoldoff_10ms = 200;
 		break;
@@ -179,14 +179,14 @@ void CW_AppUpdate(void)
 			if (gCW_State == CW_SUSPENDED) {
 				RADIO_CW_BeginResume();
 			}
-			gCW_SuspendCounter_1ms = timer_millis();
+			gCW_SuspendCounter_1ms = millis();
 		break;
 
 		case CW_ACTION_NONE:
 			if(gCW_State == CW_TRANSMITTING) {
 				// if we've been transmitting but now have no carrier, suspend
 				RADIO_CW_Suspend();
-				gCW_SuspendCounter_1ms = timer_millis();
+				gCW_SuspendCounter_1ms = millis();
 			}
 		default:
 		break;
@@ -195,7 +195,7 @@ void CW_AppUpdate(void)
 	// ---- suspend timeout → end TX ----
 	if (gCW_State == CW_SUSPENDED)
 	{
-		if (timer_millis_since(gCW_SuspendCounter_1ms) >= cw_suspend_limit_1ms) {
+		if (millis_since(gCW_SuspendCounter_1ms) >= cw_suspend_limit_1ms) {
             gCW_SuspendCounter_1ms = 0;
             gCW_TxDisplayHoldoff_10ms = 200;
             gPttIsPressed = false;

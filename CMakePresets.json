@@ -204,7 +204,7 @@
                 "ENABLE_FEAT_F4HWN_GMRS_FRS_MURS": false,
                 "ENABLE_FEAT_NR7Y_CW": true,
                 "ENABLE_FEAT_NR7Y_CPO": true,
-                "ENABLE_LPTIM": true
+                "ENABLE_MILLIS": true
             }
         }
     ],

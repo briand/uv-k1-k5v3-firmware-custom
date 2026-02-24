@@ -45,7 +45,6 @@
     #include "scheduler.h"
 #endif
 #include "py32f0xx.h"
-#include "bsp/dp32g030/gpio.h"
 #include "audio.h"
 #include "board.h"
 #ifdef ENABLE_FEAT_F4HWN_SLEEP

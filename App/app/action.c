@@ -336,6 +336,12 @@ void ACTION_SwitchFilter(void)
 
 void ACTION_Handle(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 {
+#ifdef ENABLE_CW_MODULATOR
+    // paranoid block: keyer owns SIDE1 (we shouldn't ever get this far)
+    if (Key == KEY_SIDE1 && gCW_KeyerUsingSD1) {
+        return;
+    }
+#endif
     if (gScreenToDisplay == DISPLAY_MAIN && gDTMF_InputMode){
          // entering DTMF code
 
