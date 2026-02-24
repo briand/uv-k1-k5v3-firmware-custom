@@ -1535,7 +1535,6 @@ void cancelUserInputModes(void)
         gWasFKeyPressed     = false;
         gInputBoxIndex      = 0;
         gKeyInputCountdown  = 0;
-        gBeepToPlay         = BEEP_500HZ_60MS_DOUBLE_BEEP_OPTIONAL;
         gUpdateStatus       = true;
         gUpdateDisplay      = true;
     }
@@ -1558,15 +1557,13 @@ void APP_TimeSlice500ms(void)
         if (--gKeyInputCountdown == 0)
         {
 
-            if (IS_MR_CHANNEL(gTxVfo->CHANNEL_SAVE) && (gInputBoxIndex == 1 || gInputBoxIndex == 2))
+            if (IS_MR_CHANNEL(gTxVfo->CHANNEL_SAVE) && (gInputBoxIndex > 0 && gInputBoxIndex < 4))
             {
                 channelMoveSwitch();
 
                 if (gBeepToPlay == BEEP_500HZ_60MS_DOUBLE_BEEP_OPTIONAL) {
                     AUDIO_PlayBeep(gBeepToPlay);
                 }
-
-                SETTINGS_SaveVfoIndices();
             }
 
             cancelUserInputModes();
@@ -1936,6 +1933,7 @@ static void ProcessKey(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 
             // cancel user input
             cancelUserInputModes();
+            gBeepToPlay = BEEP_500HZ_60MS_DOUBLE_BEEP_OPTIONAL;
 
             if (gMonitor)
                 ACTION_Monitor(); //turn off the monitor

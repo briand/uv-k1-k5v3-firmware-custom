@@ -377,6 +377,14 @@ static void Key_FUNC(KEY_Code_t Key, uint8_t state)
                     gBeepToPlay = BEEP_500HZ_60MS_DOUBLE_BEEP_OPTIONAL;
                 break;
 
+            case KEY_8:
+                ACTION_BackLightOnDemand();
+                break;
+
+            case KEY_9:
+                ACTION_BackLight();
+                break;
+
             case KEY_STAR:
                 ACTION_Scan(autoScan);
                 break;

@@ -114,8 +114,6 @@ static void processFKeyFunction(const KEY_Code_t Key, const bool beep)
         gBeepToPlay = BEEP_500HZ_60MS_DOUBLE_BEEP_OPTIONAL;
         return;
     }
-    
-    gBeepToPlay = BEEP_1KHZ_60MS_OPTIONAL;
 
     switch (Key) {
         case KEY_0:
@@ -212,7 +210,7 @@ static void processFKeyFunction(const KEY_Code_t Key, const bool beep)
             #endif
             COMMON_SwitchVFOMode();
             if (beep)
-                gBeepToPlay = BEEP_500HZ_60MS_DOUBLE_BEEP_OPTIONAL;
+                gBeepToPlay = BEEP_1KHZ_60MS_OPTIONAL;
 
             break;
 
@@ -230,7 +228,7 @@ static void processFKeyFunction(const KEY_Code_t Key, const bool beep)
             break;
 
         case KEY_5:
-            if(beep) {
+            if(!beep) {
 #ifdef ENABLE_NOAA
                 if (!IS_NOAA_CHANNEL(gTxVfo->CHANNEL_SAVE)) {
                     gEeprom.ScreenChannel[Vfo] = gEeprom.NoaaChannel[gEeprom.TX_VFO];
@@ -377,6 +375,8 @@ void channelMove(uint16_t Channel)
 #endif
 
     RADIO_ConfigureChannel(gEeprom.TX_VFO, gVfoConfigureMode);
+
+    SETTINGS_SaveVfoIndices();
     
     return;
 }
@@ -411,11 +411,6 @@ void channelMoveSwitch(void) {
         if (gInputBoxIndex == 4) {
             gInputBoxIndex = 0;
             gKeyInputCountdown = 1;
-
-            channelMove(Channel - 1);
-            SETTINGS_SaveVfoIndices();
-            
-            return;
         }
 
         channelMove(Channel - 1);
@@ -436,7 +431,7 @@ static void MAIN_Key_DIGITS(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
                 gWasFKeyPressed = false;
                 gUpdateStatus   = true;
 
-                processFKeyFunction(Key, false);
+                processFKeyFunction(Key, true);
             }
         }
         return;
@@ -682,34 +677,23 @@ static void MAIN_Key_DIGITS(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
     }
     #endif
 
-    processFKeyFunction(Key, true);
+    processFKeyFunction(Key, false);
 }
 
 static void MAIN_Key_EXIT(bool bKeyPressed, bool bKeyHeld)
 {
     if (!bKeyHeld && bKeyPressed) { // exit key pressed
-        gBeepToPlay = BEEP_1KHZ_60MS_OPTIONAL;
+        gBeepToPlay = BEEP_1KHZ_60MS_OPTIONAL;  // beep when key is pressed
+        return;                                 // don't use the key till it's released
+    }
 
-#ifdef ENABLE_DTMF_CALLING
-        if (gDTMF_CallState != DTMF_CALL_STATE_NONE && gCurrentFunction != FUNCTION_TRANSMIT)
-        {   // clear CALL mode being displayed
-            gDTMF_CallState = DTMF_CALL_STATE_NONE;
-            gUpdateDisplay  = true;
-            return;
-        }
-#endif
+    if (bKeyHeld) { // exit key held down
+        if (bKeyPressed) {
+            if (gInputBoxIndex > 0 || gDTMF_InputBox_Index > 0 || gDTMF_InputMode)
+            {   // cancel key input mode (channel/frequency entry)
 
-#ifdef ENABLE_FMRADIO
-        if (!gFmRadioMode)
-#endif
-        {
-            if (gScanStateDir == SCAN_OFF) {
-                if (gInputBoxIndex == 0)
-                    return;
-                gInputBox[--gInputBoxIndex] = 10;
-
-                // Restore full VFO state when back to 0
-                if (gInputBoxIndex == 0 && gHasVfoBackup) {
+                // Restore full VFO state on long press EXIT
+                if (gHasVfoBackup) {
                     const uint8_t Vfo = gEeprom.TX_VFO;
 
                     // Restore indices
@@ -727,39 +711,38 @@ static void MAIN_Key_EXIT(bool bKeyPressed, bool bKeyHeld)
                     gHasVfoBackup = false;
                 }
 
-                gKeyInputCountdown = key_input_timeout_500ms;
-                channelMoveSwitch();
-
-#ifdef ENABLE_VOICE
-                if (gInputBoxIndex == 0)
-                    gAnotherVoiceID = VOICE_ID_CANCEL;
-#endif
+                gDTMF_InputMode       = false;
+                gDTMF_InputBox_Index  = 0;
+                memset(gDTMF_String, 0, sizeof(gDTMF_String));
+                gInputBoxIndex        = 0;
+                gRequestDisplayScreen = DISPLAY_MAIN;
+                gBeepToPlay           = BEEP_1KHZ_60MS_OPTIONAL;
             }
-            else {
-                gScanKeepResult = false;
-                CHFRSCANNER_Stop();
-
-#ifdef ENABLE_VOICE
-                gAnotherVoiceID = VOICE_ID_SCANNING_STOP;
-#endif
-            }
-
-            gRequestDisplayScreen = DISPLAY_MAIN;
-            return;
         }
 
-#ifdef ENABLE_FMRADIO
-        ACTION_FM();
-#endif
         return;
     }
 
-    if (bKeyHeld && bKeyPressed) { // exit key held down
-        if (gInputBoxIndex > 0 || gDTMF_InputBox_Index > 0 || gDTMF_InputMode)
-        {   // cancel key input mode (channel/frequency entry)
+#ifdef ENABLE_DTMF_CALLING
+    if (gDTMF_CallState != DTMF_CALL_STATE_NONE && gCurrentFunction != FUNCTION_TRANSMIT)
+    {   // clear CALL mode being displayed
+        gDTMF_CallState = DTMF_CALL_STATE_NONE;
+        gUpdateDisplay  = true;
+        return;
+    }
+#endif
 
-            // Restore full VFO state on long press EXIT
-            if (gHasVfoBackup) {
+#ifdef ENABLE_FMRADIO
+    if (!gFmRadioMode)
+#endif
+    {
+        if (gScanStateDir == SCAN_OFF) {
+            if (gInputBoxIndex == 0)
+                return;
+            gInputBox[--gInputBoxIndex] = 10;
+
+            // Restore full VFO state when back to 0
+            if (gInputBoxIndex == 0 && gHasVfoBackup) {
                 const uint8_t Vfo = gEeprom.TX_VFO;
 
                 // Restore indices
@@ -777,14 +760,31 @@ static void MAIN_Key_EXIT(bool bKeyPressed, bool bKeyHeld)
                 gHasVfoBackup = false;
             }
 
-            gDTMF_InputMode       = false;
-            gDTMF_InputBox_Index  = 0;
-            memset(gDTMF_String, 0, sizeof(gDTMF_String));
-            gInputBoxIndex        = 0;
-            gRequestDisplayScreen = DISPLAY_MAIN;
-            gBeepToPlay           = BEEP_1KHZ_60MS_OPTIONAL;
+            gKeyInputCountdown = key_input_timeout_500ms;
+            channelMoveSwitch();
+
+#ifdef ENABLE_VOICE
+            if (gInputBoxIndex == 0)
+                gAnotherVoiceID = VOICE_ID_CANCEL;
+#endif
         }
+        else {
+            gScanKeepResult = false;
+            CHFRSCANNER_Stop();
+
+#ifdef ENABLE_VOICE
+            gAnotherVoiceID = VOICE_ID_SCANNING_STOP;
+#endif
+        }
+
+        gRequestDisplayScreen = DISPLAY_MAIN;
+        return;
     }
+
+#ifdef ENABLE_FMRADIO
+    ACTION_FM();
+#endif
+    return;
 }
 
 static void MAIN_Key_MENU(bool bKeyPressed, bool bKeyHeld)
@@ -837,6 +837,9 @@ static void MAIN_Key_MENU(bool bKeyPressed, bool bKeyHeld)
     }
 
     if (!bKeyPressed && !gDTMF_InputMode) { // menu key released
+        gKeyInputCountdown = 1;
+        channelMoveSwitch();
+
         const bool bFlag = !gInputBoxIndex;
         gInputBoxIndex   = 0;
 
@@ -985,7 +988,7 @@ static void MAIN_Key_UP_DOWN(bool bKeyPressed, bool bKeyHeld, int8_t Direction)
 
     if (bKeyHeld || !bKeyPressed) { // key held or released
         if (gInputBoxIndex > 0)
-            return; // leave if input box active
+            gInputBoxIndex = 0;
 
         if (!bKeyPressed) {
             if (!bKeyHeld || IS_FREQ_CHANNEL(Channel))
@@ -999,10 +1002,6 @@ static void MAIN_Key_UP_DOWN(bool bKeyPressed, bool bKeyHeld, int8_t Direction)
         }
     }
     else { // short pressed
-        if (gInputBoxIndex > 0) {
-            gBeepToPlay = BEEP_500HZ_60MS_DOUBLE_BEEP_OPTIONAL;
-            return;
-        }
         gBeepToPlay = BEEP_1KHZ_60MS_OPTIONAL;
     }
 
