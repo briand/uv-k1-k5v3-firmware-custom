@@ -24,6 +24,7 @@
 #include "settings.h"
 #include "py32f071_ll_dma.h"
 #include "py32f071_ll_gpio.h"
+#include "py32f071_ll_bus.h"
 #include "py32f071_ll_rcc.h"
 #include "py32f071_ll_usart.h"
 #include "py32f071_ll_adc.h"
@@ -35,6 +36,11 @@
 #include "driver/millis.h"
 #include "external/printf/printf.h"
 
+// Local debug toggle for CW hardware reads
+#ifndef ENABLE_CW_HARDWARE_DEBUG
+#define ENABLE_CW_HARDWARE_DEBUG 1
+#endif
+
 #define ENABLE_CEC_KEYER_DEBUG 0
 
 // Local state for last sampled paddles (edge detection)
@@ -42,51 +48,65 @@ static bool s_last_dit = false;
 static bool s_last_dah = false;
 
 // Read button ring input (SIDE1)
-#ifdef CW_STAGE2
 static void CW_ReadSideButton(bool *ring_out)
 {
-    // Side button / ring support disabled in CW_STAGE2 minimal build
+#if ENABLE_CW_HARDWARE_DEBUG
+    char dbg_buf[80];
+#endif
 
-    // Read SIDE1 button (PA3) as ring with de-noise
-    // Set keyboard matrix pins high
-    GPIOA->DATA |= (1U << GPIOA_PIN_KEYBOARD_4) |
-                   (1U << GPIOA_PIN_KEYBOARD_5) |
-                   (1U << GPIOA_PIN_KEYBOARD_6) |
-                   (1U << GPIOA_PIN_KEYBOARD_7);
+    // The keyboard matrix lives on GPIOB (columns on PB3..PB6, rows on PB12..PB15).
+    // KEY_SIDE1 is in the "zero" column, row 0 => PB15.
+    const uint32_t cols_mask = LL_GPIO_PIN_3 | LL_GPIO_PIN_4 | LL_GPIO_PIN_5 | LL_GPIO_PIN_6; // PB3..PB6
+    const uint32_t side1_row  = LL_GPIO_PIN_15; // PB15
 
-    // De-noise SIDE1 (PA3) - active low when pressed
+    // Drive columns high (same as keyboard scan initial state)
+    LL_GPIO_SetOutputPin(GPIOB, cols_mask);
+
     bool ring = false;
-    uint16_t reg = 0, reg2;
-    unsigned int i, k;
+    uint32_t reg = 0, reg2 = 0;
+    uint32_t match_count = 0;
 
-    for (i = 0, k = 0, reg = 0; i < 3 && k < 8; i++, k++) {
-        SYSTICK_DelayUs(1);
-        reg2 = GPIOA->DATA & (1U << GPIOA_PIN_KEYBOARD_0);
-        i *= (reg == reg2);  // Reset i if readings differ
-        reg = reg2;
+    // Debounce: take several samples with short delays and require consecutive matching reads
+    for (unsigned int k = 0; k < 8; k++) {
+        SYSTICK_DelayUs(10);
+        reg2 = LL_GPIO_ReadInputPort(GPIOB) & side1_row;
+
+        if (reg2 != reg) {
+            match_count = 0;
+            reg = reg2;
+        } else {
+            match_count++;
+        }
+
+        if (match_count >= 2) {
+            break;
+        }
     }
 
-    if (i >= 3) {
-        // Stable reading achieved
-        ring = !reg;  // Active low
+    if (match_count >= 2) {
+        // Stable reading achieved - active low when pressed
+        ring = !(reg);
     }
 
-    // Create I2C stop condition since we might have toggled I2C pins
-    // This leaves GPIOA_PIN_KEYBOARD_4 and GPIOA_PIN_KEYBOARD_5 high
-    I2C_Stop();
+    static bool last_reported = false;
+    if (ring != last_reported) {
+#if ENABLE_CW_HARDWARE_DEBUG
+        sprintf_(dbg_buf, "CW_ReadSideButton: stable=%u reg=0x%08X match=%u ring=%u\r\n", (unsigned)(match_count>=2), (unsigned)reg, (unsigned)match_count, (unsigned)ring);
+        UART_Send(dbg_buf, strlen(dbg_buf));
+#endif
+        last_reported = ring;
+    }
 
-    // Reset VOICE chip pins
-    GPIO_ClearBit(&GPIOA->DATA, GPIOA_PIN_KEYBOARD_6);
-    GPIO_SetBit(  &GPIOA->DATA, GPIOA_PIN_KEYBOARD_7);
+    // Cleanup: leave columns high as keyboard does
+    LL_GPIO_SetOutputPin(GPIOB, cols_mask);
 
     *ring_out = ring;
 }
-#endif
+
 
 // Generic GPIO deglitch function - reads with de-noise
 // Returns true if pin is active (low), false if inactive (high)
-#ifdef CW_STAGE2
-static bool CW_ReadGpioDeglitched(volatile uint32_t *gpio_data, uint8_t pin_bit, bool heavy)
+static bool CW_ReadGpioDeglitched(GPIO_TypeDef *gpio_port, uint8_t pin_bit, bool heavy)
 {
     bool result = false;
     uint16_t reg = 0, reg2;
@@ -94,9 +114,11 @@ static bool CW_ReadGpioDeglitched(volatile uint32_t *gpio_data, uint8_t pin_bit,
     uint32_t limit = heavy ? 500 : 100; // more samples for heavy de-noise
     uint32_t goal = heavy ? 300 : 60;  // need this many stable samples
 
+    uint32_t pin_mask = (1U << pin_bit);
     for (i = 0, k = 0, reg = 0; i < goal && k < limit; i++, k++) {
         SYSTICK_DelayUs(1);
-        reg2 = (*gpio_data) & (1U << pin_bit);
+        // Read using LL helper: returns non-zero if pin input is set
+        reg2 = LL_GPIO_IsInputPinSet(gpio_port, pin_mask) ? pin_mask : 0;
         i *= (reg == reg2);  // Reset i if readings differ
         reg = reg2;
     }
@@ -108,14 +130,13 @@ static bool CW_ReadGpioDeglitched(volatile uint32_t *gpio_data, uint8_t pin_bit,
 
     return result;
 }
-#endif
 
 // Read the PTT/tip with de-noise
 static void CW_ReadPtt(bool *ptt_out)
 {
     // TODO: add back the de-glitch routine
     *ptt_out = GPIO_IsPttPressed();
-    // *ptt_out = CW_ReadGpioDeglitched(&GPIOC->DATA, GPIOC_PIN_PTT, false);
+    // *ptt_out = CW_ReadGpioDeglitched(GPIOC, GPIOC_PIN_PTT, false);
 
 }
 
@@ -145,9 +166,10 @@ uint16_t CW_ReadCH3()
 #endif
 
 // ADC paddle detection disabled in CW_STAGE2 minimal build
-#ifdef CW_STAGE2
+
 static void CW_ReadADCkeys(bool *tip_out, bool *ring_out)
 {
+#ifdef CW_STAGE2
     // Take baseline ADC sample with timing
     // uint16_t start_tick = timer_jiffies();
     
@@ -186,8 +208,8 @@ static void CW_ReadADCkeys(bool *tip_out, bool *ring_out)
     else if (val < gEeprom.CW_ADC_CABLE_20K + CW_ADC_RANGE_LIMIT) *ring_out = true;  // 20k ohm
     else if (val < gEeprom.CW_ADC_CABLE_10K + CW_ADC_RANGE_LIMIT) *tip_out  = true;  // 10k ohm
     else *tip_out = *ring_out = true;
-}
 #endif
+}
 
 // Read raw paddle inputs for a specific mode
 // Returns true if mode is valid, false otherwise
@@ -197,7 +219,7 @@ bool CW_ReadKeysForMode(uint8_t mode, bool *dit_out, bool *dah_out)
     if (mode & CW_KEY_FLAG_NO_KEYER && !(mode & CW_KEY_FLAG_PORT_GROUND)) {
         return false;
     }
-#ifdef CW_STAGE2
+
     if (mode & CW_KEY_FLAG_ADC) {
         // ADC (CEC cable) input
         bool adc_tip = false;
@@ -223,13 +245,14 @@ bool CW_ReadKeysForMode(uint8_t mode, bool *dit_out, bool *dah_out)
     if (mode & CW_KEY_FLAG_SIDE1) {
         CW_ReadSideButton(&hw_ring);
     }
-
+    
     // Read port ring input if enabled and OR with button ring
     if (mode & CW_KEY_FLAG_PORT_RING) {
-        bool port_ring = CW_ReadGpioDeglitched(&GPIOB->DATA, GPIOB_PIN_BK1080, true);
+        // New hardware: port-ring is on PA13 (SWDIO when not used). Use deglitch helper on GPIOA bit 13.
+        bool port_ring = CW_ReadGpioDeglitched(GPIOA, 13, true);
         hw_ring = hw_ring || port_ring;  // OR both sources
     }
-
+    
     // Determine if keys are reversed
     bool reverse = (mode & CW_KEY_FLAG_REVERSED);
 
@@ -238,7 +261,6 @@ bool CW_ReadKeysForMode(uint8_t mode, bool *dit_out, bool *dah_out)
     *dah_out = reverse ? hw_ring : hw_tip;
 
     return true;
-#endif
 }
 
 // Read GPIO inputs based on configured mode
@@ -264,66 +286,52 @@ void CW_ReadKeys(CW_Input *in)
     s_last_dah = n_dah;
 }
 
-// Configure port ground pin (PA8) for tip/ring paddle input
-// When enabled: PA8 becomes GPIO output low (acts as ground for paddle port)
-// When disabled: PA8 returns to UART1 RX function with DMA
-#ifdef CW_STAGE2
+// Configure port ground pin (PA10) for tip/ring paddle input
+// When enabled: PA10 becomes GPIO output low (acts as ground for paddle port)
+// When disabled: restore UART1 RX functionality (call UART_Init to reconfigure)
 void CW_ConfigurePortGround(bool enable)
 {
-    (void)enable;
-    // Port ground config disabled in CW_STAGE2 minimal build
+    // Use LL drivers to reconfigure PA10 (USART1 RX on AF1) to GPIO output low
     if (enable) {
-        // Disable UART RX and RX DMA to prevent unwanted DMA transfers while PA8 is GPIO
-        UART1->CTRL &= ~(UART_CTRL_RXEN_MASK | UART_CTRL_RXDMAEN_MASK);
+        // Disable USART1 so the pin can be used as GPIO
+        LL_USART_Disable(USART1);
 
-        // Disable DMA Channel 0
-        DMA_CH0->CTR &= ~DMA_CH_CTR_CH_EN_MASK;
+        // Disable RX DMA channel used by USART1 receive (configured in UART_Init)
+        LL_DMA_DisableChannel(DMA1, LL_DMA_CHANNEL_2);
 
-        // Clear any pending UART RX flags
-        UART1->IF = UART_IF_RXTO_BITS_SET | UART_IF_RXFIFO_FULL_BITS_SET;
-
-        // Configure PA8 (UART RX) as a GPIO low output (sleeve - acts as ground for the paddle port input)
-        PORTCON_PORTA_SEL1 &= ~PORTCON_PORTA_SEL1_A8_MASK;
-        //PORTCON_PORTA_SEL1 |= PORTCON_PORTA_SEL1_A8_BITS_GPIOA8;
-        GPIOA->DIR |= GPIO_DIR_8_BITS_OUTPUT;
-        GPIO_ClearBit(&GPIOA->DATA, GPIOA_PIN_UART_RX); // Set low
+        // Ensure GPIOA clock is enabled then configure PA10 as push-pull output and drive low
+        //LL_IOP_GRP1_EnableClock(LL_IOP_GRP1_PERIPH_GPIOA);
+        LL_GPIO_SetPinMode(GPIOA, LL_GPIO_PIN_10, LL_GPIO_MODE_OUTPUT);
+        LL_GPIO_SetPinOutputType(GPIOA, LL_GPIO_PIN_10, LL_GPIO_OUTPUT_PUSHPULL);
+        LL_GPIO_SetPinPull(GPIOA, LL_GPIO_PIN_10, LL_GPIO_PULL_DOWN);
+        LL_GPIO_ResetOutputPin(GPIOA, LL_GPIO_PIN_10); // drive low (ground)
     } else {
-        // Configure PA8 back to UART1 RX
-        PORTCON_PORTA_SEL1 &= ~PORTCON_PORTA_SEL1_A8_MASK;
-        PORTCON_PORTA_SEL1 |= PORTCON_PORTA_SEL1_A8_BITS_UART1_RX;
-        // DIR automatically handled by UART peripheral
-
-        // Re-enable UART RX and RX DMA
-        UART1->CTRL |= UART_CTRL_RXEN_BITS_ENABLE | UART_CTRL_RXDMAEN_BITS_ENABLE;
-
-        // Re-enable DMA Channel 0
-        DMA_CH0->CTR |= DMA_CH_CTR_CH_EN_BITS_ENABLE;
-        }
+        // Restore UART configuration which will reassign PA10 to AF1 (USART1_RX)
+        UART_Init();
+    }
 #if ENABLE_KEYER_DEBUG
     char buf[50];
     sprintf_(buf, "Port Ground %s\r\n", enable ? "Enabled" : "Disabled");
     UART_Send(buf, strlen(buf));
-
+#endif
 }
-#endif
-#endif
 
 // FM Radio is disabled on this firmware, we *always* configure
 // PB15 as an input, because the radio might have the line reworked
 // onto the mic input, and we don't want to affect that.
-#ifdef CW_STAGE2
 void CW_ConfigurePortRing(bool enable)
 {
+    // On new hardware the port-ring signal is on PA13 (shared with SWDIO).
+    // When enabling we configure PA13 as a GPIO input with pull-up so
+    // it can be sampled. When disabling we leave PA13 alone so the
+    // debugger (SWD) continues to work — do not enable port-ring if
+    // you need SWD.
     if (enable) {
-        // Configure PB15 as GPIO input (ring)
-        GPIOB->DIR &= ~(0 | GPIO_DIR_15_MASK); // PB15 as INPUT
-        PORTCON_PORTB_IE |= PORTCON_PORTB_IE_B15_BITS_ENABLE; // Enable input buffer
-        PORTCON_PORTB_PU |= PORTCON_PORTB_PU_B15_BITS_ENABLE; // activate the PB15 pullup
+        LL_IOP_GRP1_EnableClock(LL_IOP_GRP1_PERIPH_GPIOA);
+        LL_GPIO_SetPinMode(GPIOA, LL_GPIO_PIN_13, LL_GPIO_MODE_INPUT);
+        LL_GPIO_SetPinPull(GPIOA, LL_GPIO_PIN_13, LL_GPIO_PULL_UP);
     } else {
-        // we want to avoid affecting the line if shorted to mic, so float it
-        GPIOB->DIR &= ~GPIO_DIR_15_MASK; // PB15 *still* as INPUT
-        PORTCON_PORTB_IE &= ~PORTCON_PORTB_IE_B15_BITS_ENABLE; // Disable input buffer
-        PORTCON_PORTB_PU &= ~PORTCON_PORTB_PU_B15_BITS_ENABLE; // deactivate the PB15 pullup
+        // Intentionally do nothing — leave PA13 as SWDIO/default
     }
 #if ENABLE_KEYER_DEBUG
     char buf[50];
@@ -331,7 +339,6 @@ void CW_ConfigurePortRing(bool enable)
     UART_Send(buf, strlen(buf));
 #endif
 }
-#endif
 
 #ifdef CW_STAGE2
 void CW_ConfigureADCforCECPaddles(bool enable)
@@ -371,15 +378,6 @@ void CW_HW_ResetKeySamples(void)
 #ifndef CW_STAGE2
 // Minimal-build stubs for symbols referenced elsewhere when full keyer support
 // is disabled. These are intentionally trivial to keep linking happy.
-void CW_ConfigurePortGround(bool enable)
-{
-    (void)enable;
-}
-
-void CW_ConfigurePortRing(bool enable)
-{
-    (void)enable;
-}
 
 void CW_ConfigureADCforCECPaddles(bool enable)
 {
