@@ -114,7 +114,10 @@ void CW_KeyerResetRuntime(void)
 {
     s_KeyerFSMState = CWK_STATE_EMIT_NONE;
 
-    s_elem_start_count = millis();
+    // Do not reset s_elem_start_count here: resetting the element start
+    // timestamp can prematurely cancel detection of an inter-word gap
+    // when a reconfigure is requested. Preserve the existing timestamp
+    // so the idle/word-gap logic remains accurate.
 
     s_active_is_dit = false;
     s_pending_alternate = false;
@@ -158,7 +161,6 @@ void CW_KeyerReconfigure(bool enable)
     // take over PTT and SIDE1 (if was or is in the INPUT set) immediately
     gCW_KeyerManagesPtt = true;
     gCW_KeyerUsingSD1 |= gEeprom.CW_KEY_INPUT & CW_KEY_FLAG_SIDE1;
-    CW_KeyerResetRuntime();
     s_cfg_dirty = true; // Defer init until idle or gap
 }
 
@@ -558,9 +560,20 @@ CW_Action_t CW_HandleState(void)
 
     // Apply pending init if needed.
     if (s_cfg_dirty && s_KeyerFSMState == CWK_STATE_IDLE) {
-        CW_KeyerInit();
+        // Defer applying configuration while we're inside a potential word gap
+        // so we don't reset timing before an inter-word space can be detected.
+#if CW_KEYER_DEBUG
+        {
+            char dbg_init[80];
+            sprintf_(dbg_init, "CFG_DIRTY at idle: now=%u s_elem_start=%u idle_elapsed=%u word_gap=%u\r\n", millis(), s_elem_start_count, millis_since(s_elem_start_count), s_word_gap_count);
+            UART_Send(dbg_init, strlen(dbg_init));
+        }
+#endif
+        if (millis_since(s_elem_start_count) >= (uint32_t)s_word_gap_count) {
+            CW_KeyerInit();
+        }
         return CW_ACTION_NONE;
-    } else if(s_KeyerFSMState == CWK_STATE_EMIT_NONE || !s_enable_keyer) {
+    } else if (s_KeyerFSMState == CWK_STATE_EMIT_NONE || !s_enable_keyer) {
         s_KeyerFSMState = CWK_STATE_IDLE;
         return CW_ACTION_NONE;
     }
@@ -666,6 +679,13 @@ CW_Action_t CW_HandleState(void)
         if (elapsed_elem >= target) {
             action = CW_ACTION_CARRIER_OFF;
             s_elem_start_count = cur_count;
+#if CW_KEYER_DEBUG
+            {
+                char dbg3[96];
+                sprintf_(dbg3, "ELEMENT_END: cur=%u target=%u set s_elem_start=%u\r\n", cur_count, target, s_elem_start_count);
+                UART_Send(dbg3, strlen(dbg3));
+            }
+#endif
             // Emit element to encoder on state exit
             CW_EncoderProcessElement(s_active_is_dit ? CW_ELEMENT_DIT : CW_ELEMENT_DAH);
             s_KeyerFSMState = CWK_STATE_INTER_ELEMENT_GAP;
@@ -789,7 +809,15 @@ CW_Action_t CW_HandleState(void)
 
 		} else {
 			// Char gap complete - character boundary reached
-			CW_EncoderProcessElement(CW_ELEMENT_INTER_CHAR_SPACE);
+            CW_EncoderProcessElement(CW_ELEMENT_INTER_CHAR_SPACE);
+#if CW_KEYER_DEBUG
+            {
+                char dbg4[96];
+                const uint32_t now = millis();
+                sprintf_(dbg4, "CHAR_GAP_COMPLETE: now=%u s_elem_start=%u elapsed=%u char_gap=%u\r\n", now, s_elem_start_count, millis_since(s_elem_start_count), s_char_gap_count);
+                UART_Send(dbg4, strlen(dbg4));
+            }
+#endif
 			if (s_pending_alternate) {
 				// Send queued key now because the gap is over
 				s_pending_alternate = false;
@@ -807,19 +835,34 @@ CW_Action_t CW_HandleState(void)
     ///   WORD GAP
     ///
 	case CWK_STATE_INTER_WORD_GAP: {
-		// Post char-gap: monitor and send immediately, or goto idle at word_gap
-            const uint32_t elapsed_gap = millis_since(s_elem_start_count);
-		CW_ReadKeys(&in);
+        // Post char-gap: monitor and send immediately, or goto idle at word_gap
+        const uint32_t elapsed_gap = millis_since(s_elem_start_count);
+        // Debug: log elapsed vs configured word gap and current paddle state
+#if CW_KEYER_DEBUG
+        {
+            char dbg[80];
+            sprintf_(dbg, "INTER_WORD_GAP: elapsed=%u word=%u dit=%d dah=%d\r\n", elapsed_gap, s_word_gap_count, in.dit, in.dah);
+            UART_Send(dbg, strlen(dbg));
+        }
+#endif
+        CW_ReadKeys(&in);
 		
-		if (in.dit || in.dah) {
+        if (in.dit || in.dah) {
             s_active_is_dit = in.dit;
 			s_elem_start_count = cur_count;
 			s_KeyerFSMState = CWK_STATE_ACTIVE_ELEMENT;
 			action = CW_ACTION_CARRIER_ON;
-		} else if (elapsed_gap >= s_word_gap_count) {
-			CW_EncoderProcessElement(CW_ELEMENT_INTER_WORD_SPACE);
-			s_KeyerFSMState = CWK_STATE_IDLE;
-		}
+            } else if (elapsed_gap >= s_word_gap_count) {
+#if CW_KEYER_DEBUG
+                {
+                    char dbg2[80];
+                    sprintf_(dbg2, "INTER_WORD_GAP: triggering INTER_WORD_SPACE (elapsed=%u >= %u)\r\n", elapsed_gap, s_word_gap_count);
+                    UART_Send(dbg2, strlen(dbg2));
+                }
+#endif
+                CW_EncoderProcessElement(CW_ELEMENT_INTER_WORD_SPACE);
+                s_KeyerFSMState = CWK_STATE_IDLE;
+            }
 		break;
 	}
 
