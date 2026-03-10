@@ -1062,7 +1062,6 @@ void RADIO_SetModulation(ModulationMode_t modulation)
         BK4819_EnterBypass();
         BK4819_SetRegValue(afDacGainRegSpec, 0xF);
         BK4819_WriteRegister(BK4819_REG_3D, 0x2AAB);
-        BK4819_SetRegValue(afcDisableRegSpec, false);
         RADIO_SetupAGC(false, false);
         return;
     }
@@ -1071,7 +1070,7 @@ void RADIO_SetModulation(ModulationMode_t modulation)
     if (modulation == MODULATION_RAW) {
         BK4819_EnterRaw();
         BK4819_SetRegValue(afDacGainRegSpec, 0xF);
-        BK4819_WriteRegister(BK4819_REG_3D, 0x2AAB);
+        BK4819_WriteRegister(BK4819_REG_3D, 0x0000);
         RADIO_SetupAGC(false, false);
         return;
     }
@@ -1247,6 +1246,12 @@ void RADIO_PrepareTX(void)
         // over voltage .. this is being a pain
         State = VFO_STATE_VOLTAGE_HIGH;
     }
+#ifdef ENABLE_BYP_RAW_DEMODULATORS
+    else if (gCurrentVfo->Modulation == MODULATION_BYP || gCurrentVfo->Modulation == MODULATION_RAW) {
+        // BYP/RAW are receive-only modes.
+        State = VFO_STATE_TX_DISABLE;
+    }
+#endif
 #ifndef ENABLE_TX_WHEN_AM
     else if (gCurrentVfo->Modulation != MODULATION_FM) {
         // not allowed to TX if in AM mode
