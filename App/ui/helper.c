@@ -22,6 +22,7 @@
 #include "ui/helper.h"
 #include "ui/inputbox.h"
 #include "misc.h"
+#include "settings.h"
 
 
 void UI_GenerateChannelString(char *pString, const uint16_t Channel)
@@ -320,6 +321,23 @@ static void sort(int16_t *a, int16_t *b)
         }
         x += 4;
       }
+    }
+
+    void UI_DisplayUnlockKeyboard(uint8_t shift) {
+        if (gEeprom.KEY_LOCK && gKeypadLocked > 0)
+        {   // tell user how to unlock the keyboard
+            
+            //memcpy(gFrameBuffer[shift] + 2, gFontKeyLock, sizeof(gFontKeyLock));
+            UI_PrintStringSmallBold("UNLOCK KEYBOARD", 12, 0, shift);
+            //memcpy(gFrameBuffer[shift] + 120, gFontKeyLock, sizeof(gFontKeyLock));
+
+            /*
+            for (uint8_t i = 12; i < 116; i++)
+            {
+                gFrameBuffer[shift][i] ^= 0xFF;
+            }
+            */
+        }
     }
 
     bool IsEmptyName(const char *name, uint8_t len) {

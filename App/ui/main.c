@@ -77,19 +77,13 @@ static void DrawSmallPowerBars(uint8_t *p, unsigned int level)
     if(level>6)
         level = 6;
 
-    if(gSetting_set_gui)
-    {
-        for(uint8_t i = 0; i <= level; i++) {
-            char bar = (0xff << (6-i)) & 0x7F;
-            memset(p + 2 + i*3, bar, 2);
+    char bar = 0b00111110;
+
+    for(uint8_t i = 0; i <= level; i++) {
+        if(gSetting_set_gui) {
+            bar = (0xff << (6-i)) & 0x7F;
         }
-    }
-    else
-    {
-        for(uint8_t i = 0; i <= level; i++) {
-            char bar = 0b00111110;
-            memset(p + 2 + i*3, bar, 2);
-        }
+        memset(p + 2 + i*3, bar, 2);
     }
 }
 #if defined ENABLE_AUDIO_BAR || defined ENABLE_RSSI_BAR
@@ -563,32 +557,7 @@ void UI_DisplayMain(void)
         return;
     }
 #else
-    if (gEeprom.KEY_LOCK && gKeypadLocked > 0)
-    {   // tell user how to unlock the keyboard
-        uint8_t shift = 3;
-
-        /*
-        BK4819_ToggleGpioOut(BK4819_GPIO5_PIN1_RED, true);
-        SYSTEM_DelayMs(50);
-        BK4819_ToggleGpioOut(BK4819_GPIO5_PIN1_RED, false);
-        SYSTEM_DelayMs(50);
-        */
-
-        if(isMainOnly())
-        {
-            shift = 5;
-        }
-        //memcpy(gFrameBuffer[shift] + 2, gFontKeyLock, sizeof(gFontKeyLock));
-        UI_PrintStringSmallBold("UNLOCK KEYBOARD", 12, 0, shift);
-        //memcpy(gFrameBuffer[shift] + 120, gFontKeyLock, sizeof(gFontKeyLock));
-
-        /*
-        for (uint8_t i = 12; i < 116; i++)
-        {
-            gFrameBuffer[shift][i] ^= 0xFF;
-        }
-        */
-    }
+    UI_DisplayUnlockKeyboard(isMainOnly() ? 5 : 3);
 #endif
 
     unsigned int activeTxVFO = gRxVfoIsActive ? gEeprom.RX_VFO : gEeprom.TX_VFO;
