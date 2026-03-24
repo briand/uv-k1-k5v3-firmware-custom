@@ -603,100 +603,91 @@ void BK4819_EnableVox(uint16_t VoxEnableThreshold, uint16_t VoxDisableThreshold)
 
 void BK4819_SetFilterBandwidth(const BK4819_FilterBandwidth_t Bandwidth, const bool weak_no_different)
 {
-    // REG_43
-    // <15>    0 ???
+    (void)weak_no_different;
+
+    // REG_43 on BK4829, per BK4829 Registers Table.
     //
-    // <14:12> 4 RF filter bandwidth
-    //         0 = 1.7  kHz
-    //         1 = 2.0  kHz
-    //         2 = 2.5  kHz
-    //         3 = 3.0  kHz
-    //         4 = 3.75 kHz
-    //         5 = 4.0  kHz
-    //         6 = 4.25 kHz
-    //         7 = 4.5  kHz
-    // if <5> == 1, RF filter bandwidth * 2
+    // <14:12> RF filter bandwidth (Apass = 0.1dB)
+    //         000 = 2.0 kHz
+    //         001 = 2.5 kHz
+    //         010 = 3.0 kHz
+    //         011 = 3.5 kHz
+    //         100 = 4.0 kHz
+    //         101 = 4.5 kHz
+    //         110 = 5.0 kHz
+    //         111 = 5.5 kHz
+    // if REG_43<5> == 1, RF filter bandwidth *= 2
     //
-    // <11:9>  0 RF filter bandwidth when signal is weak
-    //         0 = 1.7  kHz
-    //         1 = 2.0  kHz
-    //         2 = 2.5  kHz
-    //         3 = 3.0  kHz
-    //         4 = 3.75 kHz
-    //         5 = 4.0  kHz
-    //         6 = 4.25 kHz
-    //         7 = 4.5  kHz
-    // if <5> == 1, RF filter bandwidth * 2
+    // <11:9> RF filter bandwidth when signal is weak (Apass = 0.1dB)
+    //         000 = 2.0 kHz
+    //         001 = 2.5 kHz
+    //         010 = 3.0 kHz
+    //         011 = 3.5 kHz
+    //         100 = 4.0 kHz
+    //         101 = 4.5 kHz
+    //         110 = 5.0 kHz
+    //         111 = 5.5 kHz
+    // if REG_43<5> == 1, RF filter bandwidth *= 2
     //
-    // <8:6>   1 AFTxLPF2 filter Band Width
-    //         1 = 2.5  kHz (for 12.5k channel space)
-    //         2 = 2.75 kHz
-    //         0 = 3.0  kHz (for 25k   channel space)
-    //         3 = 3.5  kHz
-    //         4 = 4.5  kHz
-    //         5 = 4.25 kHz
-    //         6 = 4.0  kHz
-    //         7 = 3.75 kHz
+    // <8:6> AF Tx LPF2 filter bandwidth (Apass = 1dB)
+    //         100 = 5.5 kHz
+    //         101 = 5.0 kHz
+    //         110 = 4.5 kHz
+    //         111 = 4.0 kHz
+    //         000 = 3.0 kHz
+    //         001 = 2.5 kHz
+    //         010 = 2.75 kHz
+    //         011 = 3.5 kHz
     //
-    // <5:4>   0 BW Mode Selection
-    //         0 = 12.5k
-    //         1 =  6.25k
-    //         2 = 25k/20k
+    // <5:4> BW mode selection
+    //         00 = 12.5k
+    //         01 =  6.25k
+    //         10 = 25k/20k
     //
-    // <3>     1 ???
+    // <2> gain after FM demodulation
+    //         0 = 0 dB
+    //         1 = 6 dB
     //
-    // <2>     0 Gain after FM Demodulation
-    //         0 = 0dB
-    //         1 = 6dB
-    //
-    // <1:0>   0 ???
+    // <3> and <1:0> remain undocumented here.
 
     uint16_t val = 0;
     switch (Bandwidth)
     {
         case BK4819_FILTER_BW_WIDE: // 25kHz
-            // if (weak_no_different) {
-            //     // make the RX bandwidth the same with weak signals
-            //     val = 0x3628; // Old value 0x49a8 < v3.6
-            // } else {
-            //     // with weak RX signals the RX bandwidth is reduced
-            //     val = 0x3428; // Old value 0x45a8 < v3.6
-            // }
+            // 0x3028 = (0b011 << 12) | (0b000 << 9) | (0b000 << 6) |
+            //          (0b10 << 4)  | (1 << 3)
+            //        = RF 3.5 kHz and weak-RF 2.0 kHz, both doubled because
+            //          bit<5> is set in 25k/20k mode => RF 7.0 kHz, weak-RF
+            //          4.0 kHz, AF Tx LPF2 3.0 kHz, FM gain 0 dB.
             val = 0x3028;
             break;
 
         case BK4819_FILTER_BW_NARROW:   // 12.5kHz
-            // if (weak_no_different) {
-            //     // make the RX bandwidth the same with weak signals
-            //     val = 0x3648; // Old value 0x4808 < v3.6
-            // } else {
-            //     // with weak RX signals the RX bandwidth is reduced
-            //     val = 0x3448; // Old value 0x4408 < v3.6
-            // }
+            // 0x4048 = (0b100 << 12) | (0b000 << 9) | (0b001 << 6) |
+            //          (0b00 << 4)  | (1 << 3)
+            //        = RF 4.0 kHz, weak-RF 2.0 kHz, AF Tx LPF2 2.5 kHz,
+            //          12.5k mode, FM gain 0 dB.
             val = 0x4048;
             break;
 
         case BK4819_FILTER_BW_NARROWER: // 6.25kHz
-            // if (weak_no_different) {
-            //     // make the RX bandwidth the same with weak signals
-            //     val = 0x1348; // Old value 0x3658 < v3.6
-            // } else {
-            //     // with weak RX signals the RX bandwidth is reduced
-            //     val = 0x1148; // Old value 0x3658 < v3.6
-            // }
+            // 0x205C = (0b010 << 12) | (0b000 << 9) | (0b001 << 6) |
+            //          (0b01 << 4)  | (1 << 3)     | (1 << 2)
+            //        = RF 3.0 kHz, weak-RF 2.0 kHz, AF Tx LPF2 2.5 kHz,
+            //          6.25k mode, FM gain +6 dB.
             val = 0x205C;
             break;
 
-        case BK4819_FILTER_BW_AM:   // 8.33kHz
-            // if (weak_no_different) {
-            //     // make the RX bandwidth the same with weak signals
-            //     val = 0x4858;
-            // } else {
-            //     // with weak RX signals the RX bandwidth is reduced
-            //     val = 0x4458;
-            // }
+        case BK4819_FILTER_BW_AM:   // Stock AM preset
+            // 0x345C = (0b011 << 12) | (0b010 << 9) | (0b001 << 6) |
+            //          (0b01 << 4)  | (1 << 3)     | (1 << 2)
+            //        = RF 3.5 kHz, weak-RF 3.0 kHz, AF Tx LPF2 2.5 kHz,
+            //          6.25k mode, bit<2> set. The "8.33kHz AM" label used in
+            //          the codebase is functional/empirical; it does not come
+            //          directly from the BW mode bits of REG_43.
             val = 0x345C;
             break;
+
         default:
             val = 0x5C;
             break;
