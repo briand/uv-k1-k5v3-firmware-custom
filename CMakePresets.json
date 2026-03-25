@@ -192,19 +192,26 @@
                 "EDITION_STRING": "Fusion",
                 "TARGET": "f4hwn.fusion"
             }
-        }
-        ,
+        },
         {
             "name": "CW",
-            "inherits": "Fusion",
+            "inherits": "default",
             "cacheVariables": {
-                "EDITION_STRING": "NR7Y-CW",
-                "TARGET": "nr7y.cw",
+                "EDITION_STRING": "NR7Y-CW-b1",
+                "TARGET": "nr7y-beta1.cw",
                 "ENABLE_FMRADIO": false,
                 "ENABLE_FEAT_F4HWN_GMRS_FRS_MURS": false,
                 "ENABLE_FEAT_NR7Y_CW": true,
                 "ENABLE_FEAT_NR7Y_CPO": true,
-                "ENABLE_MILLIS": true
+                "ENABLE_MILLIS": true,
+                "ENABLE_SPECTRUM": true,
+                "ENABLE_VOX": true,
+                "ENABLE_FEAT_F4HWN_SCREENSHOT": true,
+                "ENABLE_FEAT_F4HWN_VOL": true,
+                "ENABLE_FEAT_F4HWN_AUDIO": true,
+                "ENABLE_SWD": false,
+                "ENABLE_TX_WHEN_AM": true,
+                "ENABLE_F_CAL_MENU": true
             }
         }
     ],
@@ -236,8 +243,7 @@
         {
             "name": "Fusion",
             "configurePreset": "Fusion"
-        }
-        ,
+        },
         {
             "name": "CW",
             "configurePreset": "CW"

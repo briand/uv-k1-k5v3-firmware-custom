@@ -547,8 +547,8 @@ const char* gSubMenu_CW_KEY_INPUT[] =
 	"PTT+TIP\ndit\nRING\ndah",
 	"PTT+TIP\ndah\nSD1+RING\ndit",
 	"PTT+TIP\ndit\nSD1+RING\ndah",
-	"CEC\nCable",
-	"CEC\nCable\nReversed"
+	// "CEC\nCable",
+	// "CEC\nCable\nReversed"
 };
 
 const char* gSubMenu_CW_MSG[] =

@@ -147,8 +147,8 @@ void UI_DisplayWelcome(void)
             gFrameBuffer[4][i] ^= 0xFF;
         }
 
-        sprintf(WelcomeString3, "%s Edition", Edition);
-        UI_PrintStringSmallNormal(WelcomeString3, 0, 127, 6);
+        //sprintf(WelcomeString3, "%s Edition", Edition);
+        UI_PrintStringSmallNormal(Edition, 0, 127, 6);
 
         /*
         #ifdef ENABLE_FEAT_F4HWN_RESCUE_OPS

@@ -135,8 +135,8 @@ static bool CW_ReadGpioDeglitched(GPIO_TypeDef *gpio_port, uint8_t pin_bit, bool
 static void CW_ReadPtt(bool *ptt_out)
 {
     // TODO: add back the de-glitch routine
-    *ptt_out = GPIO_IsPttPressed();
-    // *ptt_out = CW_ReadGpioDeglitched(GPIOC, GPIOC_PIN_PTT, false);
+    //*ptt_out = GPIO_IsPttPressed();
+    *ptt_out = CW_ReadGpioDeglitched(GPIOB, LL_GPIO_PIN_10, false);
 
 }
 
