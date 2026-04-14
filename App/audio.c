@@ -36,6 +36,13 @@
 
 BEEP_Type_t gBeepToPlay = BEEP_NONE;
 
+static void AUDIO_PlayBeepPulse(void) {
+    BK4819_ExitTxMute();
+    SYSTEM_DelayMs(60);
+    BK4819_EnterTxMute();
+    SYSTEM_DelayMs(20);
+}
+
 void AUDIO_PlayBeep(BEEP_Type_t Beep)
 {
 
@@ -137,17 +144,11 @@ void AUDIO_PlayBeep(BEEP_Type_t Beep)
     switch (Beep)
     {
         case BEEP_880HZ_60MS_DOUBLE_BEEP:
-            BK4819_ExitTxMute();
-            SYSTEM_DelayMs(60);
-            BK4819_EnterTxMute();
-            SYSTEM_DelayMs(20);
+            AUDIO_PlayBeepPulse();
             [[fallthrough]];
         case BEEP_500HZ_60MS_DOUBLE_BEEP_OPTIONAL:
         case BEEP_500HZ_60MS_DOUBLE_BEEP:
-            BK4819_ExitTxMute();
-            SYSTEM_DelayMs(60);
-            BK4819_EnterTxMute();
-            SYSTEM_DelayMs(20);
+            AUDIO_PlayBeepPulse();
             [[fallthrough]];
         case BEEP_1KHZ_60MS_OPTIONAL:
             BK4819_ExitTxMute();
@@ -186,11 +187,19 @@ void AUDIO_PlayBeep(BEEP_Type_t Beep)
     SYSTEM_DelayMs(5);
     BK4819_WriteRegister(BK4819_REG_71, ToneConfig);
 
+#ifdef ENABLE_FMRADIO
+    const bool isFmRadio = gFmRadioMode;
+    
+    if (isFmRadio)
+        SYSTEM_DelayMs(10);
+#endif
+
+
     if (gEnableSpeaker)
         AUDIO_AudioPathOn();
 
 #ifdef ENABLE_FMRADIO
-    if (gFmRadioMode)
+    if (isFmRadio)
         BK1080_Mute(false);
 #endif
 

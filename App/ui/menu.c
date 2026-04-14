@@ -440,13 +440,20 @@ const char gSubMenu_SCRAMBLER[][7] =
     };
 
     #ifdef ENABLE_FEAT_F4HWN_AUDIO
-        const char gSubMenu_SET_AUD[][6] =
+        const char gSubMenu_SET_AUD_FM[][6] =
         {
             "FLAT",
             "CLEAN",
             "MID",
             "BOOST",
             "MAX"
+        };
+
+        const char gSubMenu_SET_AUD_AM[][6] =
+        {
+            "SHARP",
+            "STOCK",
+            "OPEN"
         };
     #endif
 
@@ -713,7 +720,11 @@ void UI_DisplayMenu(void)
         case MENU_MIC:
             {   // display the mic gain in actual dB rather than just an index number
                 const uint8_t mic = gMicGain_dB2[gSubMenuSelection];
-                sprintf(String, "+%u.%01udB", mic / 2, mic % 2);
+                sprintf(String, "+%u.%udB", mic / 2, (mic % 2) * 5);
+
+                gaugeLine = 4;
+                gaugeMin = 0;
+                gaugeMax = 8;
             }
             break;
 
@@ -770,15 +781,14 @@ void UI_DisplayMenu(void)
             if (!gIsInSubMenu || gInputBoxIndex == 0)
             {
                 sprintf(String, "%3d.%05u", gSubMenuSelection / 100000, abs(gSubMenuSelection) % 100000);
-                UI_PrintString(String, menu_item_x1, menu_item_x2, 1, 8);
             }
             else
             {
                 const char * ascii = INPUTBOX_GetAscii();
                 sprintf(String, "%.3s.%.3s  ",ascii, ascii + 3);
-                UI_PrintString(String, menu_item_x1, menu_item_x2, 1, 8);
             }
 
+            UI_PrintString(String, menu_item_x1, menu_item_x2, 1, 8);
             UI_PrintString("MHz",  menu_item_x1, menu_item_x2, 3, 8);
 
             already_printed = true;
@@ -1032,21 +1042,22 @@ void UI_DisplayMenu(void)
             break;
 
         case MENU_LIST_CH:
-            if (gSubMenuSelection == MR_CHANNELS_LIST + 1)
-                strcpy(String, "ALL");
-            else if (gSubMenuSelection == 0)
-                strcpy(String, "OFF");
-            else
-                sprintf(String, "%u", gSubMenuSelection);
-            break;
-
         case MENU_S_LIST:
             if (gSubMenuSelection == MR_CHANNELS_LIST + 1)
                 strcpy(String, "ALL");
-            else
-                sprintf(String, "%u", gSubMenuSelection);
+            else if (gSubMenuSelection == 0 && UI_MENU_GetCurrentMenuId() == MENU_LIST_CH)
+                strcpy(String, "OFF");
+            else {
+                const char *name = gListName[gSubMenuSelection - 1];
+                
+                // If first character is empty/invalid, display "N/A"
+                if (IsEmptyName(name, sizeof(gListName[0])))
+                    sprintf(String, "%02u", gSubMenuSelection);
+                else
+                    sprintf(String, "%02u (%.3s)", gSubMenuSelection, name);
+            }
             break;
-
+            
         #ifdef ENABLE_ALARM
             case MENU_AL_MOD:
                 sprintf(String, gSubMenu_AL_MOD[gSubMenuSelection]);
@@ -1337,7 +1348,18 @@ void UI_DisplayMenu(void)
 
         #ifdef ENABLE_FEAT_F4HWN_AUDIO
             case MENU_SET_AUD:
-                strcpy(String, gSubMenu_SET_AUD[gSubMenuSelection]);
+                if(gTxVfo->Modulation == MODULATION_AM) {
+                    strcpy(String, gSubMenu_SET_AUD_AM[gSubMenuSelection]);
+                    UI_PrintStringSmallNormal("AM", 114, 0, 0);
+                }
+                else if (gTxVfo->Modulation == MODULATION_USB) {
+                    strcpy(String, "USB");
+                    UI_PrintStringSmallNormal("USB", 107, 0, 0);
+                }
+                else {
+                    strcpy(String, gSubMenu_SET_AUD_FM[gSubMenuSelection]);
+                    UI_PrintStringSmallNormal("FM", 114, 0, 0);
+                }
                 break;
         #endif
 
@@ -1363,7 +1385,7 @@ void UI_DisplayMenu(void)
                     gaugeMax = 63;
                     //#endif
                 }
-                gEeprom.VOLUME_GAIN = gSubMenuSelection;
+                // gEeprom.VOLUME_GAIN = gSubMenuSelection;
                 BK4819_WriteRegister(BK4819_REG_48,
                     (11u << 12)                |     // ??? .. 0 ~ 15, doesn't seem to make any difference
                     ( 0u << 10)                |     // AF Rx Gain-1
@@ -1488,8 +1510,8 @@ void UI_DisplayMenu(void)
         || UI_MENU_GetCurrentMenuId() == MENU_D_LIST
 #endif
     ) {
-        sprintf(String, "%2d", gSubMenuSelection);
-        UI_PrintStringSmallNormal(String, 105, 0, 0);
+        sprintf(String, "%03d", gSubMenuSelection);
+        UI_PrintStringSmallNormal(String, 107, 0, 0);
     }
 
     if ((UI_MENU_GetCurrentMenuId() == MENU_RESET    ||
