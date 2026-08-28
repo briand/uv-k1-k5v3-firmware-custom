@@ -200,6 +200,9 @@ enum ACTION_OPT_t {
 #ifdef ENABLE_FEAT_F4HWN_RXTX_LOG
     ACTION_OPT_RXTX_LOG,
 #endif
+#ifdef ENABLE_FEAT_F4HWN_FOXHUNT
+    ACTION_OPT_FOXHUNT,
+#endif
     ACTION_OPT_LEN
 };
 
@@ -424,7 +427,7 @@ void SETTINGS_SaveSettings(void);
 void SETTINGS_SaveChannelName(uint16_t channel, const char * name);
 void SETTINGS_SaveChannel(uint16_t Channel, uint8_t VFO, const VFO_Info_t *pVFO, uint8_t Mode);
 void SETTINGS_SaveBatteryCalibration(const uint16_t * batteryCalibration);
-void SETTINGS_UpdateChannel(uint16_t channel, const VFO_Info_t *pVFO, bool keep, bool check, bool save);
+void SETTINGS_UpdateChannel(uint16_t channel, const VFO_Info_t *pVFO, bool keep);
 void SETTINGS_WriteBuildOptions(void);
 #ifdef ENABLE_FEAT_F4HWN_RESUME_STATE
     void SETTINGS_WriteCurrentState(void);

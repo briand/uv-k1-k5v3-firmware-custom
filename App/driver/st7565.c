@@ -260,7 +260,7 @@ void ST7565_FillScreen(uint8_t value)
 // D=0, display OFF
 #define ST7565_CMD_DISPLAY_ON_OFF 0xAE 
 
-uint8_t cmds[] = {
+const uint8_t cmds[] = {
     ST7565_CMD_BIAS_SELECT | 0,             // Select bias setting: 1/9
     ST7565_CMD_COM_DIRECTION  | (0 << 3),   // Set output direction of COM: normal
     ST7565_CMD_SEG_DIRECTION | 1,           // Set scan direction of SEG: reverse

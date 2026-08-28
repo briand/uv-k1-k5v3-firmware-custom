@@ -48,6 +48,7 @@
 #include "settings.h"
 #include "ui/inputbox.h"
 #include "ui/main.h"
+#include "ui/menu.h"
 #include "ui/ui.h"
 #include <stdlib.h>
 
@@ -108,7 +109,7 @@ static void toggle_chan_scanlist(void)
 
         gTxVfo->SCANLIST_PARTICIPATION = scanlist;
 
-        SETTINGS_UpdateChannel(gTxVfo->CHANNEL_SAVE, gTxVfo, true, true, true);
+        SETTINGS_UpdateChannel(gTxVfo->CHANNEL_SAVE, gTxVfo, true);
     }
 
     gVfoConfigureMode = VFO_CONFIGURE;
@@ -228,6 +229,12 @@ static void processFKeyFunction(const KEY_Code_t Key, const bool beep)
         case KEY_4:
             HideFKeyIcon();
 
+            if (gScanStateDir != SCAN_OFF) {
+                // Stop the channel/frequency scan before saving the RX mode for Close Call.
+                gScanKeepResult = false;
+                CHFRSCANNER_Stop();
+            }
+
             gBackup_CROSS_BAND_RX_TX  = gEeprom.CROSS_BAND_RX_TX;
             gEeprom.CROSS_BAND_RX_TX = CROSS_BAND_OFF;     
 
@@ -335,7 +342,7 @@ static void processFKeyFunction(const KEY_Code_t Key, const bool beep)
 
                 if (gScanStateDir != SCAN_OFF) {
                     RADIO_NextValidList(isKeyUp ? 1 : -1);
-                    UI_MAIN_NotifyScanProgressDataChanged();
+                    UI_MAIN_NotifyScanListChanged();
                 } else {
                     // Adjust squelch: UP increments, DOWN decrements
                     if (gSquelchLevelOriginal == 10)
@@ -499,6 +506,16 @@ static void MAIN_Key_DIGITS(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 				}
 				#endif
 
+#ifdef ENABLE_FEAT_F4HWN_ACTION_PICKER
+                if (gWasFKeyPressed && (Key == KEY_SIDE1 || Key == KEY_SIDE2)) {
+                    gActionPickerKey = (Key == KEY_SIDE1) ? 1 : 2;
+                    gActionPickerTimeout_500ms = ACTION_PICKER_TIMEOUT_500MS;
+                    gUpdateDisplay = true;
+                    HideFKeyIcon();
+                    return;
+                }
+#endif
+
                 if (gWasFKeyPressed) {
                     HideFKeyIcon();
                     processFKeyLongFunction(Key);
@@ -557,7 +574,7 @@ static void MAIN_Key_DIGITS(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
             if (value == 0)
             {
                 gEeprom.SCAN_LIST_DEFAULT = MR_CHANNELS_LIST + 1;
-                UI_MAIN_NotifyScanProgressDataChanged();
+                UI_MAIN_NotifyScanListChanged();
             #ifdef ENABLE_FEAT_F4HWN_RESUME_STATE
                 SETTINGS_WriteCurrentState();
             #endif
@@ -576,7 +593,7 @@ static void MAIN_Key_DIGITS(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
                     gBeepToPlay = BEEP_500HZ_60MS_DOUBLE_BEEP_OPTIONAL;
                     RADIO_NextValidList(1);
                 }
-                UI_MAIN_NotifyScanProgressDataChanged();
+                UI_MAIN_NotifyScanListChanged();
 
             #ifdef ENABLE_FEAT_F4HWN_RESUME_STATE
                 SETTINGS_WriteCurrentState();
@@ -886,6 +903,11 @@ static void MAIN_Key_MENU(bool bKeyPressed, bool bKeyHeld)
 
             gFlagRefreshSetting = true;
             gRequestDisplayScreen = DISPLAY_MENU;
+#ifdef ENABLE_FEAT_F4HWN_MENU_CAT
+            gMenuLevel  = MENU_LEVEL_CAT;
+            UI_MENU_BuildCategoryScreen();
+            gMenuCursor = (gMenuCatCursor < gMenuListCount) ? gMenuCatCursor : 0;
+#endif
             #ifdef ENABLE_VOICE
                 gAnotherVoiceID   = VOICE_ID_MENU;
             #endif
@@ -975,6 +997,12 @@ static void MAIN_Key_STAR(bool bKeyPressed, bool bKeyHeld)
             return;
         }               
 #endif
+        if (gScanStateDir != SCAN_OFF) {
+            // Stop the channel/frequency scan before saving the RX mode for the CTCSS/DCS scan.
+            gScanKeepResult = false;
+            CHFRSCANNER_Stop();
+        }
+
         // scan the CTCSS/DCS code
         gBackup_CROSS_BAND_RX_TX  = gEeprom.CROSS_BAND_RX_TX;
         gEeprom.CROSS_BAND_RX_TX = CROSS_BAND_OFF;

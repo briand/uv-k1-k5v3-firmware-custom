@@ -840,9 +840,13 @@ _NR7Y_ACTIONS_CW = [
     "CODE PRACTICE",
 ]
 
-# ENABLE_FEAT_F4HWN_BEAM. Also has no BUILD_OPTIONS bit, but it sits at the end
-# of the enum so assuming it is present cannot shift anything above it.
-_NR7Y_ACTIONS_TAIL = ["BEAM"]
+# ENABLE_FEAT_F4HWN_BEAM, then ENABLE_FEAT_F4HWN_RXTX_LOG, then (since F4HWN
+# v5.9.0) ENABLE_FEAT_F4HWN_FOXHUNT close out the enum, in that order.  None of
+# them has a BUILD_OPTIONS bit, but they all sit past every conditional block
+# above, so guessing here cannot shift anything else.  The NR7Y CW presets build
+# FOX HUNT and leave BEAM / RF LOG out; the stock F4HWN editions carry all three.
+_NR7Y_ACTIONS_TAIL_CW = ["FOX HUNT"]
+_NR7Y_ACTIONS_TAIL = ["BEAM", "RF LOG", "FOX HUNT"]
 
 
 def _nr7y_keyactions_list(has_rescue_ops, has_cw):
@@ -852,6 +856,7 @@ def _nr7y_keyactions_list(has_rescue_ops, has_cw):
         lst += _NR7Y_ACTIONS_RESCUE_OPS
     if has_cw:
         lst += _NR7Y_ACTIONS_CW
+        return lst + _NR7Y_ACTIONS_TAIL_CW
     return lst + _NR7Y_ACTIONS_TAIL
 
 

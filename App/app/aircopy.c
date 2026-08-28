@@ -90,10 +90,11 @@ DECLARE_AIRCOPY_BANK(1)
 static const AIRCOPY_Segment_t AIRCOPY_Segments_Settings[] = {
     { 0xA000, 0xA170, AIRCOPY_WRITE_BYTES },
     { 0x880E, 0x886E, AIRCOPY_WRITE_BYTES },
-    { 0x9000, 0x90D6, AIRCOPY_WRITE_BYTES }, // VFO area (so scan-range source frequencies are replicated)
+    { 0x9000, 0x90E5, AIRCOPY_WRITE_BYTES }, // VFO area (full 14 VFOs 0x9000..0x90E0) +
+                                             // Fox Hunt settings tail 0x90E0..0x90E5
 };
 
-// total_blocks = ceil(0x170/64) + ceil(0x60/64) + ceil(0xD6/64) = 6 + 2 + 4 = 12
+// total_blocks = ceil(0x170/64) + ceil(0x60/64) + ceil(0xE5/64) = 6 + 2 + 4 = 12
 static const AIRCOPY_TransferMap_t AIRCOPY_Map_Settings = {
     .segments = AIRCOPY_Segments_Settings,
     .num_segments = 3,

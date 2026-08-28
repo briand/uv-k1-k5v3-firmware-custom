@@ -18,6 +18,7 @@
 #define UI_MAIN_H
 
 #include <stdint.h>
+#include <stdbool.h>
 
 enum center_line_t {
     CENTER_LINE_NONE = 0,
@@ -56,8 +57,12 @@ void UI_DisplayMain(void);
 
 #ifdef ENABLE_FEAT_F4HWN_SCAN_PROGRESS
 void UI_MAIN_NotifyScanProgressDataChanged(void);
+void UI_MAIN_NotifyScanListChanged(void);
+bool UI_MAIN_ShouldHoldScanResume(void);
 #else
 static inline void UI_MAIN_NotifyScanProgressDataChanged(void) {}
+static inline void UI_MAIN_NotifyScanListChanged(void) {}
+static inline bool UI_MAIN_ShouldHoldScanResume(void) { return false; }
 #endif
 
 #ifdef ENABLE_AGC_SHOW_DATA

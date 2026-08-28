@@ -1266,7 +1266,7 @@ void SETTINGS_SaveChannel(uint16_t Channel, uint8_t VFO, const VFO_Info_t *pVFO,
 
         PY25Q16_WriteBuffer(OffsetVFO, Buf, 0x10, false);
 
-        SETTINGS_UpdateChannel(Channel, pVFO, true, true, true);
+        SETTINGS_UpdateChannel(Channel, pVFO, true);
 
         if (IS_MR_CHANNEL(Channel)) {
 #ifndef ENABLE_KEEP_MEM_NAME
@@ -1297,58 +1297,32 @@ void SETTINGS_SaveChannelName(uint16_t channel, const char * name)
     PY25Q16_WriteBuffer(0x004000 + offset, buf, 0x10, false);
 }
 
-void SETTINGS_UpdateChannel(uint16_t channel, const VFO_Info_t *pVFO, bool keep, bool check, bool save)
+void SETTINGS_UpdateChannel(uint16_t channel, const VFO_Info_t *pVFO, bool keep)
 {
 #ifdef ENABLE_NOAA
-    if (!IS_NOAA_CHANNEL(channel))
+    if (IS_NOAA_CHANNEL(channel))
+        return;
 #endif
-    {
-        ChannelAttributes_t  state;
-        ChannelAttributes_t  att = {
-            .band = 0x7,
-            .compander = 0,
-            .unused_1 = 0,
-            .unused_2 = 0,
-            .exclude = 0,
-            .scanlist = 0,
-            };        // default attributes
 
-        // 0x0D60
-        PY25Q16_ReadBuffer(0x008000 + (channel * 2), &state, 2);
+    ChannelAttributes_t att = {
+        .band = 0x7,
+        .compander = 0,
+        .unused_1 = 0,
+        .unused_2 = 0,
+        .exclude = 0,
+        .scanlist = 0,
+    };
 
-        if (keep) {
-            att.band = pVFO->Band;
-            att.compander = pVFO->Compander;
-            att.unused_1 = 0;
-            att.unused_2 = 0;
-            att.exclude = 0;
-            att.scanlist = pVFO->SCANLIST_PARTICIPATION;
-            if (check && state.__val == att.__val)
-                return; // no change in the attributes
-        }
-
-        state.__val = att.__val;
-
-#ifndef ENABLE_FEAT_F4HWN
-        save = true;
-#endif
-        if(save)
-        {
-            uint16_t buf[MR_CHANNELS_MAX + 24];
-            PY25Q16_ReadBuffer(0x008000, buf, sizeof(buf));
-            buf[channel] = state.__val;
-            PY25Q16_WriteBuffer(0x008000, buf, sizeof(buf), false);
-        }
-
-        MR_SetChannelAttributes(channel, &att);
-
-        if (IS_MR_CHANNEL(channel)) {   // it's a memory channel
-            if (!keep) {
-                // clear/reset the channel name
-                SETTINGS_SaveChannelName(channel, "");
-            }
-        }
+    if (keep) {
+        att.band = pVFO->Band;
+        att.compander = pVFO->Compander;
+        att.scanlist = pVFO->SCANLIST_PARTICIPATION;
     }
+
+    MR_SetChannelAttributes(channel, &att);
+
+    if (IS_MR_CHANNEL(channel) && !keep)
+        SETTINGS_SaveChannelName(channel, "");
 }
 
 void SETTINGS_WriteBuildOptions(void)

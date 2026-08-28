@@ -16,6 +16,10 @@
 
 #include "app/breakout.h"
 
+#if defined(ENABLE_UART) || defined(ENABLE_USB)
+#include "app/uart.h"
+#endif
+
 #ifdef ENABLE_FEAT_F4HWN_K5VIEWER
 #include "k5viewer.h"
 #endif
@@ -359,6 +363,9 @@ void APP_RunBreakout(void) {
 
     while(isInitialized)
     {
+#if defined(ENABLE_UART) || defined(ENABLE_USB)
+        UART_ServiceCommands();
+#endif
         Tick();
         if(!isPaused)
         {

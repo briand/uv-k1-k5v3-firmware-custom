@@ -51,7 +51,7 @@ bool              gAskToSave;
 bool              gAskToDelete;
 
 
-void (*UI_DisplayFunctions[])(void) = {
+void (*const UI_DisplayFunctions[])(void) = {
     [DISPLAY_MAIN] = &UI_DisplayMain,
     [DISPLAY_MENU] = &UI_DisplayMenu,
     [DISPLAY_SCANNER] = &UI_DisplayScanner,

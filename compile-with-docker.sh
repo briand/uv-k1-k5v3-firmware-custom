@@ -8,6 +8,7 @@ set -euo pipefail
 #   ./compile-with-docker.sh Custom
 #   ./compile-with-docker.sh Bandscope -DENABLE_SPECTRUM=ON
 #   ./compile-with-docker.sh Broadcast -DENABLE_FEAT_F4HWN_GAME=ON -DENABLE_NOAA=ON
+#   ./compile-with-docker.sh Fusion -DDEV=ON
 #   ./compile-with-docker.sh All
 # Default preset: "Custom"
 # ---------------------------------------------
@@ -60,9 +61,10 @@ build_preset() {
   docker run --rm \
     -u $(id -u):$(id -g) \
     "${TTY_FLAGS[@]}" -v "$PWD":"$PWD" -w "$PWD" "$IMAGE" \
-    bash -c "which arm-none-eabi-gcc && arm-none-eabi-gcc --version && \
-             cmake --preset ${preset} ${EXTRA_ARGS[@]+\"${EXTRA_ARGS[@]}\"} && \
-             cmake --build --preset ${preset} -j"
+    bash -c 'which arm-none-eabi-gcc && arm-none-eabi-gcc --version &&
+             cmake --preset "$1" "${@:2}" &&
+             cmake --build --preset "$1" -j' \
+    bash "${preset}" ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
   echo "✅ Done: ${preset}"
 }
 
