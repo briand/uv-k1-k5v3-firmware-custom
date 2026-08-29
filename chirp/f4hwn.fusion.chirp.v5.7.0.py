@@ -54,11 +54,7 @@ DEBUG_SHOW_OBFUSCATED_COMMANDS = False
 DEBUG_SHOW_MEMORY_ACTIONS = False
 
 # TODO: remove the driver version when it's in mainline chirp 
-# The @NR7Y_VERSION@ token is replaced with the firmware release tag by the
-# release workflow (.github/workflows/main.yml) so the module version always
-# matches the firmware it ships with. In an unreleased working copy it stays
-# as the literal placeholder.
-DRIVER_VERSION = "Quansheng UV-K1 / UV-K5 V3 (F4HWN + NR7Y CW) driver ver: @NR7Y_VERSION@"
+DRIVER_VERSION = "Quansheng UV-K1 / UV-K5 V3 driver ver: 2026/07/06 (c) F4HWN v5.7.0"
 FIRMWARE_VERSION_UPDATE = "https://github.com/armel/uv-k1-k5v3-firmware-custom/releases"
 CHIRP_DRIVER_VERSION_UPDATE = "https://github.com/armel/uv-k1-k5v3-firmware-custom/releases"
 
@@ -176,7 +172,7 @@ u8 set_rxa_am:4,
 u8 squelch;
 u8 max_talk_time;
 u8 noaa_autoscan;
-u8 __UNUSED09:1,
+u8 __UNUSED08:1,
    set_nav:1,
    set_key:4,
    set_menu_lock:1,
@@ -196,8 +192,8 @@ u8 crossband;
 u8 battery_save;
 u8 dual_watch;
 u8 backlight_time;
-u8 __UNUSED10:6,
-   set_nfm:1,
+u8 __UNUSED09:5,
+   set_nfm:2,
    ste:1;
 u8 current_state;
 
@@ -293,7 +289,7 @@ struct {
     ul16 slPriorCh2;
     ul16 call_channel;
 
-    u8 __UNUSED11;
+    u8 __UNUSED10;
 } sl;
 
 // --------------------
@@ -312,7 +308,7 @@ u8  backlight_on_TX_RX:2,
     mic_bar:1,
     battery_text:2,
     live_DTMF_decoder:1,
-    __UNUSED12:1;
+    __UNUSED11:1;
 
 // --------------------
 
@@ -326,7 +322,7 @@ u8 ENABLE_DTMF_CALLING:1,
    ENABLE_VOICE:1,
    ENABLE_NOAA:1,
    ENABLE_FMRADIO:1;
-u8 ENABLE_CW_MODULATOR:1,
+u8 __UNUSED12:1,
    ENABLE_FEAT_F4HWN_RESCUE_OPS:1,
    ENABLE_BANDSCOPE:1,
    ENABLE_AM_FIX:1,
@@ -336,20 +332,16 @@ u8 ENABLE_CW_MODULATOR:1,
    ENABLE_FLASHLIGHT:1;
 } BUILD_OPTIONS;
 
-// State[2]: keypad lock scope, full byte (0..SET_LCK_LEN-1).
-// Firmware >= v5.6 moved set_lck here and widened it to 4 values
-// (KEYS / +ACTIONS / +PTT / +ACTIONS+PTT); it used to be a single bit
-// packed into the set_gui byte below. See settings.c (State[2] = set_lck).
-u8 __UNUSED14:6,
-set_lck:2;
-u8 __UNUSED15;
+u8 __UNUSED13:6,
+    set_lck:2;
+u8 __UNUSED14;
 
 u8 set_off_tmr:7,
 set_tmr:1;
 
 u8 set_gui:1,
 set_met:1,
-__UNUSED17:1,
+__UNUSED15:1,
 set_inv:1,
 set_contrast:4;
 
@@ -357,7 +349,7 @@ u8 set_tot:4,
 set_eot:4;
 
 u8 set_pwr:4,
-   __UNUSED16:2,
+   set_sav:2,
    set_scn:1,
    set_ptt:1;
 
@@ -365,11 +357,6 @@ u8 set_pwr:4,
 struct {
     char version[16];
 } version;
-
-// EEPROM layout schema marker. Pre-v1.4 firmware never wrote this byte, so it
-// reads back as erased 0xFF. See NR7Y_SCHEMA_* above.
-#seekto 0x00A170;
-u8 schema;
 
 // --------------------
 
@@ -485,7 +472,10 @@ SET_LOW_LIST = [ "< 20mW", "125mW", "250mW", "500mW", "1W", "2W", "5W"]
 SET_PTT_LIST = ["CLASSIC", "ONEPUSH"]
 
 # SET_SCN f4hwn
-SET_SCN_LIST = ["FAST", "NORMAL"]
+SET_SCN_LIST = ["NORMAL", "FAST"]
+
+# SET_SAV f4hwn
+SET_SAV_LIST = ["OFF", "LOGO", "LOGO+", "MATRIX"]
 
 # SET_TOT and SET_EOT f4hwn
 SET_TOT_EOT_LIST = ["OFF", "SOUND", "VISUAL", "ALL"]
@@ -493,8 +483,7 @@ SET_TOT_EOT_LIST = ["OFF", "SOUND", "VISUAL", "ALL"]
 # SET_OFF_ON f4hwn
 SET_OFF_ON_LIST = ["OFF", "ON"]
 
-# SET_lck f4hwn - keypad lock scope (matches firmware enum SET_LCK_t /
-# gSubMenu_SET_LCK: KEYS=0, +ACTIONS=1, +PTT=2, +ACTIONS+PTT=3)
+# SET_lck f4hwn
 SET_LCK_LIST = ["KEYS", "KEYS + ACTIONS", "KEYS + PTT", "KEYS + ACTIONS + PTT"]
 
 # SET_MET SET_GUI f4hwn
@@ -543,45 +532,6 @@ TALK_TIME_LIST = ["N/U", "N/U", "N/U", "N/U", "N/U", "30 sec", "35 sec", "40 sec
 
 # Set NFM value
 SET_NFM_LIST = ["NARROW", "NARROWER"]
-
-# ---- EEPROM schema -------------------------------------------------------
-# Schema 1 (pre-v1.4 firmware) borrowed bit 6 of the channel flags byte as a
-# NARROWEST selector on CW/USB channels, so TX_LOCK could never be set there.
-# Schema 2 gives bit 6 back to TX_LOCK and keeps the filter in bit 1 as a plain
-# wide/narrow flag, with the firmware deciding what those mean per modulation
-# (FM 25k/12.5k, CW and SSB 6.25k/2.0k).
-#
-# Schema 1 is read-only: an image is upgraded in memory on load and only ever
-# written back as schema 2. Pre-v1.4 firmware never wrote the marker, so it
-# reads back as erased 0xFF.
-NR7Y_SCHEMA_ADDR = 0x00A170
-NR7Y_SCHEMA_LEGACY = 1
-NR7Y_SCHEMA_CURRENT = 2
-
-# modulation -> (wide name, narrow name). CW and USB have no narrow mode string
-# in chirp_common.MODES, so their bandwidth bit rides in an Extra rather than in
-# the mode, and both entries are the same name.
-_NR7Y_MODE_NAME = {
-    0: ("FM", "NFM"),
-    1: ("AM", "NAM"),
-    2: ("USB", "USB"),
-    3: ("CW", "CW"),
-}
-
-# mode name -> (modulation, bandwidth). A bandwidth of None means the mode
-# string does not determine the bit - it comes from the Bandwidth extra.
-_NR7Y_MODE_BITS = {
-    "FM":  (0, 0),
-    "NFM": (0, 1),
-    "AM":  (1, 0),
-    "NAM": (1, 1),
-    "USB": (2, None),
-    "CW":  (3, None),
-}
-
-# Wide/narrow as the user sees it. The firmware translates per modulation, so
-# CHIRP deliberately does not talk in kilohertz here.
-NR7Y_BANDWIDTH_LIST = ["Wide", "Narrow"]
 
 # Set RxA value
 SET_RXA_FM_LIST = ["FLAT", "CLEAN", "MID", "BOOST", "MAX"]
@@ -781,122 +731,11 @@ KEYACTIONS_LIST = ["NONE",
                    "RxA",
                    "POWER HIGH",
                    "REMOVE OFFSET",
-                   "BEAM"
+                   "BEAM",
+                   "RF LOG"
                   ]
 
 MIC_GAIN_LIST = ["+1.5dB", "+4.0dB", "+8.0dB", "+12.0dB", "+16.0dB", "+20.0dB", "+24.0dB", "+28.0dB", "+31.5dB"]
-
-# ============================================================
-# NR7Y CW extension – module-level constants
-# ============================================================
-
-# CW settings base address in fusion firmware (PY25Q16 direct address)
-_NR7Y_CW_SETTINGS_ADDR = 0x00A140
-
-# CW macro EEPROM addresses (cwmacro.h: reuses DTMF contacts region 0x1C00-0x1CFF)
-_NR7Y_CW_MACRO_ADDRS = [0x1C00, 0x1C30, 0x1C60, 0x1C90]
-_NR7Y_CW_MACRO_SIZE = 48       # Block layout: [0]=len|SIG, [1..46]=payload, [47]=checksum
-_NR7Y_CW_MACRO_MAX_LEN = 46   # Payload bytes
-_NR7Y_CW_MACRO_SIG = 0x80     # Signature stored in high bit of length byte
-
-# CW key input mode display strings (menu index 0-10 stored directly in EEPROM bits 0-4)
-_NR7Y_CW_KEY_INPUT_MODES = [
-    "PTT HandKey",           # 0: 0x08
-    "Port HandKey",          # 1: 0x18
-    "Side Btn Iambic",       # 2: 0x04
-    "Side Btn Iambic Rev",   # 3: 0x05
-    "Port Iambic",           # 4: 0x12
-    "Port Iambic Reversed",  # 5: 0x13
-    "Port and Btn Iambic",       # 6: 0x16
-    "Port and Btn Iambic Rev",   # 7: 0x17
-    "USB Port Iambic",           # 8: 0x20
-    "USB Port Iambic Rev",       # 9: 0x21
-    "USB Port HandKey",          # 10: 0x28
-]
-
-# CW keyer mode display strings (stored as a full byte 0-3 at _NR7Y_CW_SETTINGS_ADDR+4)
-_NR7Y_CW_KEYER_MODES = [
-    "Iambic A",       # 0
-    "Iambic B",       # 1
-    "Ultimatic",      # 2
-    "Semi-Auto Bug",  # 3
-]
-
-# Extended key actions for NR7Y firmware with CW modulator, mirroring
-# App/settings.h enum ACTION_OPT_t.
-#
-# The firmware enum is conditionally compiled, so a stored key-action number only
-# means something relative to the features that build has.  Slots 0-13 are
-# unconditional -- the enum keeps a value for ALARM/FM/1750/FLASHLIGHT even when
-# the feature is compiled out, which is why those only need filtering out of the
-# displayed choices -- but the RESCUE_OPS block shifts everything after it, so the
-# index mapping has to be assembled per build instead of hardcoded.  With
-# RESCUE_OPS off the CW actions sit at 21-28 and CODE PRACTICE at 29; with it on
-# they are 23-30 and 31.
-_NR7Y_ACTIONS_COMMON = [
-    "NONE",            # 0:  ACTION_OPT_NONE
-    "FLASHLIGHT",      # 1:  ACTION_OPT_FLASHLIGHT
-    "POWER",           # 2:  ACTION_OPT_POWER
-    "MONITOR",         # 3:  ACTION_OPT_MONITOR
-    "SCAN",            # 4:  ACTION_OPT_SCAN
-    "VOX",             # 5:  ACTION_OPT_VOX
-    "ALARM",           # 6:  ACTION_OPT_ALARM
-    "FM RADIO",        # 7:  ACTION_OPT_FM
-    "1750Hz",          # 8:  ACTION_OPT_1750
-    "LOCK KEYPAD",     # 9:  ACTION_OPT_KEYLOCK
-    "VFO A / VFO B",   # 10: ACTION_OPT_A_B
-    "VFO / MEM",       # 11: ACTION_OPT_VFO_MR
-    "MODE",            # 12: ACTION_OPT_SWITCH_DEMODUL
-    "BL_MIN_TMP_OFF",  # 13: ACTION_OPT_BLMIN_TMP_OFF
-    # ENABLE_FEAT_F4HWN
-    "RX MODE",         # 14: ACTION_OPT_RXMODE
-    "MAIN ONLY",       # 15: ACTION_OPT_MAINONLY
-    "PTT",             # 16: ACTION_OPT_PTT
-    "WIDE / NARROW",   # 17: ACTION_OPT_WN
-    "BACKLIGHT",       # 18: ACTION_OPT_BACKLIGHT
-    "MUTE",            # 19: ACTION_OPT_MUTE
-    "RxA",             # 20: ACTION_OPT_RXA
-]
-
-# ENABLE_FEAT_F4HWN_RESCUE_OPS
-_NR7Y_ACTIONS_RESCUE_OPS = ["POWER HIGH", "REMOVE OFFSET"]
-
-# ENABLE_CW_MODULATOR
-_NR7Y_ACTIONS_CW = [
-    "PLAY CW MSG 1",
-    "PLAY CW MSG 2",
-    "PLAY CW MSG 3",
-    "PLAY CW MSG 4",
-    "REPEAT CW MSG 1",
-    "REPEAT CW MSG 2",
-    "REPEAT CW MSG 3",
-    "REPEAT CW MSG 4",
-    # ACTION_OPT_CPO is guarded on ENABLE_CW_MODULATOR *and*
-    # ENABLE_CODE_PRACTICE, but BUILD_OPTIONS has no spare bit to report code
-    # practice separately and every CW preset enables both, so it rides along
-    # with the CW block.
-    "CODE PRACTICE",
-]
-
-# ENABLE_FEAT_F4HWN_BEAM, then ENABLE_FEAT_F4HWN_RXTX_LOG, then (since F4HWN
-# v5.9.0) ENABLE_FEAT_F4HWN_FOXHUNT close out the enum, in that order.  None of
-# them has a BUILD_OPTIONS bit, but they all sit past every conditional block
-# above, so guessing here cannot shift anything else.  The NR7Y CW presets build
-# FOX HUNT and leave BEAM / RF LOG out; the stock F4HWN editions carry all three.
-_NR7Y_ACTIONS_TAIL_CW = ["FOX HUNT"]
-_NR7Y_ACTIONS_TAIL = ["BEAM", "RF LOG", "FOX HUNT"]
-
-
-def _nr7y_keyactions_list(has_rescue_ops, has_cw):
-    """Return the index -> action-name map for the running firmware build."""
-    lst = list(_NR7Y_ACTIONS_COMMON)
-    if has_rescue_ops:
-        lst += _NR7Y_ACTIONS_RESCUE_OPS
-    if has_cw:
-        lst += _NR7Y_ACTIONS_CW
-        return lst + _NR7Y_ACTIONS_TAIL_CW
-    return lst + _NR7Y_ACTIONS_TAIL
-
 
 def xorarr(data: bytes):
     """the communication is obfuscated using this fine mechanism"""
@@ -1069,47 +908,6 @@ def _resetradio(serport):
     _send_command(serport, resetpacket)
 
 
-def _check_upload_target(serport, firmware):
-    """Refuse to program a radio this module does not understand.
-
-    Two gates, both hard. Download and upload are independent operations, so
-    the module cannot assume the radio in front of it is the one the image came
-    from - it has to ask, before the first write.
-    """
-    # 1. Right firmware family? The handshake string is AUTHOR_STRING_2 plus
-    #    VERSION_STRING_2 from the firmware's version.c. Our tree sets
-    #    AUTHOR_STRING_2 to NR7Y; armel's Fusion sets it to F4HWN. Locally
-    #    built firmware reports a bare "NR7Y " because only the release
-    #    workflow injects a tag, so match on the prefix alone.
-    if not (firmware or "").startswith("NR7Y"):
-        raise errors.RadioError(
-            "This module only programs NR7Y CW firmware.\n"
-            "Radio reports: %s" % (firmware or "(no version string)"))
-
-    # 2. Right EEPROM schema? Block on anything but an exact match. Reading it
-    #    from the radio depends on eeprom_compat.c mapping through 0xA171 -
-    #    without that the address is unmapped and reads back 0xFF.
-    rep = _readmem(serport, NR7Y_SCHEMA_ADDR, 1)
-    if not rep:
-        raise errors.RadioError("Could not read the EEPROM schema marker.")
-
-    schema = rep[0]
-    if schema == 0xFF:          # never written = pre-v1.4. Must come first:
-        schema = NR7Y_SCHEMA_LEGACY   # 0xFF > CURRENT would take the wrong branch.
-
-    if schema < NR7Y_SCHEMA_CURRENT:
-        raise errors.RadioError(
-            "This radio runs firmware older than v1.4 (EEPROM schema %d).\n"
-            "Update the firmware first - uploading now would corrupt CW and "
-            "SSB channel settings." % schema)
-
-    if schema > NR7Y_SCHEMA_CURRENT:
-        raise errors.RadioError(
-            "This radio uses EEPROM schema %d, newer than this module "
-            "understands (%d).\nUse the CHIRP module that shipped with the "
-            "radio's firmware release." % (schema, NR7Y_SCHEMA_CURRENT))
-
-
 def do_download(radio):
     """download eeprom from radio"""
     serport = radio.pipe
@@ -1126,10 +924,6 @@ def do_download(radio):
         radio.FIRMWARE_VERSION = f
     else:
         raise errors.RadioError("Failed to initialize radio")
-
-    # Provenance travels with the image, so a saved .img can be checked with no
-    # radio attached. Mirrors what mainline uvk5.py stores for firmware.
-    radio.metadata = {'nr7y_firmware': f}
 
     addr = 0
     while addr < MEM_SIZE:
@@ -1163,13 +957,10 @@ def do_upload(radio):
     radio.status_fn(status)
 
     f = _sayhello(serport)
-    if not f:
-        # sync_out() discards this function's return value, so returning False
-        # here would report success on a failed handshake.
-        raise errors.RadioError("Failed to initialize radio")
-    radio.FIRMWARE_VERSION = f
-
-    _check_upload_target(serport, f)
+    if f:
+        radio.FIRMWARE_VERSION = f
+    else:
+        return False
 
     while True:
         if step == 0:
@@ -1240,6 +1031,24 @@ def list_def(value, lst, default):
         return default
     return value    
 
+
+def f4hwn_state7_erased(mem):
+    """Return true when the packed F4HWN settings byte is still erased."""
+    return (int(mem.set_pwr) == 0x0F and
+            int(mem.set_sav) == 0x03 and
+            int(mem.set_scn) == 0x01 and
+            int(mem.set_ptt) == 0x01)
+
+
+def f4hwn_set_scn_to_menu(value):
+    """Convert the stored SetScn bit to the firmware menu index."""
+    return 0 if int(value) else 1
+
+
+def f4hwn_set_scn_to_storage(value):
+    """Convert the firmware menu index to the inverted stored SetScn bit."""
+    return 0 if int(value) else 1
+
 @directory.register
 class UVK5RadioEgzumer(chirp_common.CloneModeRadio):
     """Quansheng UV-K5 (egzumer + f4hwn)"""
@@ -1286,6 +1095,51 @@ class UVK5RadioEgzumer(chirp_common.CloneModeRadio):
         for idx, name in enumerate(self._get_vfo_channel_names()):
             specials[name] = MR_CHANNELS_MAX + idx
         return specials
+
+    def _get_scanlist_name(self, index):
+        if not hasattr(self, "_memobj") or not 0 <= index < MR_CHANNELS_LIST - 1:
+            return ""
+
+        try:
+            name_obj = self._memobj.listname[index].name
+        except AttributeError:
+            return ""
+
+        chars = []
+        for char_element in name_obj:
+            val = int(char_element)
+            if val in (0x00, 0xFF):
+                break
+            if 32 <= val <= 126:
+                chars.append(val)
+
+        return bytes(chars).decode("ascii", errors="ignore").strip()
+
+    def _get_scanlist_display_list(self):
+        scanlists = ["OFF"]
+
+        for idx in range(MR_CHANNELS_LIST - 1):
+            name = self._get_scanlist_name(idx)
+            if name:
+                scanlists.append(f"{name} [{idx + 1}]")
+            else:
+                scanlists.append(SCANLIST_LIST[idx + 1])
+
+        scanlists.append("ALL")
+        return scanlists
+
+    def _get_scanlist_select_display_list(self):
+        scanlists = []
+
+        for idx in range(MR_CHANNELS_LIST - 1):
+            name = self._get_scanlist_name(idx)
+            if name:
+                scanlists.append(f"{name} [{idx + 1}]")
+            else:
+                scanlists.append(SCANLIST_SELECT_LIST[idx])
+
+        scanlists.append("LIST [ALL]")
+        return scanlists
 
     @classmethod
     def get_prompts(cls):
@@ -1499,45 +1353,6 @@ class UVK5RadioEgzumer(chirp_common.CloneModeRadio):
         chirp_common.split_tone_decode(mem, (tx_tmode, tx_tone, tx_pol),
                                        (rx_tmode, rx_tone, rx_pol))
 
-    # ---------------------------------------------------------------- mode bits
-
-    def _nr7y_apply_mode(self, _mem_chan, memory):
-        """Write modulation and bandwidth for the memory's mode.
-
-        The mode string fixes the bandwidth bit only for FM and AM, where
-        FM/NFM and AM/NAM are the ordinary CHIRP convention. USB and CW have no
-        narrow mode string to carry it (chirp_common.MODES has NCW but no NUSB,
-        and using one without the other would be inconsistent), so their bit
-        comes from the Bandwidth extra and is never inferred.
-        """
-        mod, bw = _NR7Y_MODE_BITS.get(memory.mode, (0, 0))
-        _mem_chan.modulation = mod
-
-        if bw is None:
-            bw = 0
-            for setting in getattr(memory, 'extra', None) or []:
-                if setting.get_name() == "nr7y_bandwidth":
-                    try:
-                        bw = NR7Y_BANDWIDTH_LIST.index(str(setting.value))
-                    except ValueError:
-                        bw = 0
-                    break
-        _mem_chan.bandwidth = bw
-
-    def _nr7y_mem_chan(self, number):
-        """The raw channel or VFO record for a memory number, or None."""
-        if not isinstance(number, int):
-            return None
-        ch_num = number - 1
-        if ch_num < 0:
-            return None
-        if ch_num < MR_CHANNELS_MAX:
-            return self._memobj.channel[ch_num]
-        try:
-            return self._memobj.vfo_channel[ch_num - MR_CHANNELS_MAX]
-        except IndexError:
-            return None
-
     # Extract a high-level memory object from the low-level memory map
     # This is called to populate a memory in the UI
     def get_memory(self, number):
@@ -1610,7 +1425,7 @@ class UVK5RadioEgzumer(chirp_common.CloneModeRadio):
             rs = RadioSetting("compander", "Compander", val)
             mem.extra.append(rs)
 
-            val = RadioSettingValueList(SCANLIST_LIST)
+            val = RadioSettingValueList(self._get_scanlist_display_list())
             rs = RadioSetting("scanlists", "Scanlists", val)
             mem.extra.append(rs)
 
@@ -1646,25 +1461,25 @@ class UVK5RadioEgzumer(chirp_common.CloneModeRadio):
         # tone data
         self._get_tone(mem, _mem)
 
-        # ---- NR7Y: mode by table, not by arithmetic ----------------------
-        # Upstream computed the mode index as modulation * 2 + bandwidth, which
-        # only works while every modulation has a narrow variant in valid_modes.
-        # It does not: CHIRP has no NUSB string (chirp_common.MODES has NCW but
-        # not NUSB), so the list is ragged and the stride runs off the end at
-        # index 5. An explicit table sidesteps it entirely, and lets the
-        # bandwidth bit stay meaningful for USB/CW instead of being pinned.
+        # mode
+        temp_modes = self.get_features().valid_modes
+        # Convert modulation and bandwidth to int (they may be bitDE objects)
         modulation = int(_mem.modulation)
         bandwidth = int(_mem.bandwidth)
-
-        names = _NR7Y_MODE_NAME.get(modulation)
-        if names is None:
-            LOG.warning(f"Memory {mem.number}: Invalid modulation={modulation}, "
-                        f"bandwidth={bandwidth}, using FM as default")
-            mem.mode = "FM"
+        temp_modul = modulation * 2 + bandwidth
+        
+        if temp_modul < len(temp_modes):
+            mem.mode = temp_modes[temp_modul]
+        elif temp_modul == 5:  # USB with narrow setting
+            mem.mode = temp_modes[4]
+        elif temp_modul >= len(temp_modes):
+            # Invalid modulation (corrupt data), use FM as safe default
+            LOG.warning(f"Memory {mem.number}: Invalid modulation={modulation}, bandwidth={bandwidth}, "
+                       f"using FM as default")
+            mem.mode = "FM"  # Safe default instead of invalid string
+            # Also clean up the corrupt values
             _mem.modulation = 0
             _mem.bandwidth = 0
-        else:
-            mem.mode = names[bandwidth & 1]
 
         # tuning step
         tstep = int(_mem.step)
@@ -1747,7 +1562,7 @@ class UVK5RadioEgzumer(chirp_common.CloneModeRadio):
         rs.set_doc('Compnd: Do you want to compand on this frequency?')
         mem.extra.append(rs)
 
-        val = RadioSettingValueList(SCANLIST_LIST, None, tmpscn)
+        val = RadioSettingValueList(self._get_scanlist_display_list(), None, tmpscn)
         rs = RadioSetting("scanlists", "Scanlists (SList)", val)
         rs.set_doc('SList: Is this frequency is part of a scan list?')
         mem.extra.append(rs)
@@ -2026,11 +1841,15 @@ class UVK5RadioEgzumer(chirp_common.CloneModeRadio):
             elif elname == "set_key":
                 _mem.set_key = int(element.value)
 
-            # set ptt f4hwn
+            # set scn f4hwn
             elif elname == "set_scn":
-                _mem.set_scn = int(element.value)
+                _mem.set_scn = f4hwn_set_scn_to_storage(element.value)
 
-             # set menu lock f4hwn
+            # set sav f4hwn
+            elif elname == "set_sav":
+                _mem.set_sav = int(element.value)
+
+            # set menu lock f4hwn
             elif elname == "set_menu_lock":
                 _mem.set_menu_lock = int(element.value)
 
@@ -2164,6 +1983,7 @@ class UVK5RadioEgzumer(chirp_common.CloneModeRadio):
 
     def get_settings(self):
         _mem = self._memobj
+        state7_erased = f4hwn_state7_erased(_mem)
 
 # add menu firmware with version and option display if version 3.0 and up
         ValFirm = "Firmware : " + self.FIRMWARE_VERSION 
@@ -2473,8 +2293,9 @@ class UVK5RadioEgzumer(chirp_common.CloneModeRadio):
 
         # ----------------- Scan Lists
 
-        tmpscanl = list_def(_mem.sl.slDef - 1, SCANLIST_SELECT_LIST, 1)
-        val = RadioSettingValueList(SCANLIST_SELECT_LIST, None, tmpscanl)
+        scanlist_select_list = self._get_scanlist_select_display_list()
+        tmpscanl = list_def(_mem.sl.slDef - 1, scanlist_select_list, 1)
+        val = RadioSettingValueList(scanlist_select_list, None, tmpscanl)
         rs = RadioSetting("slDef", "Default Scan Lists (SList)", val)
         rs.set_doc('SList: Selects which lists are used by the memory scan\n' + \
                     '* LIST [1] to LIST [24]\n' + \
@@ -2482,8 +2303,8 @@ class UVK5RadioEgzumer(chirp_common.CloneModeRadio):
         scanl.append(rs)
 
         val = RadioSettingValueBoolean(_mem.sl.slPriorEnab)
-        rs = RadioSetting("slPriorEnab", "List 1 Priority Channel Scan", val)
-        rs.set_doc('List 1 priority: Is this list has priority')
+        rs = RadioSetting("slPriorEnab", "Priority Channel Scan", val)
+        rs.set_doc('Does scan use Priority Channels')
         scanl.append(rs)
 
         ch_list = []
@@ -2493,14 +2314,14 @@ class UVK5RadioEgzumer(chirp_common.CloneModeRadio):
 
         tmpch = list_def(_mem.sl.slPriorCh1, ch_list, 0)
         val = RadioSettingValueList(ch_list, None, tmpch)
-        rs = RadioSetting("slPriorCh1", "List 1 Priority Channel 1", val)
-        rs.set_doc('List 1 priority channel 1: Select the channel you want for priority')
+        rs = RadioSetting("slPriorCh1", "Priority Channel 1", val)
+        rs.set_doc('Priority channel 1: Select the channel you want for Priority Channel 1')
         scanl.append(rs)
 
         tmpch = list_def(_mem.sl.slPriorCh2, ch_list, 0)
         val = RadioSettingValueList(ch_list, None, tmpch)
-        rs = RadioSetting("slPriorCh2", "List 1 Priority Channel 2", val)
-        rs.set_doc('List 1 priority channel 2: Select the channel you want for priority')
+        rs = RadioSetting("slPriorCh2", "Priority Channel 2", val)
+        rs.set_doc('Priority channel 2: Select the channel you want for Priority Channel 2')
         scanl.append(rs)
 
         # List names (24 entries)
@@ -2573,7 +2394,7 @@ class UVK5RadioEgzumer(chirp_common.CloneModeRadio):
 
                                      
         # Set_Low_Power f4hwn
-        tmpsetpwr = list_def(_mem.set_pwr, SET_LOW_LIST, 0)
+        tmpsetpwr = 0 if state7_erased else list_def(_mem.set_pwr, SET_LOW_LIST, 0)
         val = RadioSettingValueList(SET_LOW_LIST, SET_LOW_LIST[tmpsetpwr])
         SetPwrSetting = RadioSetting("set_pwr", "Define Power Value when User selection is selected in POWER (SetPwr)", val)
         SetPwrSetting.set_doc('SetPwr: This is the level TX power when (Power) is set to User,.\n' + \
@@ -2581,7 +2402,7 @@ class UVK5RadioEgzumer(chirp_common.CloneModeRadio):
                               'if the User level is select, it will use this TX power level ')
         
         # Set_Ptt f4hwn
-        tmpsetptt = list_def(_mem.set_ptt, SET_PTT_LIST, 0)
+        tmpsetptt = 0 if state7_erased else list_def(_mem.set_ptt, SET_PTT_LIST, 0)
         val = RadioSettingValueList(SET_PTT_LIST, SET_PTT_LIST[tmpsetptt])
         SetPttSetting = RadioSetting("set_ptt", "Ptt Mode: Set PTT Key Operating Mode (SetPtt)", val)
         SetPttSetting.set_doc('SetPtt :\n' + \
@@ -2623,6 +2444,7 @@ class UVK5RadioEgzumer(chirp_common.CloneModeRadio):
         SetInvSetting.set_doc('SetInv: black text on light background or light text on black background\n' + \
                               '* OFF : black text (default)\n' + \
                               '* ON : light text')
+        
         # Set_lck, uses
         tmpsetlck = list_def(_mem.set_lck, SET_LCK_LIST, 0)
         val = RadioSettingValueList(SET_LCK_LIST, SET_LCK_LIST[tmpsetlck])
@@ -2632,7 +2454,7 @@ class UVK5RadioEgzumer(chirp_common.CloneModeRadio):
                             '* KEYS + ACTIONS\n' + \
                             '* KEYS + PTT\n' + \
                             '* KEYS + ACTIONS + PTT')
-        
+
         # Set_met f4hwn
         tmpsetmet = list_def(_mem.set_met, SET_MET_LIST, 0)
         val = RadioSettingValueList(SET_MET_LIST, SET_MET_LIST[tmpsetmet])
@@ -2699,12 +2521,22 @@ class UVK5RadioEgzumer(chirp_common.CloneModeRadio):
 
 
         # Set_Scn f4hwn
-        tmpsetscn = list_def(_mem.set_scn, SET_SCN_LIST, 0)
+        tmpsetscn = 0 if state7_erased else f4hwn_set_scn_to_menu(_mem.set_scn)
         val = RadioSettingValueList(SET_SCN_LIST, SET_SCN_LIST[tmpsetscn])
         SetScnSetting = RadioSetting("set_scn", "Set Scn (SetScn)", val)
         SetScnSetting.set_doc('SetScn : Set Scan mode\n' + \
                               '* NORMAL : classic scan mode, checks each channel or frequency with the usual full tune.\n' + \
                               '* FAST : faster scan mode using a quick signal precheck before the full tune.')
+
+        # Set_Sav f4hwn
+        tmpsetsav = 0 if state7_erased else list_def(_mem.set_sav, SET_SAV_LIST, 0)
+        val = RadioSettingValueList(SET_SAV_LIST, SET_SAV_LIST[tmpsetsav])
+        SetSavSetting = RadioSetting("set_sav", "Set Sav (SetSav)", val)
+        SetSavSetting.set_doc('SetSav : Set Saver mode\n' + \
+                              '* OFF : none.\n' + \
+                              '* LOGO : show startup LOGO.\n' + \
+                              '* LOGO+ : show startup LOGO with horizontal scroll.\n' + \
+                              '* MATRIX : show the matrix.')
 
         # Set_Menu_Lock f4hwn
         tmpsetmenulock = list_def(_mem.set_menu_lock, SET_OFF_ON_LIST, 0)
@@ -3464,6 +3296,7 @@ class UVK5RadioEgzumer(chirp_common.CloneModeRadio):
         if _mem.BUILD_OPTIONS.ENABLE_FEAT_F4HWN_RESCUE_OPS:
             basic.append(SetKEYSetting)
         basic.append(SetScnSetting)
+        basic.append(SetSavSetting)
         if _mem.BUILD_OPTIONS.ENABLE_FEAT_F4HWN_RESCUE_OPS:
             basic.append(SetMenuLockSetting)
 
@@ -3599,12 +3432,12 @@ class UVK5RadioEgzumer(chirp_common.CloneModeRadio):
         # find band
         band = self._find_band(memory.freq)
 
-        # ---- NR7Y: mode by table, and never pin the bandwidth bit --------
-        # Upstream forced bandwidth = 1 for USB, which made the bit unusable as
-        # a filter selector. Under EEPROM schema 2 that bit is the user's choice
-        # (wide = 6.25k, narrow = 2.0k on CW/SSB), so USB and CW take it from
-        # the Bandwidth extra instead - see _nr7y_apply_mode().
-        self._nr7y_apply_mode(_mem_chan, memory)
+        # mode
+        tmp_mode = self.get_features().valid_modes.index(memory.mode)
+        _mem_chan.modulation = tmp_mode / 2
+        _mem_chan.bandwidth = tmp_mode % 2
+        if memory.mode == "USB":
+            _mem_chan.bandwidth = 1  # narrow
 
         # frequency/offset
         _mem_chan.freq = memory.freq/10
@@ -3670,659 +3503,3 @@ class UVK5RadioEgzumer(chirp_common.CloneModeRadio):
             _mem_attr.scanlist = tmp_val
 
         return memory
-
-
-# ================================================================================
-# NR7Y Fusion variant – adds CW modulator support to the F4HWN Fusion driver
-# ================================================================================
-
-@directory.register
-class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
-    """Quansheng UV-K1/K5v3 with F4HWN Fusion + NR7Y CW firmware"""
-    VENDOR = "Quansheng"
-    MODEL = "UV-K1 & UV-K5 V3 (F4HWN Fusion)"
-    VARIANT = "NR7Y"
-
-    # ------------------------------------------------------------------ CW detection
-
-    def _is_nr7y_cw_firmware(self):
-        """Return True if firmware was compiled with ENABLE_CW_MODULATOR."""
-        try:
-            return bool(self._memobj.BUILD_OPTIONS.ENABLE_CW_MODULATOR)
-        except Exception as exc:
-            LOG.warning("Cannot read ENABLE_CW_MODULATOR: %s", exc)
-            return False
-
-    # ------------------------------------------------------------------ features
-
-    def get_features(self):
-        rf = super().get_features()
-        rf.valid_modes = ["FM", "NFM", "AM", "NAM", "USB", "CW"]
-        return rf
-
-    # ------------------------------------------------------------------ memory
-
-    def get_memory(self, number):
-        mem = super().get_memory(number)
-
-        _mem_chan = self._nr7y_mem_chan(number)
-        if _mem_chan is None or getattr(mem, 'empty', False):
-            return mem
-
-        # On CW and SSB the bandwidth bit is not carried by the mode string, so
-        # surface it as its own setting. Plain Wide/Narrow: the firmware decides
-        # that means 6.25k or 2.0k on these modes, and naming the widths here
-        # would only invite confusion with the FM ones.
-        if int(_mem_chan.modulation) in (2, 3) and self._is_nr7y_cw_firmware():
-            enc = list_def(int(_mem_chan.bandwidth), NR7Y_BANDWIDTH_LIST, 0)
-            rs = RadioSetting(
-                "nr7y_bandwidth", "Bandwidth",
-                RadioSettingValueList(NR7Y_BANDWIDTH_LIST, None, enc))
-            rs.set_doc(
-                'Receive filter for this CW/SSB channel.\n'
-                '* Wide: 6.25 kHz\n'
-                '* Narrow: 2.0 kHz')
-            if mem.extra is None:
-                mem.extra = RadioSettingGroup("Extra", "extra")
-            mem.extra.append(rs)
-
-        return mem
-
-    # ------------------------------------------------------------------ schema
-
-    @classmethod
-    def nr7y_approve_schema(cls, schema):
-        """True if this module understands that EEPROM layout.
-
-        Schema 1 is accepted because it is upgraded in memory on load; anything
-        past 2 was written by a newer firmware and belongs to a newer module.
-        """
-        return schema <= NR7Y_SCHEMA_CURRENT
-
-    @classmethod
-    def detect_from_serial(cls, pipe):
-        """Pick the class that can actually read this radio.
-
-        A radio whose schema is past what we understand is routed to the
-        read-only variant rather than refused outright: the download still
-        works, so a backup is possible, but nothing can be written back.
-        """
-        _sayhello(pipe)
-
-        rep = _readmem(pipe, NR7Y_SCHEMA_ADDR, 1)
-        schema = rep[0] if rep else 0xFF
-        if schema == 0xFF:
-            schema = NR7Y_SCHEMA_LEGACY
-
-        for rclass in cls.detected_models():
-            if rclass.nr7y_approve_schema(schema):
-                return rclass
-
-        return NR7YRestrictedRadio
-
-    def _nr7y_read_schema(self):
-        """Schema of the loaded image, normalised. 0xFF means pre-v1.4."""
-        try:
-            schema = int(self._memobj.schema)
-        except Exception as exc:
-            LOG.warning("Cannot read EEPROM schema marker: %s", exc)
-            return NR7Y_SCHEMA_LEGACY
-        # Normalise erased flash first: 0xFF is 255, so comparing it before
-        # this would take the "newer schema" branch.
-        if schema == 0xFF:
-            return NR7Y_SCHEMA_LEGACY
-        return schema
-
-    def _nr7y_upgrade_schema(self):
-        """Bring a schema 1 image up to schema 2, in memory.
-
-        Same mapping the firmware applies on first boot: on CW and USB records
-        the old NARROWEST flag in bit 6 becomes the filter bit, and bit 6 goes
-        back to being TX_LOCK, set on. Schema 1 is read-only - this module
-        never writes it back.
-        """
-        migrated = 0
-
-        for record in list(self._memobj.channel) + list(self._memobj.vfo_channel):
-            try:
-                mod = int(record.modulation)
-            except Exception:
-                continue
-            # An erased record decodes to modulation 0xF and matches neither.
-            if mod not in (2, 3):
-                continue
-
-            was_narrowest = int(record.txLock) & 1
-            record.bandwidth = was_narrowest
-            record.txLock = 1
-            migrated += 1
-
-        self._memobj.schema = NR7Y_SCHEMA_CURRENT
-        self.metadata = {'nr7y_schema': NR7Y_SCHEMA_CURRENT}
-
-        LOG.warning(
-            'Image used EEPROM schema %d and has been upgraded to schema %d '
-            '(%d CW/SSB channels). Saving this file will store it in the new '
-            'layout, which pre-v1.4 firmware cannot read.',
-            NR7Y_SCHEMA_LEGACY, NR7Y_SCHEMA_CURRENT, migrated)
-
-    def _check_schema_at_load(self):
-        """Gate an image the way mainline uvk5.py gates firmware at load.
-
-        Missing provenance is a warning, not a failure - an image written by an
-        older or modified module simply has nothing to check. A schema that is
-        present and unsupported raises.
-        """
-        if 'nr7y_schema' not in self.metadata:
-            LOG.warning('This image has no EEPROM schema information. It may '
-                        'have been generated with an old or modified version '
-                        'of this module. Download a fresh image from your '
-                        'radio for the best safety and compatibility.')
-
-        schema = self._nr7y_read_schema()
-        if not self.nr7y_approve_schema(schema):
-            raise errors.RadioError(
-                'Image uses EEPROM schema %d, which is not supported by this '
-                'module' % schema)
-
-    def process_mmap(self):
-        super().process_mmap()
-        self._check_schema_at_load()
-        if self._nr7y_read_schema() < NR7Y_SCHEMA_CURRENT:
-            self._nr7y_upgrade_schema()
-
-    # ------------------------------------------------------------------ key actions helper
-
-    def _nr7y_action_map(self):
-        """Return the index -> action-name map for the firmware on the radio.
-
-        Mirrors the conditionally-compiled ACTION_OPT_t enum so the numbers we
-        read and write line up with the actions that build actually has.
-        """
-        try:
-            has_rescue_ops = bool(
-                self._memobj.BUILD_OPTIONS.ENABLE_FEAT_F4HWN_RESCUE_OPS)
-        except Exception as exc:
-            LOG.warning("Cannot read ENABLE_FEAT_F4HWN_RESCUE_OPS: %s", exc)
-            has_rescue_ops = False
-        return _nr7y_keyactions_list(has_rescue_ops,
-                                     self._is_nr7y_cw_firmware())
-
-    def _get_nr7y_action(self, action_num):
-        """Return (choices_list, current_str) for a programmable key.
-
-        The map from _nr7y_action_map only contains actions the build compiled,
-        so the filtering here is purely about which of those to offer.
-        """
-        base_list = self._nr7y_action_map()
-
-        has_alarm       = self._memobj.BUILD_OPTIONS.ENABLE_ALARM
-        has_1750        = self._memobj.BUILD_OPTIONS.ENABLE_TX1750
-        has_flashlight  = self._memobj.BUILD_OPTIONS.ENABLE_FLASHLIGHT
-        has_fm_radio    = self._memobj.BUILD_OPTIONS.ENABLE_FMRADIO
-        has_vox         = self._memobj.BUILD_OPTIONS.ENABLE_VOX
-
-        lst = base_list.copy()
-        # Remove TX-only actions that must not appear in key-press menus
-        for a in ("BACKLIGHT", "BL_MIN_TMP_OFF"):
-            if a in lst:
-                lst.remove(a)
-
-        # These keep an enum slot even when compiled out, so they are always in
-        # the map and only ever need hiding from the choices.
-        if not has_alarm:
-            if "ALARM" in lst:
-                lst.remove("ALARM")
-        if not has_1750:
-            if "1750Hz" in lst:
-                lst.remove("1750Hz")
-        if not has_flashlight:
-            if "FLASHLIGHT" in lst:
-                lst.remove("FLASHLIGHT")
-        if not has_fm_radio:
-            if "FM RADIO" in lst:
-                lst.remove("FM RADIO")
-        if not has_vox:
-            if "MUTE" in lst:
-                lst.remove("MUTE")
-
-        action_num = int(action_num)
-        if action_num >= len(base_list) or base_list[action_num] not in lst:
-            action_num = 0
-        return lst, base_list[action_num]
-
-    def _build_nr7y_keya_group(self):
-        """Rebuild the Programmable Keys group using the NR7Y extended actions list."""
-        _mem = self._memobj
-        keya = RadioSettingGroup("keya", "Programmable Keys")
-        for name, label in (
-            ("key1_shortpress_action", "Side Key 1 Short Press (F1Shrt)"),
-            ("key1_longpress_action",  "Side Key 1 Long Press (F1Long)"),
-            ("key2_shortpress_action", "Side Key 2 Short Press (F2Shrt)"),
-            ("key2_longpress_action",  "Side Key 2 Long Press (F2Long)"),
-            ("keyM_longpress_action",  "Menu Key Long Press (M Long)"),
-        ):
-            choices, current = self._get_nr7y_action(int(getattr(_mem, name)))
-            keya.append(RadioSetting(name, label,
-                                     RadioSettingValueList(choices, current)))
-        return keya
-
-    # ------------------------------------------------------------------ CW settings group builder
-
-    def _build_cw_settings_group(self):
-        """Return a RadioSettingGroup containing all CW settings."""
-        cw = RadioSettingGroup("cw", "CW Settings")
-
-        # Sidetone Frequency (450-950 Hz in 50 Hz steps)
-        freq_opts = ["%d Hz" % (450 + i * 50) for i in range(11)]
-        try:
-            fi = self._get_cw_frequency_idx()
-            cw.append(RadioSetting("cw_frequency", "Sidetone Frequency",
-                                   RadioSettingValueList(freq_opts, freq_opts[fi])))
-        except Exception as e:
-            LOG.error("CW freq setting: %s", e)
-
-        # Sidetone Volume (0=OFF, 1-6)
-        vol_opts = ["OFF"] + [str(i) for i in range(1, 7)]
-        try:
-            vi = self._get_cw_sidetone_level()
-            cw.append(RadioSetting("cw_sidetone_level", "Sidetone Volume",
-                                   RadioSettingValueList(vol_opts, vol_opts[vi])))
-        except Exception as e:
-            LOG.error("CW vol setting: %s", e)
-
-        # Keyer Mode
-        try:
-            mi = self._get_cw_keyer_mode()
-            cw.append(RadioSetting("cw_keyer_mode", "Keyer Mode",
-                                   RadioSettingValueList(_NR7Y_CW_KEYER_MODES,
-                                                        _NR7Y_CW_KEYER_MODES[mi])))
-        except Exception as e:
-            LOG.error("CW keyer mode: %s", e)
-
-        # Keyer Speed (10-45 WPM)
-        try:
-            wpm = self._get_cw_wpm()
-            cw.append(RadioSetting("cw_wpm", "Keyer Speed (WPM)",
-                                   RadioSettingValueInteger(10, 45, wpm)))
-        except Exception as e:
-            LOG.error("CW WPM: %s", e)
-
-        # Key Input Mode
-        try:
-            ki = self._get_cw_key_input_idx()
-            cw.append(RadioSetting("cw_key_input", "Key Input Mode",
-                                   RadioSettingValueList(_NR7Y_CW_KEY_INPUT_MODES,
-                                                        _NR7Y_CW_KEY_INPUT_MODES[ki])))
-        except Exception as e:
-            LOG.error("CW key input: %s", e)
-
-        # Break-in
-        try:
-            breakin_opts = ["OFF", "ON"]
-            bi = 1 if self._get_cw_breakin() else 0
-            rs_bi = RadioSetting("cw_break_in", "Break-in (CWbkin)",
-                                 RadioSettingValueList(breakin_opts, breakin_opts[bi]))
-            rs_bi.set_doc("ON: TX during keying. OFF: sidetone only, no RF TX.")
-            cw.append(rs_bi)
-        except Exception as e:
-            LOG.error("CW break-in: %s", e)
-
-        # Message Repeat Delay
-        try:
-            rd = self._get_cw_repeat_delay()
-            rs_rd = RadioSetting("cw_repeat_delay", "Message Repeat Delay (sec)",
-                                 RadioSettingValueInteger(0, 127, rd))
-            rs_rd.set_doc("Delay between repeated CW message plays (0-127 seconds)")
-            cw.append(rs_rd)
-        except Exception as e:
-            LOG.error("CW repeat delay: %s", e)
-
-        # CW Macros (4 messages)
-        macros = RadioSettingGroup("cw_macros", "CW Macros")
-        for i in range(1, 5):
-            try:
-                txt = self._get_cw_msg(i)
-                rs_m = RadioSetting("cw_msg%d" % i, "CW Message %d" % i,
-                                    RadioSettingValueString(0, 46, txt))
-                rs_m.set_doc("CW macro %d (A-Z, 0-9, /, ?, ., ,, -, = only; max 46 chars)" % i)
-                macros.append(rs_m)
-            except Exception as e:
-                LOG.error("CW macro %d: %s", i, e)
-        cw.append(macros)
-        return cw
-
-    # ------------------------------------------------------------------ get_settings
-
-    def get_settings(self):
-        top = super().get_settings()
-
-        # Build a replacement settings tree: swap out the keya group and
-        # (when CW firmware is detected) append the CW settings group.
-        has_cw = self._is_nr7y_cw_firmware()
-
-        new_top = RadioSettings()
-        for group in top:
-            try:
-                if group.get_name() == 'keya':
-                    new_top.append(self._build_nr7y_keya_group())
-                    continue
-            except AttributeError:
-                pass
-            new_top.append(group)
-
-        if has_cw:
-            new_top.append(self._build_cw_settings_group())
-        return new_top
-
-    # ------------------------------------------------------------------ set_settings
-
-    def set_settings(self, settings):
-        _mem = self._memobj
-        has_cw = self._is_nr7y_cw_firmware()
-        # Same map the settings were built from, so a name round-trips to the
-        # number this firmware build means by it.
-        action_list = self._nr7y_action_map()
-
-        for element in settings:
-            if not isinstance(element, RadioSetting):
-                # Recurse into groups
-                self.set_settings(element)
-                continue
-
-            name = element.get_name()
-
-            # Programmable key actions – use the correct actions list
-            if name in ("key1_shortpress_action", "key1_longpress_action",
-                        "key2_shortpress_action", "key2_longpress_action",
-                        "keyM_longpress_action"):
-                try:
-                    idx = action_list.index(str(element.value))
-                except ValueError:
-                    idx = 0
-                setattr(_mem, name, idx)
-                continue
-
-            # CW settings (only present when CW firmware is active)
-            if has_cw and name.startswith("cw_"):
-                self._apply_cw_setting(name, element)
-                continue
-
-            # All other settings: delegate to the base class handler
-            super().set_settings([element])
-
-    # ------------------------------------------------------------------ CW setting applier
-
-    def _apply_cw_setting(self, name, element):
-        """Dispatch a single cw_* setting to its encode/write helper."""
-        try:
-            if name == "cw_frequency":
-                freq_opts = ["%d Hz" % (450 + i * 50) for i in range(11)]
-                self._set_cw_frequency_idx(freq_opts.index(str(element.value)))
-            elif name == "cw_sidetone_level":
-                vol_opts = ["OFF"] + [str(i) for i in range(1, 7)]
-                self._set_cw_sidetone_level(vol_opts.index(str(element.value)))
-            elif name == "cw_keyer_mode":
-                self._set_cw_keyer_mode(_NR7Y_CW_KEYER_MODES.index(str(element.value)))
-            elif name == "cw_wpm":
-                self._set_cw_wpm(int(element.value))
-            elif name == "cw_key_input":
-                self._set_cw_key_input_idx(
-                    _NR7Y_CW_KEY_INPUT_MODES.index(str(element.value)))
-            elif name == "cw_break_in":
-                self._set_cw_breakin(["OFF", "ON"].index(str(element.value)))
-            elif name == "cw_repeat_delay":
-                self._set_cw_repeat_delay(int(element.value))
-            elif name.startswith("cw_msg"):
-                # "cw_msg1" → idx 1 … "cw_msg4" → idx 4
-                self._set_cw_msg(int(name[6:]), str(element.value))
-        except Exception as e:
-            LOG.error("Error applying CW setting %s: %s", name, e)
-
-    # ------------------------------------------------------------------ CW byte-level helpers
-    # All addresses are in the _mmap (image) coordinate space which is 1:1 with
-    # PY25Q16 addresses for the fusion firmware.
-
-    def _mmap_byte(self, addr):
-        """Read one byte from the image at the given address."""
-        val = self._mmap[addr]
-        if isinstance(val, (bytes, bytearray)):
-            val = val[0]
-        return int(val) & 0xFF
-
-    def _mmap_set(self, addr, byte_val):
-        """Write one byte to the image at the given address."""
-        self._mmap[addr] = int(byte_val) & 0xFF
-
-    # -- Sidetone frequency (bits 0-3 of CW byte 0) --
-
-    def _get_cw_frequency_idx(self):
-        """Return sidetone frequency index 0-10 (450-950 Hz, 50 Hz steps)."""
-        b = self._mmap_byte(_NR7Y_CW_SETTINGS_ADDR)
-        if b == 0xFF:
-            return 3   # Default 600 Hz
-        # Firmware stores (Hz/10 − 45) / 5 in bits 0-3
-        freq_val = 45 + (b & 0x0F) * 5   # Hz/10
-        return max(0, min(10, (freq_val * 10 - 450) // 50))
-
-    def _set_cw_frequency_idx(self, idx):
-        b = self._mmap_byte(_NR7Y_CW_SETTINGS_ADDR)
-        freq_hz = 450 + int(idx) * 50
-        encoded = (freq_hz // 10 - 45) // 5
-        self._mmap_set(_NR7Y_CW_SETTINGS_ADDR, (b & 0xF0) | (encoded & 0x0F))
-
-    # -- Sidetone level (bits 4-6 of CW byte 0) --
-
-    def _get_cw_sidetone_level(self):
-        """Return sidetone volume index 0-6 (0=OFF)."""
-        b = self._mmap_byte(_NR7Y_CW_SETTINGS_ADDR)
-        if b == 0xFF:
-            return 4   # Default level 4
-        return (b >> 4) & 0x07
-
-    def _set_cw_sidetone_level(self, level):
-        b = self._mmap_byte(_NR7Y_CW_SETTINGS_ADDR)
-        self._mmap_set(_NR7Y_CW_SETTINGS_ADDR, (b & 0x0F) | ((int(level) & 0x07) << 4))
-
-    # -- Keyer mode (full byte at CW byte 4) --
-
-    def _get_cw_keyer_mode(self):
-        """Return 0=Iambic A, 1=Iambic B, 2=Ultimatic, 3=Semi-Auto Bug."""
-        b = self._mmap_byte(_NR7Y_CW_SETTINGS_ADDR + 4)
-        if b >= len(_NR7Y_CW_KEYER_MODES):
-            return 1   # Default Mode B (blank/invalid EEPROM)
-        return b
-
-    def _set_cw_keyer_mode(self, mode):
-        mode = max(0, min(len(_NR7Y_CW_KEYER_MODES) - 1, int(mode)))
-        self._mmap_set(_NR7Y_CW_SETTINGS_ADDR + 4, mode)
-
-    # -- Keyer speed (bits 0-6 of CW byte 1; mode no longer shares this byte) --
-
-    def _get_cw_wpm(self):
-        """Return WPM (10-45)."""
-        b = self._mmap_byte(_NR7Y_CW_SETTINGS_ADDR + 1)
-        if b == 0xFF:
-            return 18  # Default 18 WPM
-        wpm = b & 0x7F
-        return wpm if 10 <= wpm <= 45 else 18
-
-    def _set_cw_wpm(self, wpm):
-        wpm = max(10, min(45, int(wpm)))
-        self._mmap_set(_NR7Y_CW_SETTINGS_ADDR + 1, wpm & 0x7F)
-
-    # -- Key input mode (bits 0-4 of CW byte 2) --
-
-    def _get_cw_key_input_idx(self):
-        """Return key input menu index 0-10."""
-        b = self._mmap_byte(_NR7Y_CW_SETTINGS_ADDR + 2)
-        if b == 0xFF or b >= 0x80:
-            return 0   # Default HandKey
-        idx = b & 0x1F
-        return idx if idx < len(_NR7Y_CW_KEY_INPUT_MODES) else 0
-
-    def _set_cw_key_input_idx(self, idx):
-        if idx < 0 or idx >= len(_NR7Y_CW_KEY_INPUT_MODES):
-            idx = 0
-        b = self._mmap_byte(_NR7Y_CW_SETTINGS_ADDR + 2)
-        break_in = (b >> 6) & 0x01
-        reserved = b & 0x20
-        self._mmap_set(_NR7Y_CW_SETTINGS_ADDR + 2,
-                       (int(idx) & 0x1F) | reserved | (break_in << 6))
-
-    # -- Break-in enable (bit 6 of CW byte 2) --
-
-    def _get_cw_breakin(self):
-        """Return 1=ON (break-in enabled), 0=OFF."""
-        b = self._mmap_byte(_NR7Y_CW_SETTINGS_ADDR + 2)
-        if b == 0xFF or b >= 0x80:
-            return 1   # Default ON
-        return (b >> 6) & 0x01
-
-    def _set_cw_breakin(self, enable):
-        enable = 1 if enable else 0
-        b = self._mmap_byte(_NR7Y_CW_SETTINGS_ADDR + 2)
-        self._mmap_set(_NR7Y_CW_SETTINGS_ADDR + 2,
-                       (b & 0x1F) | (b & 0x20) | (enable << 6))
-
-    # -- Message repeat delay (bits 0-6 of CW byte 3) --
-
-    def _get_cw_repeat_delay(self):
-        """Return repeat delay in seconds (0-127)."""
-        b = self._mmap_byte(_NR7Y_CW_SETTINGS_ADDR + 3)
-        if b >= 0x80:
-            return 4   # Default 4 seconds
-        return b & 0x7F
-
-    def _set_cw_repeat_delay(self, delay):
-        self._mmap_set(_NR7Y_CW_SETTINGS_ADDR + 3, max(0, min(127, int(delay))) & 0x7F)
-
-    # ------------------------------------------------------------------ CW macro read/write
-
-    def _get_cw_msg(self, idx):
-        """Read and decode CW macro. idx is 1-4.  Returns plain-text string."""
-        if idx < 1 or idx > 4:
-            return ""
-        addr = _NR7Y_CW_MACRO_ADDRS[idx - 1]
-        try:
-            raw = bytes(self._mmap[addr:addr + _NR7Y_CW_MACRO_SIZE])
-        except Exception as e:
-            LOG.error("Error reading CW macro %d from 0x%04x: %s", idx, addr, e)
-            return ""
-
-        length_byte = raw[0]
-        if length_byte == 0xFF:
-            return ""   # Empty macro
-        if (length_byte & _NR7Y_CW_MACRO_SIG) == 0:
-            return ""   # Missing signature – not a valid macro block
-        length = length_byte & ~_NR7Y_CW_MACRO_SIG
-        if length == 0 or length > _NR7Y_CW_MACRO_MAX_LEN:
-            return ""
-
-        # Verify checksum (last byte of the block)
-        checksum = sum(raw[1:length + 1]) & 0xFF
-        if raw[_NR7Y_CW_MACRO_SIZE - 1] != checksum:
-            LOG.warning("CW macro %d checksum mismatch (expected 0x%02x, got 0x%02x)",
-                        idx, checksum, raw[_NR7Y_CW_MACRO_SIZE - 1])
-            return ""
-
-        # Decode: each payload byte has bit 7 = inter-word space before this char
-        result = []
-        for i in range(1, length + 1):
-            byte = raw[i]
-            has_space = (byte & 0x80) != 0
-            char = chr(byte & 0x7F)
-            if has_space and result:   # No leading space
-                result.append(' ')
-            result.append(char)
-        text = ''.join(result)
-        LOG.info("CW macro %d read: '%s' (%d chars)", idx, text, length)
-        return text
-
-    def _set_cw_msg(self, idx, text):
-        """Encode and write CW macro. idx is 1-4.  text is plain ASCII."""
-        if idx < 1 or idx > 4:
-            return
-        addr = _NR7Y_CW_MACRO_ADDRS[idx - 1]
-        raw = bytearray([0xFF] * _NR7Y_CW_MACRO_SIZE)
-
-        if not text or not text.strip():
-            for i in range(_NR7Y_CW_MACRO_SIZE):
-                self._mmap[addr + i] = raw[i]
-            LOG.info("CW macro %d cleared", idx)
-            return
-
-        # Encode words, inserting inter-word space flag on first char of each word
-        encoded = []
-        for word_idx, word in enumerate(text.upper().split()):
-            for char_idx, char in enumerate(word):
-                if len(encoded) >= _NR7Y_CW_MACRO_MAX_LEN:
-                    break
-                if not ((char >= 'A' and char <= 'Z') or
-                        (char >= '0' and char <= '9') or
-                        char in ('/', '?', ',', '.', '-', '=')):
-                    LOG.debug("CW macro %d: skipping invalid char '%s'", idx, char)
-                    continue
-                has_space = (word_idx > 0 and char_idx == 0)
-                encoded.append(ord(char) | (0x80 if has_space else 0x00))
-
-        if not encoded:
-            for i in range(_NR7Y_CW_MACRO_SIZE):
-                self._mmap[addr + i] = raw[i]
-            LOG.warning("CW macro %d: empty after filtering '%s'", idx, text)
-            return
-
-        raw[0] = len(encoded) | _NR7Y_CW_MACRO_SIG
-        for i, b in enumerate(encoded):
-            raw[i + 1] = b
-        checksum = sum(encoded) & 0xFF
-        raw[_NR7Y_CW_MACRO_SIZE - 1] = checksum
-
-        for i in range(_NR7Y_CW_MACRO_SIZE):
-            self._mmap[addr + i] = raw[i]
-        LOG.info("CW macro %d saved: '%s' (%d chars, chk=0x%02x)",
-                 idx, text, len(encoded), checksum)
-
-@directory.register
-@directory.detected_by(UVK5_NR7Y_Fusion)
-class NR7YRestrictedRadio(UVK5_NR7Y_Fusion):
-    """Radio whose EEPROM layout is newer than this module understands.
-
-    Follows the shape of mainline uvk5.py's UVK5RestrictedRadio: the image is
-    still readable, so someone on firmware this module does not know can take a
-    backup - which is exactly when a backup matters most - while every path
-    that could act on a misparse is closed.
-    """
-    VARIANT = 'unsupported'
-
-    @classmethod
-    def nr7y_approve_schema(cls, schema):
-        return False
-
-    def process_mmap(self):
-        # Deliberately does not call _check_schema_at_load(), and does not
-        # upgrade: the layout is unknown, so leave the bytes exactly as read.
-        LOG.warning('EEPROM schema %s is not supported by this module. '
-                    'Image data will be read-only.',
-                    self.metadata.get('nr7y_schema', '<unknown>'))
-        self._memobj = bitwise.parse(MEM_FORMAT, self._mmap)
-
-    def sync_out(self):
-        raise errors.RadioError(
-            'Upload is disabled due to unsupported EEPROM schema')
-
-    def set_memory(self, m):
-        raise errors.InvalidValueError(
-            'Memories are read-only due to unsupported EEPROM schema')
-
-    def set_settings(self, settings):
-        raise errors.InvalidValueError(
-            'Settings are read-only due to unsupported EEPROM schema')
-
-    def validate_memory(self, mem):
-        # Note: validate_memory rather than marking mem.immutable in
-        # get_memory(). Mainline tried the immutable approach and reverted it
-        # in 2ddb759c because it broke paste.
-        return [chirp_common.ValidationError(
-            'This image is read-only due to being from a radio with an '
-            'unsupported EEPROM schema')]

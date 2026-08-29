@@ -2264,25 +2264,23 @@ void UI_DisplayMain(void)
         const uint8_t displayBandwidth = vfoInfo->CHANNEL_BANDWIDTH;
 
         #ifdef ENABLE_FEAT_F4HWN_NARROWER
+            // SetNFM upgrades FM's narrow to 6.25k, so "N+" says something there.
+            // It does not apply to CW/SSB, whose narrow is already 2k - showing
+            // N+ on those would claim an upgrade that never happened.
             bool narrower = 0;
 
-            if(displayBandwidth == BANDWIDTH_NARROW && gSetting_set_nfm == 1)
+            if (displayBandwidth == BANDWIDTH_NARROW && gSetting_set_nfm == 1
+        #ifdef ENABLE_EXTRA_FILTER
+                && vfoInfo->Modulation != MODULATION_USB
+            #ifdef ENABLE_CW_MODULATOR
+                && vfoInfo->Modulation != MODULATION_CW
+            #endif
+        #endif
+               )
             {
                 narrower = 1;
             }
 
-#ifdef ENABLE_EXTRA_FILTER
-            if (displayBandwidth == BANDWIDTH_NARROWEST)
-            {
-                // BANDWIDTH_NARROWEST is a distinct per-channel setting (not the F4HWN
-                // narrower mode upgrade); show its own label rather than "N+".
-                if (gSetting_set_gui)
-                    UI_PrintStringSmallNormal("2k", LCD_WIDTH + 80, 0, line + 1);
-                else
-                    GUI_DisplaySmallest("2k", 91, line == 0 ? 17 : 49, false, true);
-            }
-            else
-#endif
             if (gSetting_set_gui)
             {
                 const char *bandWidthNames[] = {"W", "N", "N+"};
@@ -2296,32 +2294,18 @@ void UI_DisplayMain(void)
         #else
             if (gSetting_set_gui)
             {
-#ifdef ENABLE_EXTRA_FILTER
-                const char *bandWidthNames[] = {"W", "N", "2k"};
-                UI_PrintStringSmallNormal(bandWidthNames[vfoInfo->CHANNEL_BANDWIDTH], LCD_WIDTH + 80, 0, line + 1);
-#else
                 const char *bandWidthNames[] = {"W", "N"};
                 UI_PrintStringSmallNormal(bandWidthNames[displayBandwidth], LCD_WIDTH + 80, 0, line + 1);
-#endif
             }
             else
             {
-#ifdef ENABLE_EXTRA_FILTER
-                const char *bandWidthNames[] = {"WIDE", "NAR", "2k"};
-                GUI_DisplaySmallest(bandWidthNames[vfoInfo->CHANNEL_BANDWIDTH], 91, line == 0 ? 17 : 49, false, true);
-#else
                 const char *bandWidthNames[] = {"WIDE", "NAR"};
                 GUI_DisplaySmallest(bandWidthNames[displayBandwidth], 91, line == 0 ? 17 : 49, false, true);
-#endif
             }
         #endif
 #else
         if (vfoInfo->CHANNEL_BANDWIDTH == BANDWIDTH_NARROW)
             UI_PrintStringSmallNormal("N", LCD_WIDTH + 70, 0, line + 1);
-#ifdef ENABLE_EXTRA_FILTER
-		else if (vfoInfo->CHANNEL_BANDWIDTH == BANDWIDTH_NARROWEST)
-			UI_PrintStringSmallNormal("2k", LCD_WIDTH + 70, 0, line + 1);
-#endif
 #endif
 
 #ifdef ENABLE_DTMF_CALLING

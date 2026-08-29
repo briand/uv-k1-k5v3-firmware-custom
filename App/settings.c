@@ -51,6 +51,36 @@ void SETTINGS_InitEEPROM(void)
 {
     uint8_t Data[16] = {0};
 
+#ifdef ENABLE_CW_MODULATOR
+    //
+    // EEPROM schema check. Deliberately separate from the version-string check
+    // below: that one fires on any version change and resets locks, inversion
+    // and logo lines, which is a different question with a different trigger.
+    // This one must fire exactly once per upgrade, because the migration it
+    // guards is not idempotent.
+    //
+    {
+        uint8_t schema = 0;
+        PY25Q16_ReadBuffer(EEPROM_SCHEMA_ADDR, &schema, 1);
+
+        // Erased flash means pre-v1.4, which never wrote this byte. Normalise
+        // first: 0xFF is 255, so an unnormalised value compares as "newer".
+        if (schema == 0xFF)
+            schema = EEPROM_SCHEMA_LEGACY;
+
+        if (schema < EEPROM_SCHEMA_CURRENT)
+        {
+            SETTINGS_MigrateFilterSchema();
+
+            schema = EEPROM_SCHEMA_CURRENT;
+            PY25Q16_WriteBuffer(EEPROM_SCHEMA_ADDR, &schema, 1, false);
+        }
+        // schema > EEPROM_SCHEMA_CURRENT: written by a newer firmware whose
+        // layout we do not know. Leave the channel data alone rather than
+        // migrating it onto an older meaning.
+    }
+#endif
+
     //
     // Version check
     // Read stored version from EEPROM and compare with VERSION_STRING_2
@@ -1232,25 +1262,10 @@ void SETTINGS_SaveChannel(uint16_t Channel, uint8_t VFO, const VFO_Info_t *pVFO,
         State -> _8[2] = (pVFO->freq_config_TX.CodeType << 4) | pVFO->freq_config_RX.CodeType;
         State -> _8[3] = (pVFO->Modulation << 4) | pVFO->TX_OFFSET_FREQUENCY_DIRECTION;
         State -> _8[4] = 0
-#ifdef ENABLE_EXTRA_FILTER
-            // For CW/SSB, bit 6 encodes NARROWEST instead of TX_LOCK.
-            | ((((
-#ifdef ENABLE_CW_MODULATOR
-                pVFO->Modulation == MODULATION_CW ||
-#endif
-                pVFO->Modulation == MODULATION_USB))
-                    ? (pVFO->CHANNEL_BANDWIDTH == BANDWIDTH_NARROWEST ? 1u : 0u)
-                    : (pVFO->TX_LOCK & 1u)) << 6)
-#else
-            | (pVFO->TX_LOCK << 6)
-#endif
+            | ((pVFO->TX_LOCK & 1u)    << 6)
             | (pVFO->BUSY_CHANNEL_LOCK << 5)
             | (pVFO->OUTPUT_POWER      << 2)
-#ifdef ENABLE_EXTRA_FILTER
-            | ((pVFO->CHANNEL_BANDWIDTH == BANDWIDTH_NARROWEST ? BANDWIDTH_NARROW : pVFO->CHANNEL_BANDWIDTH) << 1)
-#else
-            | (pVFO->CHANNEL_BANDWIDTH << 1)
-#endif
+            | ((pVFO->CHANNEL_BANDWIDTH & 1u) << 1)
             | (pVFO->FrequencyReverse  << 0);
         State -> _8[5] = ((pVFO->DTMF_PTT_ID_TX_MODE & 7u) << 1)
 #ifdef ENABLE_DTMF_CALLING
@@ -1434,6 +1449,82 @@ State[1] = 0
 
 #ifdef ENABLE_FEAT_F4HWN
 
+#ifdef ENABLE_CW_MODULATOR
+// ---- Schema 1 -> 2 migration ----
+//
+// Schema 1 packed the CW/USB filter across two bits, because bit 6 was borrowed
+// from TX_LOCK to mean NARROWEST:
+//
+//     WIDE       bit1 0  bit6 0
+//     NARROW     bit1 1  bit6 0
+//     NARROWEST  bit1 1  bit6 1
+//
+// Schema 2 keeps the filter in bit 1 alone (0 = 6.25k, 1 = 2.0k) and gives bit 6
+// back to TX_LOCK. Mapping new_bit1 = old_bit6 preserves every distinction that
+// mattered: an explicit 2k stays 2k, and WIDE and NARROW - both 12.5k or wider,
+// neither offered any more - fold together onto 6.25k. Setting bit 6 on the way
+// through gives these records the safe TX_LOCK default they could never hold.
+//
+// NOT idempotent: run twice, every record ends at bit1 = 1. The schema byte is
+// what guarantees it runs once. See EEPROM_SCHEMA_* in settings.h.
+static void MigrateFlagsRegion(uint32_t base, uint32_t bytes)
+{
+    #define CHANNEL_SIZE  16
+    #define MOD_OFFSET    11   // modulation << 4 | offset direction
+    #define FLAGS_OFFSET  12
+    #define MIGRATE_BATCH 512
+
+    uint8_t Buf[MIGRATE_BATCH];
+
+    for (uint32_t off = 0; off < bytes; off += MIGRATE_BATCH)
+    {
+        const uint32_t span = (bytes - off < MIGRATE_BATCH) ? (bytes - off) : MIGRATE_BATCH;
+        bool dirty = false;
+
+        PY25Q16_ReadBuffer(base + off, Buf, span);
+
+        for (uint32_t ch = 0; ch + CHANNEL_SIZE <= span; ch += CHANNEL_SIZE)
+        {
+            // An erased record is all 0xFF, so its modulation nibble is 0xF and
+            // matches neither - erased channels need no special case.
+            const uint8_t mod = Buf[ch + MOD_OFFSET] >> 4;
+            if (mod != MODULATION_CW && mod != MODULATION_USB)
+                continue;
+
+            const uint8_t old_flags     = Buf[ch + FLAGS_OFFSET];
+            const uint8_t was_narrowest = (old_flags >> 6) & 1u;
+            uint8_t       flags         = old_flags;
+
+            flags &= (uint8_t)~(1u << 1);              // clear the filter bit
+            flags |= (uint8_t)(was_narrowest << 1);    // 2k survives, else 6.25k
+            flags |= (uint8_t)(1u << 6);               // TX_LOCK back on
+
+            if (flags != old_flags)
+            {
+                Buf[ch + FLAGS_OFFSET] = flags;
+                dirty = true;
+            }
+        }
+
+        // Most radios have far fewer than 1024 CW channels; skipping untouched
+        // batches turns a guaranteed 32 sector programs into a handful.
+        if (dirty)
+            PY25Q16_WriteBuffer(base + off, Buf, span, false);
+    }
+
+    #undef CHANNEL_SIZE
+    #undef MOD_OFFSET
+    #undef FLAGS_OFFSET
+    #undef MIGRATE_BATCH
+}
+
+void SETTINGS_MigrateFilterSchema(void)
+{
+    MigrateFlagsRegion(0x000000, MR_CHANNELS_MAX * 16);  // 0x0000 - 0x3FFF
+    MigrateFlagsRegion(0x009000, 14 * 16);               // 0x9000 - 0x90DF, 7 bands x 2 VFOs
+}
+#endif // ENABLE_CW_MODULATOR
+
 void SETTINGS_ResetTxLock(void)
 {
     // This is an expensive operation: full scan of all MR channels
@@ -1462,6 +1553,20 @@ void SETTINGS_ResetTxLock(void)
         }
 
         PY25Q16_WriteBuffer(Offset, Buf, BatchSize, false);
+    }
+
+    // The VFO band slots live outside the MR channel region and were previously
+    // missed entirely, which is why F Lock DISABLE ALL never gated frequency
+    // mode. 14 records: 7 bands x 2 VFOs, same 16-byte layout.
+    {
+        uint8_t VfoBuf[14 * CHANNEL_SIZE];
+
+        PY25Q16_ReadBuffer(0x009000, VfoBuf, sizeof(VfoBuf));
+
+        for (uint32_t ch = 0; ch < 14; ch++)
+            VfoBuf[(ch * CHANNEL_SIZE) + TXLOCK_BYTE_OFFSET] |= (1 << TXLOCK_BIT);
+
+        PY25Q16_WriteBuffer(0x009000, VfoBuf, sizeof(VfoBuf), false);
     }
 
     RADIO_ConfigureChannel(0, VFO_CONFIGURE_RELOAD);

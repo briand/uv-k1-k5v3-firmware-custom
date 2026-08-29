@@ -29,12 +29,12 @@ enum {
     RADIO_CHANNEL_DOWN = 0xFFu,
 };
 
+// Stored per-channel filter selection. Schema 2 keeps this to a single bit:
+// it means "wide" or "narrow" and nothing more. What those resolve to in
+// kilohertz is decided per modulation by RADIO_ResolveFilter().
 enum {
 	BANDWIDTH_WIDE = 0,
 	BANDWIDTH_NARROW,
-#ifdef ENABLE_EXTRA_FILTER
-	BANDWIDTH_NARROWEST,
-#endif
 };
 
 enum PTT_ID_t {
@@ -173,7 +173,7 @@ void     RADIO_SetupRegisters(bool switchToForeground);
 #ifdef ENABLE_NOAA
     void RADIO_ConfigureNOAA(void);
 #endif
-BK4819_FilterBandwidth_t RADIO_GetAMFilterBandwidth(const VFO_Info_t *pVfo);
+BK4819_FilterBandwidth_t RADIO_ResolveFilter(const VFO_Info_t *pVfo);
 void     RADIO_SetTxParameters(void);
 void     RADIO_SetupAGC(bool listeningAM, bool disable);
 void     RADIO_SetModulation(ModulationMode_t modulation);

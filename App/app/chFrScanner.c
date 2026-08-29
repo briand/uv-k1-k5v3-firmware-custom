@@ -549,7 +549,7 @@ static void ScanFastApplyChannelShape(ModulationMode_t modulation)
 
     if (modulation == MODULATION_AM)
     {
-        BK4819_SetFilterBandwidth(RADIO_GetAMFilterBandwidth(gRxVfo), true);
+        BK4819_SetFilterBandwidth(RADIO_ResolveFilter(gRxVfo), true);
     }
     else
     {

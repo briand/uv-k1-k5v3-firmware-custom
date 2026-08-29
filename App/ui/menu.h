@@ -221,11 +221,11 @@ extern const t_menu_item MenuList[];
 
 extern const char* const gSubMenu_TXP[8];
 extern const char* const gSubMenu_SFT_D[3];
+extern const char* const gSubMenu_W_N[2];
 #ifdef ENABLE_EXTRA_FILTER
-	extern const char* const gSubMenu_W_N[3];
-#else
-	extern const char* const gSubMenu_W_N[2];
+	extern const char* const gSubMenu_W_N_SSB[2];
 #endif
+const char* const *UI_MENU_FilterLabels(void);
 extern const char* const gSubMenu_OFF_ON[2];
 extern const char*       gSubMenu_NA;
 extern const char* const gSubMenu_TOT[11];

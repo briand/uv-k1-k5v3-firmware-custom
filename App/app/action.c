@@ -376,13 +376,10 @@ void ACTION_SwitchDemodul(void)
 
 void ACTION_SwitchFilter(void)
 {
-	gTxVfo->CHANNEL_BANDWIDTH++;
-#ifdef ENABLE_EXTRA_FILTER
-	if (gTxVfo->CHANNEL_BANDWIDTH > BANDWIDTH_NARROWEST)
-#else
-	if (gTxVfo->CHANNEL_BANDWIDTH > BANDWIDTH_NARROW)
-#endif
-		gTxVfo->CHANNEL_BANDWIDTH = BANDWIDTH_WIDE;
+	// One bit, so this is a straight toggle. What wide and narrow resolve to
+	// depends on the modulation - see RADIO_ResolveFilter().
+	gTxVfo->CHANNEL_BANDWIDTH = (gTxVfo->CHANNEL_BANDWIDTH == BANDWIDTH_WIDE)
+		? BANDWIDTH_NARROW : BANDWIDTH_WIDE;
 	gRequestSaveChannel  = 1;
 	gFlagReconfigureVfos = true;
 }
@@ -845,7 +842,7 @@ void ACTION_Wn(void)
 
     if (pVfo->Modulation == MODULATION_AM)
     {
-        BK4819_SetFilterBandwidth(RADIO_GetAMFilterBandwidth(pVfo), true);
+        BK4819_SetFilterBandwidth(RADIO_ResolveFilter(pVfo), true);
         return;
     }
 
