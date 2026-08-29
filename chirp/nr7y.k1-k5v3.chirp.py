@@ -1127,9 +1127,6 @@ def do_download(radio):
     else:
         raise errors.RadioError("Failed to initialize radio")
 
-    # Provenance travels with the image, so a saved .img can be checked with no
-    # radio attached. Mirrors what mainline uvk5.py stores for firmware.
-    radio.metadata = {'nr7y_firmware': f}
 
     addr = 0
     while addr < MEM_SIZE:
@@ -1142,6 +1139,16 @@ def do_download(radio):
             addr += MEM_BLOCK
         else:
             raise errors.RadioError("Memory download incomplete")
+
+    # Provenance travels with the image, so a saved .img can be checked with no
+    # radio attached. Mirrors what mainline uvk5.py stores for firmware. Read
+    # the schema from the bytes we just fetched rather than asking the radio
+    # again - on pre-v1.4 firmware the address is unmapped and reads 0xFF.
+    schema = eeprom[NR7Y_SCHEMA_ADDR] if len(eeprom) > NR7Y_SCHEMA_ADDR else 0xFF
+    if schema == 0xFF:
+        schema = NR7Y_SCHEMA_LEGACY
+
+    radio.metadata = {'nr7y_firmware': f, 'nr7y_schema': schema}
 
     return memmap.MemoryMapBytes(eeprom)
 
@@ -3747,10 +3754,26 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
         read-only variant rather than refused outright: the download still
         works, so a backup is possible, but nothing can be written back.
         """
-        _sayhello(pipe)
+        # clone.py opens the pipe at timeout=0.25 and calls this before
+        # do_download gets a chance to raise it. This firmware needs the same
+        # headroom do_download uses or the very first reply times out with
+        # "Header short read"; restore the caller's value either way.
+        saved_timeout = pipe.timeout
+        pipe.timeout = 4.0
+        try:
+            _sayhello(pipe)
+            rep = _readmem(pipe, NR7Y_SCHEMA_ADDR, 1)
+            schema = rep[0] if rep else 0xFF
+        except Exception as e:
+            # Best-effort only: the sole thing detection routes around is a
+            # schema newer than this module, and none exists yet. Never let it
+            # block a download that would otherwise have worked.
+            LOG.warning('EEPROM schema detection failed (%s); '
+                        'continuing with %s', e, cls.__name__)
+            return cls
+        finally:
+            pipe.timeout = saved_timeout
 
-        rep = _readmem(pipe, NR7Y_SCHEMA_ADDR, 1)
-        schema = rep[0] if rep else 0xFF
         if schema == 0xFF:
             schema = NR7Y_SCHEMA_LEGACY
 
