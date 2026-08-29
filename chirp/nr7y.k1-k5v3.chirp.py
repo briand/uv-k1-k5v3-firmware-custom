@@ -1511,6 +1511,31 @@ class UVK5RadioEgzumer(chirp_common.CloneModeRadio):
         chirp_common.split_tone_decode(mem, (tx_tmode, tx_tone, tx_pol),
                                        (rx_tmode, rx_tone, rx_pol))
 
+    # ------------------------------------------------------------- image version
+
+    def _eeprom_version_string(self):
+        """Firmware version recorded in the image itself, or "" if absent.
+
+        The firmware stamps VERSION_STRING_2 into the EEPROM at boot (see
+        SETTINGS_InitEEPROM in settings.c), so unlike FIRMWARE_VERSION - which
+        is only set during a live download - this travels with a saved .img and
+        can be read with no radio attached.
+        """
+        try:
+            raw = str(self._memobj.version.version)
+        except Exception as exc:
+            LOG.warning("Cannot read the EEPROM version block: %s", exc)
+            return ""
+
+        # Erased flash reads back as 0xFF and the firmware zero-pads a short
+        # string, so stop at the first byte that is not printable ASCII.
+        out = []
+        for ch in raw:
+            if not (' ' <= ch <= '~'):
+                break
+            out.append(ch)
+        return ''.join(out).strip()
+
     # ---------------------------------------------------------------- mode bits
 
     def _nr7y_apply_mode(self, _mem_chan, memory):
@@ -2182,7 +2207,13 @@ class UVK5RadioEgzumer(chirp_common.CloneModeRadio):
         Compair1 = "F4HWN v5.0"  
 
         if self.FIRMWARE_VERSION == "":
-            ValFirm = "Firmware : Only when read from the radio "
+            # No live radio, but the image carries the version the firmware
+            # stamped into EEPROM, so report that rather than nothing.
+            _img_version = self._eeprom_version_string()
+            if _img_version:
+                ValFirm = "Firmware : " + _img_version + " (from image)"
+            else:
+                ValFirm = "Firmware : Only when read from the radio "
       
         else:
             FIRMWARE_VERSION_RADIO = self.FIRMWARE_VERSION
@@ -3025,8 +3056,12 @@ class UVK5RadioEgzumer(chirp_common.CloneModeRadio):
         # ----------------- Driver Info
 
         if self.FIRMWARE_VERSION == "":
-            firmware = "To get the firmware version please download " \
-                       "the image from the radio first"
+            _img_version = self._eeprom_version_string()
+            if _img_version:
+                firmware = "%s  (recorded in this image, not read live)" % _img_version
+            else:
+                firmware = "To get the firmware version please download " \
+                           "the image from the radio first"
         else:
             firmware = self.FIRMWARE_VERSION
 
@@ -3826,10 +3861,15 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
         present and unsupported raises.
         """
         if 'nr7y_schema' not in self.metadata:
-            LOG.warning('This image has no EEPROM schema information. It may '
+            # The EEPROM version block is still there even when the module's
+            # own metadata is not, which is exactly the case this warns about.
+            img_version = self._eeprom_version_string()
+            LOG.warning('This image has no EEPROM schema information%s. It may '
                         'have been generated with an old or modified version '
                         'of this module. Download a fresh image from your '
-                        'radio for the best safety and compatibility.')
+                        'radio for the best safety and compatibility.',
+                        ' (firmware reports %s)' % img_version
+                        if img_version else '')
 
         schema = self._nr7y_read_schema()
         if not self.nr7y_approve_schema(schema):
