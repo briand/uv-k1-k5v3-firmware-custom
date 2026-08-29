@@ -3751,7 +3751,12 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
         """
         return schema <= NR7Y_SCHEMA_CURRENT
 
-    # NOTE: no detect_from_serial() here, deliberately.
+    # NOTE: no detect_from_serial(), and no detected_by() sub-model either.
+    # These two go together: CloneModeRadio.detect_from_serial() asserts that a
+    # class with detected models implements its own, so registering one without
+    # the other makes every clone fail with "Internal driver error" before the
+    # port is even touched (chirp_common.py, detect_from_serial).
+    #
     #
     # An earlier version probed the schema byte over the wire before the
     # download so a newer-schema radio could be routed to NR7YRestrictedRadio.
@@ -4289,47 +4294,3 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
             self._mmap[addr + i] = raw[i]
         LOG.info("CW macro %d saved: '%s' (%d chars, chk=0x%02x)",
                  idx, text, len(encoded), checksum)
-
-@directory.register
-@directory.detected_by(UVK5_NR7Y_Fusion)
-class NR7YRestrictedRadio(UVK5_NR7Y_Fusion):
-    """Radio whose EEPROM layout is newer than this module understands.
-
-    Follows the shape of mainline uvk5.py's UVK5RestrictedRadio: the image is
-    still readable, so someone on firmware this module does not know can take a
-    backup - which is exactly when a backup matters most - while every path
-    that could act on a misparse is closed.
-    """
-    VARIANT = 'unsupported'
-
-    @classmethod
-    def nr7y_approve_schema(cls, schema):
-        return False
-
-    def process_mmap(self):
-        # Deliberately does not call _check_schema_at_load(), and does not
-        # upgrade: the layout is unknown, so leave the bytes exactly as read.
-        LOG.warning('EEPROM schema %s is not supported by this module. '
-                    'Image data will be read-only.',
-                    self.metadata.get('nr7y_schema', '<unknown>'))
-        self._memobj = bitwise.parse(MEM_FORMAT, self._mmap)
-
-    def sync_out(self):
-        raise errors.RadioError(
-            'Upload is disabled due to unsupported EEPROM schema')
-
-    def set_memory(self, m):
-        raise errors.InvalidValueError(
-            'Memories are read-only due to unsupported EEPROM schema')
-
-    def set_settings(self, settings):
-        raise errors.InvalidValueError(
-            'Settings are read-only due to unsupported EEPROM schema')
-
-    def validate_memory(self, mem):
-        # Note: validate_memory rather than marking mem.immutable in
-        # get_memory(). Mainline tried the immutable approach and reverted it
-        # in 2ddb759c because it broke paste.
-        return [chirp_common.ValidationError(
-            'This image is read-only due to being from a radio with an '
-            'unsupported EEPROM schema')]
