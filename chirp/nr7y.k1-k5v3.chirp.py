@@ -1089,7 +1089,12 @@ def _check_upload_target(serport, firmware):
     # 2. Right EEPROM schema? Block on anything but an exact match. Reading it
     #    from the radio depends on eeprom_compat.c mapping through 0xA171 -
     #    without that the address is unmapped and reads back 0xFF.
-    rep = _readmem(serport, NR7Y_SCHEMA_ADDR, 1)
+    # Read 8 bytes, not 1. do_download proves hello-then-readmem is safe at the
+    # 0x80 block size it uses, but a 1-byte read is an unusual size this
+    # protocol is never otherwise asked for, and a 1-byte probe is what the
+    # removed detect_from_serial() was doing when downloads stopped working.
+    # Stay on a size the firmware handles routinely.
+    rep = _readmem(serport, NR7Y_SCHEMA_ADDR, 8)
     if not rep:
         raise errors.RadioError("Could not read the EEPROM schema marker.")
 
@@ -3746,42 +3751,21 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
         """
         return schema <= NR7Y_SCHEMA_CURRENT
 
-    @classmethod
-    def detect_from_serial(cls, pipe):
-        """Pick the class that can actually read this radio.
-
-        A radio whose schema is past what we understand is routed to the
-        read-only variant rather than refused outright: the download still
-        works, so a backup is possible, but nothing can be written back.
-        """
-        # clone.py opens the pipe at timeout=0.25 and calls this before
-        # do_download gets a chance to raise it. This firmware needs the same
-        # headroom do_download uses or the very first reply times out with
-        # "Header short read"; restore the caller's value either way.
-        saved_timeout = pipe.timeout
-        pipe.timeout = 4.0
-        try:
-            _sayhello(pipe)
-            rep = _readmem(pipe, NR7Y_SCHEMA_ADDR, 1)
-            schema = rep[0] if rep else 0xFF
-        except Exception as e:
-            # Best-effort only: the sole thing detection routes around is a
-            # schema newer than this module, and none exists yet. Never let it
-            # block a download that would otherwise have worked.
-            LOG.warning('EEPROM schema detection failed (%s); '
-                        'continuing with %s', e, cls.__name__)
-            return cls
-        finally:
-            pipe.timeout = saved_timeout
-
-        if schema == 0xFF:
-            schema = NR7Y_SCHEMA_LEGACY
-
-        for rclass in cls.detected_models():
-            if rclass.nr7y_approve_schema(schema):
-                return rclass
-
-        return NR7YRestrictedRadio
+    # NOTE: no detect_from_serial() here, deliberately.
+    #
+    # An earlier version probed the schema byte over the wire before the
+    # download so a newer-schema radio could be routed to NR7YRestrictedRadio.
+    # It broke downloads outright: clone.py runs detection on the open port
+    # before do_download, and the extra hello/readmem exchange left the radio
+    # not answering at all - every download died with "Header short read".
+    # The firmware drops any command whose timestamp does not match the last
+    # hello (uart.c CMD_051B) and answers nothing, which is exactly that
+    # symptom.
+    #
+    # It bought nothing today: no schema past 2 exists, so detection could only
+    # ever return this class anyway. The download path is now byte-for-byte the
+    # same conversation the working v1.3 module has. When a schema 3 does exist,
+    # wire demotion up then - and test it on hardware first.
 
     def _nr7y_read_schema(self):
         """Schema of the loaded image, normalised. 0xFF means pre-v1.4."""
