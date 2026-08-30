@@ -2263,20 +2263,35 @@ void UI_DisplayMain(void)
 #if ENABLE_FEAT_F4HWN
         const uint8_t displayBandwidth = vfoInfo->CHANNEL_BANDWIDTH;
 
+#ifdef ENABLE_EXTRA_FILTER
+        // CW and SSB resolve the same wide/narrow bit to 6.25k and 2.0k, so
+        // W/N here would read as the FM widths and mislead the operator. Name
+        // the filter instead - within these modes the pair is unambiguous, and
+        // it matches what the Filter submenu offers.
+        if (
+    #ifdef ENABLE_CW_MODULATOR
+            vfoInfo->Modulation == MODULATION_CW ||
+    #endif
+            vfoInfo->Modulation == MODULATION_USB)
+        {
+            const char *ssbName = (displayBandwidth == BANDWIDTH_WIDE) ? "6k" : "2k";
+
+            if (gSetting_set_gui)
+                UI_PrintStringSmallNormal(ssbName, LCD_WIDTH + 80, 0, line + 1);
+            else
+                GUI_DisplaySmallest(ssbName, 91, line == 0 ? 17 : 49, false, true);
+        }
+        else
+#endif
+        {
         #ifdef ENABLE_FEAT_F4HWN_NARROWER
-            // SetNFM upgrades FM's narrow to 6.25k, so "N+" says something there.
-            // It does not apply to CW/SSB, whose narrow is already 2k - showing
-            // N+ on those would claim an upgrade that never happened.
+            // SetNFM upgrades FM's narrow to 6.25k, so "N+" says something
+            // here. CW/SSB never reach this branch when the extra filter is
+            // compiled in; without it they share the FM widths and the upgrade
+            // applies to them too, so no modulation test is needed either way.
             bool narrower = 0;
 
-            if (displayBandwidth == BANDWIDTH_NARROW && gSetting_set_nfm == 1
-        #ifdef ENABLE_EXTRA_FILTER
-                && vfoInfo->Modulation != MODULATION_USB
-            #ifdef ENABLE_CW_MODULATOR
-                && vfoInfo->Modulation != MODULATION_CW
-            #endif
-        #endif
-               )
+            if (displayBandwidth == BANDWIDTH_NARROW && gSetting_set_nfm == 1)
             {
                 narrower = 1;
             }
@@ -2303,6 +2318,7 @@ void UI_DisplayMain(void)
                 GUI_DisplaySmallest(bandWidthNames[displayBandwidth], 91, line == 0 ? 17 : 49, false, true);
             }
         #endif
+        }
 #else
         if (vfoInfo->CHANNEL_BANDWIDTH == BANDWIDTH_NARROW)
             UI_PrintStringSmallNormal("N", LCD_WIDTH + 70, 0, line + 1);

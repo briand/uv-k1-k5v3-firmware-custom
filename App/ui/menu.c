@@ -250,8 +250,8 @@ const char* const gSubMenu_W_N[] =
 #ifdef ENABLE_EXTRA_FILTER
 const char* const gSubMenu_W_N_SSB[] =
 {
-	"6k SSB",
-	"2k CW",
+	"6.25k",
+	"2.0k",
 };
 #endif
 
