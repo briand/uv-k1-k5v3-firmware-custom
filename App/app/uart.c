@@ -868,6 +868,23 @@ void UART_HandleCommand(uint32_t Port)
     #endif
 }
 
+#if defined(ENABLE_UART)
+// Resynchronize the hardware-UART command parser with a freshly re-initialized
+// DMA channel. UART_Init() rebuilds DMA1 channel 2, which restarts the write
+// position at 0, but gUART_WriteIndex (the read position) is static and would
+// otherwise still point into the middle of the previous session's bytes. Stale
+// bytes above the reset write position can contain an 0xAB 0xCD pair, and the
+// "CommandLength < (Size + 8)" path in UART_IsCommandAvailable() returns without
+// resyncing the pointer - so the parser parks on the bogus frame and ignores
+// real traffic landing at index 0. Call this whenever UART_Init() is re-run
+// after boot (e.g. handing PA10 back from the CW port-ground mode).
+void UART_ResetRxParser(void)
+{
+    gUART_WriteIndex = 0;
+    memset(UART_DMA_Buffer, 0, sizeof(UART_DMA_Buffer));
+}
+#endif
+
 void UART_ServiceCommands(void)
 {
 #ifdef ENABLE_USB

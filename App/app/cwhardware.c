@@ -32,6 +32,7 @@
 #include "driver/systick.h"
 #include "driver/i2c.h"
 #include "driver/uart.h"
+#include "app/uart.h"
 #include "driver/millis.h"
 #ifdef ENABLE_USB
 #include "driver/vcp.h"
@@ -550,8 +551,12 @@ void CW_ConfigurePortGround(bool enable)
         LL_GPIO_SetPinPull(GPIOA, LL_GPIO_PIN_10, LL_GPIO_PULL_DOWN);
         LL_GPIO_ResetOutputPin(GPIOA, LL_GPIO_PIN_10); // drive low (ground)
     } else {
-        // Restore UART configuration which will reassign PA10 to AF1 (USART1_RX)
+        // Restore UART configuration which will reassign PA10 to AF1 (USART1_RX),
+        // re-enable USART1 and restart the RX DMA channel.
         UART_Init();
+        // UART_Init() restarts the DMA write position at 0; resync the command
+        // parser's read pointer or it stays parked in last session's stale bytes.
+        UART_ResetRxParser();
     }
 #if ENABLE_KEYER_DEBUG
     char buf[50];
