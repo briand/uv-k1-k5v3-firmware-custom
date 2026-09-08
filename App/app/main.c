@@ -138,11 +138,11 @@ static void processFKeyFunction(const KEY_Code_t Key, const bool beep)
 
     switch (Key) {
         case KEY_0:
-            #ifdef ENABLE_FMRADIO
-                ACTION_FM();
-			#else
-				ACTION_SwitchDemodul();
-            #endif
+            // Plain long press, and F + short press, rotate the modulation mode.
+            // FM broadcast listening lives on F + LONG press instead
+            // (processFKeyLongFunction) so that enabling ENABLE_FMRADIO doesn't
+            // cost us the demodulation shortcut.
+            ACTION_SwitchDemodul();
             break;
 
         case KEY_1:
@@ -468,6 +468,12 @@ static void processFKeyLongFunction(const KEY_Code_t Key)
     gBeepToPlay = BEEP_1KHZ_60MS_OPTIONAL;
 
     switch (Key) {
+#ifdef ENABLE_FMRADIO
+        case KEY_0:
+            ACTION_FM();
+            break;
+#endif
+
         case KEY_4:
             ACTION_SwitchFilter();
             break;

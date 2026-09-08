@@ -587,7 +587,13 @@ void ACTION_Handle(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 #ifdef ENABLE_FMRADIO
 void ACTION_FM(void)
 {
-    if (gCurrentFunction != FUNCTION_TRANSMIT && gCurrentFunction != FUNCTION_MONITOR)
+    // Only an in-progress transmission blocks the toggle. FUNCTION_MONITOR used
+    // to block it too, but ENABLE_CW_MODULATOR forces gMonitor (and therefore
+    // FUNCTION_MONITOR) on for CW and USB, which made this a silent no-op in
+    // exactly the modes this firmware spends most of its time in. Monitor is
+    // torn down below anyway: gMonitor is cleared and RADIO_SetupRegisters(true)
+    // puts us back in FUNCTION_FOREGROUND before FM_Start().
+    if (gCurrentFunction != FUNCTION_TRANSMIT)
     {
         gInputBoxIndex = 0;
 
@@ -596,13 +602,16 @@ void ACTION_FM(void)
             gFlagReconfigureVfos  = true;
             gRequestDisplayScreen = DISPLAY_MAIN;
 
+#ifdef ENABLE_CW_MODULATOR
+            // Re-arm the keyer if we're returning to a CW channel.
+            CW_KeyerReconfigure(gTxVfo->Modulation == MODULATION_CW);
+#endif
+
 #ifdef ENABLE_VOX
             gVoxResumeCountdown = 80;
 #endif
             return;
         }
-
-        gMonitor = false;
 
         if (gScanStateDir != SCAN_OFF) {
             // Stop the channel/frequency scan before switching to the FM radio.
@@ -611,6 +620,19 @@ void ACTION_FM(void)
         }
 
         RADIO_SelectVfos();
+
+        // Both of these have to happen AFTER RADIO_SelectVfos(), which re-asserts
+        // gMonitor and re-arms the keyer for CW/USB channels - doing them first
+        // just gets the work undone.
+        gMonitor = false;
+#ifdef ENABLE_CW_MODULATOR
+        // Park the keyer before handing the radio to the BK1080. CW_AppUpdate()
+        // keys on gTxVfo->Modulation, not on gFmRadioMode, so an armed keyer
+        // would otherwise still be polling paddles - and still holding PA10 -
+        // while the user is listening to broadcast FM.
+        CW_KeyerReconfigure(false);
+#endif
+
         RADIO_SetupRegisters(true);
 
         FM_Start();
