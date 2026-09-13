@@ -51,6 +51,7 @@
 
 #ifdef ENABLE_CW_MODULATOR
 #include "app/cwkeyer.h"
+#include "app/menu.h"
 
     #ifdef ENABLE_CODE_PRACTICE
         #include "app/cpo.h"
@@ -78,9 +79,14 @@ static void ACTION_RepeatCWMsg1(void);
 static void ACTION_RepeatCWMsg2(void);
 static void ACTION_RepeatCWMsg3(void);
 static void ACTION_RepeatCWMsg4(void);
-#ifdef ENABLE_CODE_PRACTICE
+static void ACTION_CwBreakin(void);
+static void ACTION_CwWpmUp(void);
+static void ACTION_CwWpmDn(void);
+static void ACTION_CwKeySource(void);
+static void ACTION_CwCross(void);
+    #ifdef ENABLE_CODE_PRACTICE
 static void ACTION_CPO(void);
-#endif
+    #endif
 #endif
 
 void (*action_opt_table[])(void) = {
@@ -138,6 +144,12 @@ void (*action_opt_table[])(void) = {
 	[ACTION_OPT_REPEAT_CWMSG2] = &ACTION_RepeatCWMsg2,
 	[ACTION_OPT_REPEAT_CWMSG3] = &ACTION_RepeatCWMsg3,
 	[ACTION_OPT_REPEAT_CWMSG4] = &ACTION_RepeatCWMsg4,
+	[ACTION_OPT_CW_BREAKIN] = &ACTION_CwBreakin,
+	[ACTION_OPT_CW_WPM_UP] = &ACTION_CwWpmUp,
+	[ACTION_OPT_CW_WPM_DN] = &ACTION_CwWpmDn,
+	[ACTION_OPT_CW_KEY_SRC] = &ACTION_CwKeySource,
+	[ACTION_OPT_CW_CROSS] = &ACTION_CwCross,
+	[ACTION_OPT_CW_FILTER] = &ACTION_SwitchFilter,
     #ifdef ENABLE_CODE_PRACTICE
     [ACTION_OPT_CPO] = &ACTION_CPO,
 	#endif
@@ -608,6 +620,62 @@ static void ACTION_RepeatCWMsg3(void)
 static void ACTION_RepeatCWMsg4(void)
 {
 	CW_StartMacroPlayback(3, true);
+}
+
+static void ACTION_CwBreakin(void)
+{
+	gEeprom.CW_BREAKIN_ENABLE = !gEeprom.CW_BREAKIN_ENABLE;
+	gRequestSaveSettings = true;
+	gUpdateStatus        = true;
+}
+
+static void ACTION_CwWpmUp(void)
+{
+	if (gEeprom.CW_KEY_WPM <= 42) {
+		gEeprom.CW_KEY_WPM += 2;
+		CW_UpdateWPM();
+		gRequestSaveSettings = true;
+		gUpdateDisplay       = true;
+	}
+}
+
+static void ACTION_CwWpmDn(void)
+{
+	if (gEeprom.CW_KEY_WPM >= 12) {
+		gEeprom.CW_KEY_WPM -= 2;
+		CW_UpdateWPM();
+		gRequestSaveSettings = true;
+		gUpdateDisplay       = true;
+	}
+}
+
+static void ACTION_CwKeySource(void)
+{
+	// Cycle to the next menu selection; on stuck-key validation, revert to
+	// the safe handkey default, mirroring the menu's MENU_CW_KEY_INPUT case.
+	const uint8_t next = (gEeprom.CW_KEY_INPUT_MENU + 1) % ARRAY_SIZE(CW_KEY_INPUT_menu_to_bitmap);
+	const uint8_t new_mode = CW_KEY_INPUT_menu_to_bitmap[next];
+
+	if (!CW_CheckKeyerInputs(new_mode)) {
+		gCwKeyInputCheckFailed    = true;
+		gEeprom.CW_KEY_INPUT      = CW_KEY_INPUT_HANDKEY;
+		gEeprom.CW_KEY_INPUT_MENU = 0;
+	} else {
+		gCwKeyInputCheckFailed    = false;
+		gEeprom.CW_KEY_INPUT      = new_mode;
+		gEeprom.CW_KEY_INPUT_MENU = next;
+	}
+
+	gRequestSaveSettings = true;
+	gFlagReconfigureVfos = true;
+	gUpdateDisplay       = true;
+}
+
+static void ACTION_CwCross(void)
+{
+	gCW_CrossMode = !gCW_CrossMode;
+	gFlagReconfigureVfos = true;
+	gUpdateDisplay       = true;
 }
 #endif
 
