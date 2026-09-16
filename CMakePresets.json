@@ -233,7 +233,7 @@
                 "TARGET": "nr7y.cw",
                 "VERSION_STRING_1": "v5.9.0",
                 "VERSION_STRING_2": "",
-                "ENABLE_FMRADIO": false,
+                "ENABLE_FMRADIO": true,
                 "ENABLE_FEAT_F4HWN_GMRS_FRS_MURS": false,
                 "ENABLE_FEAT_NR7Y_CW": true,
                 "ENABLE_FEAT_NR7Y_CPO": true,
