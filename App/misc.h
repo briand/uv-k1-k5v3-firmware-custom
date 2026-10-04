@@ -519,6 +519,7 @@ static inline bool SerialConfigInProgress() { return gSerialConfigCountDown_500m
 	extern volatile bool                  gCW_CrossMode;
     extern volatile uint32_t     gCW_SuspendCounter_1ms;
 	extern volatile uint16_t      gCW_TxDisplayHoldoff_10ms;
+	extern uint8_t               gCW_KeyerModePopup_500ms;  // main screen keyer mode popup, counts down to hide
 	extern const uint16_t        cw_suspend_limit_1ms;
 
 	// CW macro/keyer state used by app loop

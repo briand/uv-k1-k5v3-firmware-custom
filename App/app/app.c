@@ -2122,6 +2122,14 @@ void APP_TimeSlice500ms(void)
 			CW_StartMacroPlayback(gCW_PlaybackMacroIndex, true);
 		}
 	}
+
+	// Keyer mode popup: hide after timeout, or as soon as we start transmitting
+	if (gCW_KeyerModePopup_500ms > 0) {
+		if (gCurrentFunction == FUNCTION_TRANSMIT || --gCW_KeyerModePopup_500ms == 0) {
+			gCW_KeyerModePopup_500ms = 0;
+			gUpdateDisplay = true;
+		}
+	}
 #endif
 
     if (gReducedService)

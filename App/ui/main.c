@@ -883,6 +883,26 @@ void DrawCWDecodeBar(void)
 
 	ST7565_BlitLine(line);
 }
+
+// Boxed popup over the middle of the main screen showing the keyer mode just selected.
+// Covers lines 1-5 between x=7 and x=120, clear of the RX blink marker at x=0-6.
+static void DrawCWKeyerModePopup(void)
+{
+	static const char *const modeNames[] = {
+		[CW_IAMBIC_MODE_A]        = "IAMBIC A",
+		[CW_IAMBIC_MODE_B]        = "IAMBIC B",
+		[CW_KEYER_MODE_ULTIMATIC] = "ULTIMATIC",
+		[CW_IAMBIC_MODE_BUG]      = "BUG",
+	};
+
+	for (uint8_t line = 1; line <= 5; line++)
+		memset(gFrameBuffer[line] + 7, 0, 114);
+
+	UI_DrawRectangleBuffer(gFrameBuffer, 8, 9, 119, 46, true);
+	UI_PrintStringSmallBold("CW KEYER", 9, 118, 2);
+	if (gEeprom.CW_KEYER_MODE < ARRAY_SIZE(modeNames))
+		UI_PrintString(modeNames[gEeprom.CW_KEYER_MODE], 9, 118, 3, 8);
+}
 #endif
 
 #ifdef ENABLE_FEAT_F4HWN_AUDIO_SCOPE
@@ -2394,6 +2414,12 @@ void UI_DisplayMain(void)
         UI_PrintScanRangeCss(String, 2, 46, 6);
 #endif
 
+#ifdef ENABLE_CW_MODULATOR
+    const bool showKeyerModePopup = gCW_KeyerModePopup_500ms > 0 && gCurrentFunction != FUNCTION_TRANSMIT;
+    if (showKeyerModePopup && center_line == CENTER_LINE_NONE)
+        center_line = CENTER_LINE_CW_KEYER_POPUP;   // popup covers the middle line, keep the RSSI refresh off it
+#endif
+
     if (center_line == CENTER_LINE_NONE)
     {   // we're free to use the middle line
 
@@ -2578,6 +2604,11 @@ void UI_DisplayMain(void)
     //#ifdef ENABLE_FEAT_F4HWN_RESCUE_OPS
     //}
     //#endif
+#endif
+
+#ifdef ENABLE_CW_MODULATOR
+    if (showKeyerModePopup)
+        DrawCWKeyerModePopup();
 #endif
 
     ST7565_BlitFullScreen();

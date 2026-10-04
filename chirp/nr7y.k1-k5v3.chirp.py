@@ -873,8 +873,8 @@ _NR7Y_CW_KEYER_MODES = [
 # the feature is compiled out, which is why those only need filtering out of the
 # displayed choices -- but the RESCUE_OPS block shifts everything after it, so the
 # index mapping has to be assembled per build instead of hardcoded.  With
-# RESCUE_OPS off the CW actions sit at 21-28 and CODE PRACTICE at 29; with it on
-# they are 23-30 and 31.
+# RESCUE_OPS off the CW actions sit at 21-28, CODE PRACTICE at 29 and CW KEYER
+# MODE at 30; with it on they are 23-30, 31 and 32.
 _NR7Y_ACTIONS_COMMON = [
     "NONE",            # 0:  ACTION_OPT_NONE
     "FLASHLIGHT",      # 1:  ACTION_OPT_FLASHLIGHT
@@ -918,6 +918,7 @@ _NR7Y_ACTIONS_CW = [
     # practice separately and every CW preset enables both, so it rides along
     # with the CW block.
     "CODE PRACTICE",
+    "CW KEYER MODE",
 ]
 
 # ENABLE_FEAT_F4HWN_BEAM, then ENABLE_FEAT_F4HWN_RXTX_LOG, then (since F4HWN

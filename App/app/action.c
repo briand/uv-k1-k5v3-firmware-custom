@@ -84,6 +84,7 @@ static void ACTION_RepeatCWMsg1(void);
 static void ACTION_RepeatCWMsg2(void);
 static void ACTION_RepeatCWMsg3(void);
 static void ACTION_RepeatCWMsg4(void);
+static void ACTION_CWKeyerMode(void);
 #ifdef ENABLE_CODE_PRACTICE
 static void ACTION_CPO(void);
 #endif
@@ -147,6 +148,7 @@ void (*const action_opt_table[])(void) = {
     #ifdef ENABLE_CODE_PRACTICE
     [ACTION_OPT_CPO] = &ACTION_CPO,
 	#endif
+	[ACTION_OPT_CW_KEYER_MODE] = &ACTION_CWKeyerMode,
 #endif
 
 #ifdef ENABLE_FEAT_F4HWN
@@ -731,6 +733,21 @@ static void ACTION_RepeatCWMsg3(void)
 static void ACTION_RepeatCWMsg4(void)
 {
 	CW_StartMacroPlayback(3, true);
+}
+
+// Cycle Iambic A -> Iambic B -> Ultimatic -> Bug, same effect as the CWkmod menu
+static void ACTION_CWKeyerMode(void)
+{
+	if (gEeprom.CW_KEYER_MODE >= CW_IAMBIC_MODE_BUG)
+		gEeprom.CW_KEYER_MODE = CW_IAMBIC_MODE_A;
+	else
+		gEeprom.CW_KEYER_MODE++;
+
+	CW_KeyerResetRuntime();  // avoid stale squeeze/tracker state bleeding across mode switch
+	gRequestSaveSettings = true;
+
+	gCW_KeyerModePopup_500ms = 4;  // 2 seconds
+	gUpdateDisplay = true;
 }
 #endif
 
