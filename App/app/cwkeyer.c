@@ -342,6 +342,10 @@ void CW_StartProperRoger(void)
     s_play_long_dah = true;
     CW_BeginPlayback(false);
 
+    // Skip the char-gap lead-in so the first dit keys on the next poll. Reaching
+    // the side key already takes longer than a char gap after any keyed element.
+    s_elem_start_count = millis() - s_char_gap_count;
+
     // Keep what was keyed before so the R reads as a reply to it
     s_play_space_pending = (gCW_TX_DisplayIndex > 0);
 }
