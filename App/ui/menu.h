@@ -177,6 +177,7 @@ enum
 	MENU_CW_MSG_REPEAT,
 	MENU_CW_ROGER_DITS,
 	MENU_CW_BKIN,
+	MENU_CW_HANG,
 #endif
 #if defined(ENABLE_FEAT_F4HWN) && defined(ENABLE_FEAT_F4HWN_LOGO_SAV)
     MENU_SET_SAV
@@ -300,6 +301,9 @@ extern const t_sidefunction gSubMenu_SIDEFUNCTIONS[];
 extern const char		gSubmenu_SIDETONE[9][6];
 extern const char*        gSubMenu_CW_KEY_BUTTON[3];
 extern const char*        gSubMenu_CW_KEY_PORT[3];
+#ifdef ENABLE_CW_MODULATOR
+extern const char*        gSubMenu_CW_KEY_INPUT[11];
+#endif
 
 extern bool              gIsInSubMenu;
                          

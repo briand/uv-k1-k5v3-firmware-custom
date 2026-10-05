@@ -23,6 +23,7 @@
 #include "app/cwapp.h"
 #include "app/cwkeyer.h"
 #include "app/cwmacro.h"
+#include "app/cwpopup.h"
 #include "app/app.h"
 #include "app/menu.h"
 #include "audio.h"
@@ -96,6 +97,10 @@ void CW_AppUpdate(void)
 		action = CW_PlaybackHandleState();
 	else
 		action = CW_HandleState();
+
+	// keying confirms and closes a settings popup (break-in off never enters TX)
+	if (action == CW_ACTION_CARRIER_ON)
+		CW_Popup_OnKeying();
 
 	// ---- local-only sidetone path (no RF) ----
 	// Used when recording a macro, reading ADC, breakin disabled, or code practice
@@ -201,7 +206,7 @@ void CW_AppUpdate(void)
 	// ---- suspend timeout → end TX ----
 	if (gCW_State == CW_SUSPENDED)
 	{
-		if (millis_since(gCW_SuspendCounter_1ms) >= cw_suspend_limit_1ms) {
+		if (millis_since(gCW_SuspendCounter_1ms) >= gEeprom.CW_HANG_10MS * 10u) {
             gCW_SuspendCounter_1ms = 0;
             gCW_TxDisplayHoldoff_10ms = 200;
             gPttIsPressed = false;

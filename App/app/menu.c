@@ -449,6 +449,11 @@ int MENU_GetLimits(uint8_t menu_id, int32_t *pMin, int32_t *pMax)
 			*pMax = 1;  // on
 			break;
 
+		case MENU_CW_HANG:
+			*pMin = CW_HANG_10MS_MIN;  // 10 ms steps
+			*pMax = CW_HANG_10MS_MAX;
+			break;
+
 #endif
 #ifdef ENABLE_FEAT_F4HWN_SLEEP
         case MENU_SET_OFF:
@@ -1142,6 +1147,10 @@ void MENU_AcceptSetting(void)
 			gEeprom.CW_BREAKIN_ENABLE = gSubMenuSelection;  // 0=off, 1=on
 			break;
 
+		case MENU_CW_HANG:
+			gEeprom.CW_HANG_10MS = gSubMenuSelection;
+			break;
+
 		case MENU_CW_KEY_INPUT:
 			// Map menu selection (0-10) to bit-mapped value
 			{
@@ -1702,6 +1711,10 @@ void MENU_ShowCurrentSetting(void)
 			break;
 		case MENU_CW_BKIN:
 			gSubMenuSelection = gEeprom.CW_BREAKIN_ENABLE;
+			break;
+
+		case MENU_CW_HANG:
+			gSubMenuSelection = gEeprom.CW_HANG_10MS;
 			break;
 
 		case MENU_CW_KEY_INPUT:

@@ -412,6 +412,9 @@ gEeprom.FreqChannel[1]   = IS_FREQ_CHANNEL(Data16[5]) ? Data16[5] : (FREQ_CHANNE
 	gEeprom.CW_MESSAGE_REPEAT_DELAY = (Data[3] < 0x80) ? (Data[3] & 0x7F) : 4;  // default 4s
 	// Data[5]: proper roger dah length in dits. 0xFF (unused since v1.0.0) or out of range = default
 	gEeprom.CW_ROGER_DAH_DITS = (Data[5] >= CW_ROGER_DAH_DITS_MIN && Data[5] <= CW_ROGER_DAH_DITS_MAX) ? Data[5] : CW_ROGER_DAH_DITS_DEFAULT;
+	// Data[7]: break-in hang time in 10 ms units. 0xFF (unused since v1.0.0) or out of range = 300 ms.
+	// Byte 6 is skipped on purpose: pre-1.0 betas kept an ADC low byte there that reads as a valid time.
+	gEeprom.CW_HANG_10MS = (Data[7] >= CW_HANG_10MS_MIN && Data[7] <= CW_HANG_10MS_MAX) ? Data[7] : CW_HANG_10MS_DEFAULT;
 #endif
 
     // 0F40..0F47
@@ -1127,7 +1130,7 @@ void SETTINGS_SaveSettings(void)
 	State[4] = (uint8_t)gEeprom.CW_KEYER_MODE;  // keyer mode: 0=A, 1=B, 2=Ultimatic, 3=Bug
 	State[5] = gEeprom.CW_ROGER_DAH_DITS;  // proper roger dah length in dits
 	State[6] = 0xFF;  // unused (was CW_ADC_CABLE_20K low)
-	State[7] = 0xFF;  // unused (was CW_ADC_CABLE_20K high)
+	State[7] = gEeprom.CW_HANG_10MS;  // break-in hang time in 10 ms units
     PY25Q16_WriteBuffer(0x00A140, SecBuf, 0x08, false);
 #endif
     // ---------------------

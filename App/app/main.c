@@ -38,6 +38,7 @@
 #include "app/cpo.h"
 #endif
 #ifdef ENABLE_CW_MODULATOR
+#include "app/cwpopup.h"
 #include "app/cwrit.h"
 #endif
 
@@ -1142,7 +1143,7 @@ void MAIN_ProcessKeys(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 #endif
 
 #ifdef ENABLE_CW_MODULATOR
-    if (CW_RIT_ProcessKey(Key, bKeyPressed, bKeyHeld))
+    if (CW_Popup_ProcessKey(Key, bKeyPressed, bKeyHeld) || CW_RIT_ProcessKey(Key, bKeyPressed, bKeyHeld))
         return;
 #endif
 

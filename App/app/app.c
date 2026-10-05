@@ -86,6 +86,7 @@
 #include "ui/ui.h"
 #ifdef ENABLE_CW_MODULATOR
 #include "app/cwkeyer.h"
+#include "app/cwpopup.h"
 #include "app/cwrit.h"
 #endif
 #ifdef ENABLE_CODE_PRACTICE
@@ -2124,14 +2125,7 @@ void APP_TimeSlice500ms(void)
 		}
 	}
 
-	// Keyer mode popup: hide after timeout, or as soon as we start transmitting
-	if (gCW_KeyerModePopup_500ms > 0) {
-		if (gCurrentFunction == FUNCTION_TRANSMIT || --gCW_KeyerModePopup_500ms == 0) {
-			gCW_KeyerModePopup_500ms = 0;
-			gUpdateDisplay = true;
-		}
-	}
-
+	CW_Popup_Tick500ms();
 	CW_RIT_Tick500ms();
 #endif
 

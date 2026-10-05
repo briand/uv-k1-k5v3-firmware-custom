@@ -34,6 +34,7 @@
 #ifdef ENABLE_CW_MODULATOR
 	#include "app/cwmacro.h"
 	#include "app/cwkeyer.h"
+	#include "app/cwpopup.h"
 	#include "app/cwrit.h"
     #include "driver/millis.h"
 #endif
@@ -51,6 +52,7 @@
 #include "ui/helper.h"
 #include "ui/inputbox.h"
 #include "ui/main.h"
+#include "ui/menu.h"
 #include "ui/ui.h"
 #include "audio.h"
 #include "menu.h"
@@ -885,9 +887,56 @@ void DrawCWDecodeBar(void)
 	ST7565_BlitLine(line);
 }
 
-// Boxed popup over the middle of the main screen showing the keyer mode just selected.
+static const char *CWPopupFilterName(void)
+{
+#ifdef ENABLE_EXTRA_FILTER
+	// CW and SSB read the filter bit as 6.25k / 2.0k, see RADIO_ResolveFilter()
+	if (gTxVfo->Modulation == MODULATION_CW || gTxVfo->Modulation == MODULATION_USB)
+		return (gTxVfo->CHANNEL_BANDWIDTH == BANDWIDTH_WIDE) ? "6k" : "2k";
+#endif
+
+	switch (gTxVfo->CHANNEL_BANDWIDTH) {
+		case BANDWIDTH_NARROW:
+#ifdef ENABLE_FEAT_F4HWN_NARROWER
+			if (gSetting_set_nfm == 1)
+				return "NARROW+";
+#endif
+			return "NARROW";
+		default:
+			return "WIDE";
+	}
+}
+
+// Menu name split over two rows: all but its last line on the first, the last line below
+static void DrawCWPopupKeyInput(uint8_t index)
+{
+	char row[20];
+	const char *name = gSubMenu_CW_KEY_INPUT[index];
+	const char *last = strrchr(name, '\n');
+	const size_t len = last ? (size_t)(last - name) : strlen(name);
+
+	memcpy(row, name, len);
+	row[len] = '\0';
+	for (char *p = row; *p; p++)
+		if (*p == '\n')
+			*p = ' ';
+
+	UI_PrintStringSmallNormal(row, 9, 118, 3);
+	if (last)
+		UI_PrintStringSmallNormal(last + 1, 9, 118, 4);
+}
+
+// 7 px wide, 4 px tall arrowhead with its tip at (x, y)
+static void DrawCWPopupArrow(uint8_t x, uint8_t y, bool up)
+{
+	for (int8_t row = 0; row < 4; row++)
+		for (int8_t dx = -row; dx <= row; dx++)
+			UI_DrawPixelBuffer(gFrameBuffer, x + dx, up ? y + row : y - row, true);
+}
+
+// Boxed popup over the middle of the main screen for the CW setting a key action just changed.
 // Covers lines 1-5 between x=7 and x=120, clear of the RX blink marker at x=0-6.
-static void DrawCWKeyerModePopup(void)
+static void DrawCWPopup(void)
 {
 	static const char *const modeNames[] = {
 		[CW_IAMBIC_MODE_A]        = "IAMBIC A",
@@ -896,13 +945,55 @@ static void DrawCWKeyerModePopup(void)
 		[CW_IAMBIC_MODE_BUG]      = "BUG",
 	};
 
+	const CW_PopupKind_t kind = CW_Popup_Kind();
+	char        value[12];
+	const char *title;
+	const char *text = value;  // big-font value; NULL for the two-row key input layout
+
+	switch (kind) {
+		case CW_POPUP_KEYER_MODE:
+			title = "CW KEYER";
+			text  = (gEeprom.CW_KEYER_MODE < ARRAY_SIZE(modeNames)) ? modeNames[gEeprom.CW_KEYER_MODE] : "";
+			break;
+		case CW_POPUP_SPEED:
+			title = "CW SPEED";
+			sprintf(value, "%u WPM", gEeprom.CW_KEY_WPM);
+			break;
+		case CW_POPUP_FILTER:
+			title = "FILTER";
+			text  = CWPopupFilterName();
+			break;
+		case CW_POPUP_BREAK_IN:
+			title = "BREAK-IN";
+			text  = gEeprom.CW_BREAKIN_ENABLE ? "ON" : "OFF";
+			break;
+		case CW_POPUP_KEY_INPUT:
+		case CW_POPUP_KEY_STUCK:
+			title = (kind == CW_POPUP_KEY_STUCK) ? "KEY STUCK" : "KEY INPUT";
+			text  = NULL;
+			break;
+		default:
+			return;
+	}
+
 	for (uint8_t line = 1; line <= 5; line++)
 		memset(gFrameBuffer[line] + 7, 0, 114);
 
 	UI_DrawRectangleBuffer(gFrameBuffer, 8, 9, 119, 46, true);
-	UI_PrintStringSmallBold("CW KEYER", 9, 118, 2);
-	if (gEeprom.CW_KEYER_MODE < ARRAY_SIZE(modeNames))
-		UI_PrintString(modeNames[gEeprom.CW_KEYER_MODE], 9, 118, 3, 8);
+	UI_PrintStringSmallBold(title, 9, 118, 2);
+
+	if (text)
+		UI_PrintString(text, 9, 118, 3, 8);
+	else
+		DrawCWPopupKeyInput(CW_Popup_KeyInput());
+
+	if (kind == CW_POPUP_SPEED) {
+		// Each arrow sits on the side of the key that does it. The left key (KEY_UP) speeds
+		// up with UP/DOWN navigation and slows down with the UV-K1's LEFT/RIGHT navigation.
+		const bool leftIsFaster = gEeprom.SET_NAV;
+		DrawCWPopupArrow(17,  leftIsFaster ? 28 : 31, leftIsFaster);
+		DrawCWPopupArrow(110, leftIsFaster ? 31 : 28, !leftIsFaster);
+	}
 }
 #endif
 
@@ -2450,9 +2541,9 @@ void UI_DisplayMain(void)
 #endif
 
 #ifdef ENABLE_CW_MODULATOR
-    const bool showKeyerModePopup = gCW_KeyerModePopup_500ms > 0 && gCurrentFunction != FUNCTION_TRANSMIT;
-    if (showKeyerModePopup && center_line == CENTER_LINE_NONE)
-        center_line = CENTER_LINE_CW_KEYER_POPUP;   // popup covers the middle line, keep the RSSI refresh off it
+    const bool showCWPopup = CW_Popup_Kind() != CW_POPUP_NONE && gCurrentFunction != FUNCTION_TRANSMIT;
+    if (showCWPopup && center_line == CENTER_LINE_NONE)
+        center_line = CENTER_LINE_CW_POPUP;   // popup covers the middle line, keep the RSSI refresh off it
 #endif
 
     if (center_line == CENTER_LINE_NONE)
@@ -2642,8 +2733,8 @@ void UI_DisplayMain(void)
 #endif
 
 #ifdef ENABLE_CW_MODULATOR
-    if (showKeyerModePopup)
-        DrawCWKeyerModePopup();
+    if (showCWPopup)
+        DrawCWPopup();
 #endif
 
     ST7565_BlitFullScreen();

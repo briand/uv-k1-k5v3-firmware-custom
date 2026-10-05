@@ -870,6 +870,12 @@ _NR7Y_CW_ROGER_DITS_MIN = 3
 _NR7Y_CW_ROGER_DITS_MAX = 20
 _NR7Y_CW_ROGER_DITS_DEFAULT = 7
 
+# Break-in hang time in 10 ms units (full byte at _NR7Y_CW_SETTINGS_ADDR+7),
+# mirrors CW_HANG_10MS_* in App/settings.h
+_NR7Y_CW_HANG_10MS_MIN = 1
+_NR7Y_CW_HANG_10MS_MAX = 200
+_NR7Y_CW_HANG_10MS_DEFAULT = 30
+
 # Extended key actions for NR7Y firmware with CW modulator, mirroring
 # App/settings.h enum ACTION_OPT_t.
 #
@@ -879,9 +885,9 @@ _NR7Y_CW_ROGER_DITS_DEFAULT = 7
 # the feature is compiled out, which is why those only need filtering out of the
 # displayed choices -- but the RESCUE_OPS block shifts everything after it, so the
 # index mapping has to be assembled per build instead of hardcoded.  With
-# RESCUE_OPS off the CW actions sit at 21-28, CODE PRACTICE at 29, CW KEYER MODE
-# at 30, PROPER ROGER at 31 and RIT/XIT ADJUST at 32; with it on they are 23-30,
-# 31, 32, 33 and 34.
+# RESCUE_OPS off the CW actions sit at 21-28, CODE PRACTICE at 29, then CW KEYER
+# MODE, PROPER ROGER, RIT/XIT ADJUST, CW SPEED, FILTER WIDTH, CW KEY INPUT and CW
+# BREAK-IN at 30-36; with it on everything from the CW actions moves up by 2.
 _NR7Y_ACTIONS_COMMON = [
     "NONE",            # 0:  ACTION_OPT_NONE
     "FLASHLIGHT",      # 1:  ACTION_OPT_FLASHLIGHT
@@ -928,6 +934,10 @@ _NR7Y_ACTIONS_CW = [
     "CW KEYER MODE",
     "PROPER ROGER",
     "RIT/XIT ADJUST",
+    "CW SPEED",
+    "FILTER WIDTH",
+    "CW KEY INPUT",
+    "CW BREAK-IN",
 ]
 
 # ENABLE_FEAT_F4HWN_BEAM, then ENABLE_FEAT_F4HWN_RXTX_LOG, then (since F4HWN
@@ -4171,6 +4181,19 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
         except Exception as e:
             LOG.error("CW break-in: %s", e)
 
+        # Break-in hang time
+        try:
+            hang = self._get_cw_hang_ms()
+            rs_hang = RadioSetting("cw_hang_ms", "Break-in Hang Time (ms) (CWhang)",
+                                   RadioSettingValueInteger(_NR7Y_CW_HANG_10MS_MIN * 10,
+                                                            _NR7Y_CW_HANG_10MS_MAX * 10,
+                                                            hang, 10))
+            rs_hang.set_doc("How long TX stays up after the last element before "
+                            "returning to receive (10-2000 ms in 10 ms steps, default 300)")
+            cw.append(rs_hang)
+        except Exception as e:
+            LOG.error("CW hang time: %s", e)
+
         # Message Repeat Delay
         try:
             rd = self._get_cw_repeat_delay()
@@ -4290,6 +4313,8 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
                 self._set_cw_repeat_delay(int(element.value))
             elif name == "cw_roger_dits":
                 self._set_cw_roger_dits(int(element.value))
+            elif name == "cw_hang_ms":
+                self._set_cw_hang_ms(int(element.value))
             elif name.startswith("cw_msg"):
                 # "cw_msg1" → idx 1 … "cw_msg4" → idx 4
                 self._set_cw_msg(int(name[6:]), str(element.value))
@@ -4426,6 +4451,19 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
     def _set_cw_roger_dits(self, dits):
         dits = max(_NR7Y_CW_ROGER_DITS_MIN, min(_NR7Y_CW_ROGER_DITS_MAX, int(dits)))
         self._mmap_set(_NR7Y_CW_SETTINGS_ADDR + 5, dits)
+
+    # -- Break-in hang time (full byte at CW byte 7, 10 ms units) --
+
+    def _get_cw_hang_ms(self):
+        """Return break-in hang time in ms (10-2000)."""
+        b = self._mmap_byte(_NR7Y_CW_SETTINGS_ADDR + 7)
+        if not _NR7Y_CW_HANG_10MS_MIN <= b <= _NR7Y_CW_HANG_10MS_MAX:
+            b = _NR7Y_CW_HANG_10MS_DEFAULT  # blank/invalid EEPROM
+        return b * 10
+
+    def _set_cw_hang_ms(self, ms):
+        units = max(_NR7Y_CW_HANG_10MS_MIN, min(_NR7Y_CW_HANG_10MS_MAX, int(ms) // 10))
+        self._mmap_set(_NR7Y_CW_SETTINGS_ADDR + 7, units)
 
     # ------------------------------------------------------------------ CW macro read/write
 

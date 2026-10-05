@@ -179,6 +179,7 @@ enable_feature(ENABLE_FEAT_NR7Y_CW
     app/cwhardware.c
     app/cwmacro.c
     app/cwrit.c
+    app/cwpopup.c
 )
 
 # Code practice (requires CW)

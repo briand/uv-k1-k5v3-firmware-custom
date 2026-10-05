@@ -94,6 +94,11 @@ typedef enum CW_IambicMode_t CW_IambicMode_t;
 #define CW_ROGER_DAH_DITS_MAX     20
 #define CW_ROGER_DAH_DITS_DEFAULT 7
 
+// Break-in hang time in 10 ms units (CWhang menu): how long TX stays up after the last element
+#define CW_HANG_10MS_MIN          1
+#define CW_HANG_10MS_MAX          200
+#define CW_HANG_10MS_DEFAULT      30
+
 #endif
 
 enum TxLockModes_t {
@@ -203,6 +208,10 @@ enum ACTION_OPT_t {
     ACTION_OPT_CW_KEYER_MODE,
     ACTION_OPT_CW_PROPER_ROGER,
     ACTION_OPT_CW_RIT,
+    ACTION_OPT_CW_SPEED,
+    ACTION_OPT_CW_FILTER,
+    ACTION_OPT_CW_KEY_INPUT,
+    ACTION_OPT_CW_BREAK_IN,
 #endif
 #ifdef ENABLE_FEAT_F4HWN_BEAM
     ACTION_OPT_BEAM,
@@ -397,6 +406,7 @@ typedef struct {
 	bool     			  CW_BREAKIN_ENABLE;    // TX on key
 	uint8_t               CW_MESSAGE_REPEAT_DELAY;  // Repeat delay in seconds
 	uint8_t               CW_ROGER_DAH_DITS;    // proper roger dah length in dits
+	uint8_t               CW_HANG_10MS;         // break-in hang time in 10 ms units
 #endif
 
 } EEPROM_Config_t;
