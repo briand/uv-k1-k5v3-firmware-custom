@@ -19,6 +19,7 @@
 
 #include "am_fix.h"
 #include "app/cwkeyer.h"
+#include "app/cwrit.h"
 #include "app/dtmf.h"
 #ifdef ENABLE_FEAT_F4HWN_RXTX_LOG
     #include "app/rxtx_log.h"
@@ -891,16 +892,11 @@ void RADIO_SetupRegisters(bool switchToForeground)
         else
             Frequency = NoaaFrequencyTable[gNoaaChannel];
     #else
-        Frequency = gRxVfo->pRX->Frequency
-	#if ENABLE_CW_MODULATOR
-		- (gRxVfo->Modulation == MODULATION_CW && !gCW_CrossMode ? gEeprom.CW_TONE_FREQUENCY : 0) // CW BFO offset
-		;
-			// char buf[64];
-			// sprintf_(buf, "RX freq: %d Hz, offset: %d Hz\r\n", gRxVfo->pRX->Frequency * 10, (10 * gEeprom.CW_TONE_FREQUENCY));
-			// UART_Send(buf, strlen(buf));
-	#endif
-	;
+        Frequency = gRxVfo->pRX->Frequency;
     #endif
+	#ifdef ENABLE_CW_MODULATOR
+		Frequency = CW_RIT_RxFrequency(gRxVfo, Frequency);  // CW BFO offset plus RIT
+	#endif
     BK4819_SetFrequency(Frequency);
 
     // Keep the demodulator in sync when retuning without entering RX audio.
@@ -1081,9 +1077,7 @@ void RADIO_SetTxParameters(void)
 
 	uint32_t tx_frequency = gCurrentVfo->pTX->Frequency;
 #ifdef ENABLE_CW_MODULATOR
-	if (gTxVfo->Modulation == MODULATION_CW && gCW_CrossMode) {
-		tx_frequency += gEeprom.CW_TONE_FREQUENCY;
-	}
+	tx_frequency = CW_RIT_TxFrequency(gTxVfo, tx_frequency);  // cross-mode pitch plus XIT
 #endif
 	BK4819_SetFrequency(tx_frequency);
 
@@ -1488,6 +1482,28 @@ void RADIO_PrepareCssTX(void)
 }
 
 #ifdef ENABLE_CW_MODULATOR
+
+void RADIO_CW_ApplyModeFilter(VFO_Info_t *pVfo, ModulationMode_t previous)
+{
+#ifdef ENABLE_EXTRA_FILTER
+	static uint8_t s_widthBeforeCW[2] = {BANDWIDTH_WIDE, BANDWIDTH_WIDE};
+	const unsigned int vfo = (pVfo == &gEeprom.VfoInfo[1]);
+
+	if (pVfo->Modulation == MODULATION_CW && previous != MODULATION_CW) {
+		s_widthBeforeCW[vfo] = pVfo->CHANNEL_BANDWIDTH;
+		pVfo->CHANNEL_BANDWIDTH = BANDWIDTH_NARROW;  // 2.0k in CW, see RADIO_ResolveFilter()
+	}
+	else if (previous == MODULATION_CW && pVfo->Modulation != MODULATION_CW && pVfo->Modulation != MODULATION_USB
+	         && pVfo->CHANNEL_BANDWIDTH == BANDWIDTH_NARROW) {
+		// narrow is 2k only in CW/SSB; FM and AM read the same bit as their own
+		// narrow, so still on CW's 2k default, hand back the width from before CW
+		pVfo->CHANNEL_BANDWIDTH = s_widthBeforeCW[vfo];
+	}
+#else
+	(void)pVfo;
+	(void)previous;
+#endif
+}
 
 void RADIO_CW_BeginResume(void)
 {

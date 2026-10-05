@@ -880,7 +880,8 @@ _NR7Y_CW_ROGER_DITS_DEFAULT = 7
 # displayed choices -- but the RESCUE_OPS block shifts everything after it, so the
 # index mapping has to be assembled per build instead of hardcoded.  With
 # RESCUE_OPS off the CW actions sit at 21-28, CODE PRACTICE at 29, CW KEYER MODE
-# at 30 and PROPER ROGER at 31; with it on they are 23-30, 31, 32 and 33.
+# at 30, PROPER ROGER at 31 and RIT/XIT ADJUST at 32; with it on they are 23-30,
+# 31, 32, 33 and 34.
 _NR7Y_ACTIONS_COMMON = [
     "NONE",            # 0:  ACTION_OPT_NONE
     "FLASHLIGHT",      # 1:  ACTION_OPT_FLASHLIGHT
@@ -926,6 +927,7 @@ _NR7Y_ACTIONS_CW = [
     "CODE PRACTICE",
     "CW KEYER MODE",
     "PROPER ROGER",
+    "RIT/XIT ADJUST",
 ]
 
 # ENABLE_FEAT_F4HWN_BEAM, then ENABLE_FEAT_F4HWN_RXTX_LOG, then (since F4HWN

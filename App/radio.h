@@ -186,6 +186,9 @@ void     RADIO_SendEndOfTransmission(void);
 #ifdef ENABLE_CW_MODULATOR
 void     RADIO_CW_Suspend(void);
 void     RADIO_CW_BeginResume(void);
+// Call after the user changes a VFO's mode: CW comes back on the 2k filter, and
+// leaving CW for FM/AM hands back the width that was in use before CW
+void     RADIO_CW_ApplyModeFilter(VFO_Info_t *pVfo, ModulationMode_t previous);
 #endif
 
 #endif

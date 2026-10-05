@@ -37,6 +37,9 @@
 #ifdef ENABLE_CODE_PRACTICE
 #include "app/cpo.h"
 #endif
+#ifdef ENABLE_CW_MODULATOR
+#include "app/cwrit.h"
+#endif
 
 #include "audio.h"
 #include "board.h"
@@ -972,8 +975,15 @@ static void MAIN_Key_STAR(bool bKeyPressed, bool bKeyHeld)
     }
     
     if (!gWasFKeyPressed) // pressed without the F-key
-    {   
-        if (gScanStateDir == SCAN_OFF 
+    {
+#ifdef ENABLE_CW_MODULATOR
+        // DTMF entry is meaningless in CW, so * opens RIT/XIT adjust instead
+        if (gTxVfo->Modulation == MODULATION_CW && gScanStateDir == SCAN_OFF) {
+            CW_RIT_EnterAdjust();
+            return;
+        }
+#endif
+        if (gScanStateDir == SCAN_OFF
 #ifdef ENABLE_NOAA
             && !IS_NOAA_CHANNEL(gTxVfo->CHANNEL_SAVE)
 #endif
@@ -1078,8 +1088,7 @@ static void MAIN_Key_UP_DOWN(bool bKeyPressed, bool bKeyHeld, int8_t Direction)
                 gTxVfo->freq_config_RX.Frequency = frequency;
                 uint32_t rx_frequency = frequency;
 #ifdef ENABLE_CW_MODULATOR
-				if (gTxVfo->Modulation == MODULATION_CW && !gCW_CrossMode)
-					rx_frequency -= gEeprom.CW_TONE_FREQUENCY; // CW BFO offset (10s of Hz)
+				rx_frequency = CW_RIT_RxFrequency(gTxVfo, rx_frequency); // CW BFO offset plus RIT
 #endif
 				
 				BK4819_SetFrequency(rx_frequency);
@@ -1130,6 +1139,11 @@ void MAIN_ProcessKeys(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
             gBeepToPlay = BEEP_500HZ_60MS_DOUBLE_BEEP_OPTIONAL;
         return;
     }
+#endif
+
+#ifdef ENABLE_CW_MODULATOR
+    if (CW_RIT_ProcessKey(Key, bKeyPressed, bKeyHeld))
+        return;
 #endif
 
     if (gDTMF_InputMode && bKeyPressed && !bKeyHeld) {

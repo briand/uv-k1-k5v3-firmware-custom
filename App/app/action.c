@@ -57,6 +57,7 @@
 
 #ifdef ENABLE_CW_MODULATOR
 #include "app/cwkeyer.h"
+#include "app/cwrit.h"
 
     #ifdef ENABLE_CODE_PRACTICE
         #include "app/cpo.h"
@@ -151,6 +152,7 @@ void (*const action_opt_table[])(void) = {
 	#endif
 	[ACTION_OPT_CW_KEYER_MODE] = &ACTION_CWKeyerMode,
 	[ACTION_OPT_CW_PROPER_ROGER] = &ACTION_CWProperRoger,
+	[ACTION_OPT_CW_RIT] = &CW_RIT_ToggleAdjust,
 #endif
 
 #ifdef ENABLE_FEAT_F4HWN
@@ -357,12 +359,18 @@ void ACTION_SwitchDemodul(void)
 {
     gRequestSaveChannel = 1;
 
+#ifdef ENABLE_CW_MODULATOR
+    const ModulationMode_t previous = gTxVfo->Modulation;
+#endif
+
     gTxVfo->Modulation++;
 
     if(gTxVfo->Modulation == MODULATION_UKNOWN)
         gTxVfo->Modulation = MODULATION_FM;
 
 #ifdef ENABLE_CW_MODULATOR
+	RADIO_CW_ApplyModeFilter(gTxVfo, previous);
+
 	// Arm/dearm keyer ownership immediately so a very quick PTT press after
 	// switching to CW cannot beat deferred reconfigure/save paths.
 	CW_KeyerReconfigure(gTxVfo->Modulation == MODULATION_CW);

@@ -900,7 +900,15 @@ void MENU_AcceptSetting(void)
             break;
 
         case MENU_AM:
+#ifdef ENABLE_CW_MODULATOR
+        {
+            const ModulationMode_t previous = gTxVfo->Modulation;
             gTxVfo->Modulation     = gSubMenuSelection;
+            RADIO_CW_ApplyModeFilter(gTxVfo, previous);
+        }
+#else
+            gTxVfo->Modulation     = gSubMenuSelection;
+#endif
             gRequestSaveChannel = 1;
             return;
 
