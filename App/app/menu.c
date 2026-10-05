@@ -439,6 +439,11 @@ int MENU_GetLimits(uint8_t menu_id, int32_t *pMin, int32_t *pMax)
 			*pMax = 127;  // 0-127 menu value (stored as seconds)
 			break;
 
+		case MENU_CW_ROGER_DITS:
+			*pMin = CW_ROGER_DAH_DITS_MIN;
+			*pMax = CW_ROGER_DAH_DITS_MAX;
+			break;
+
 		case MENU_CW_BKIN:
 			*pMin = 0;  // off
 			*pMax = 1;  // on
@@ -1197,6 +1202,10 @@ void MENU_AcceptSetting(void)
 		case MENU_CW_MSG_REPEAT:
 			gEeprom.CW_MESSAGE_REPEAT_DELAY = gSubMenuSelection;
 			break;
+
+		case MENU_CW_ROGER_DITS:
+			gEeprom.CW_ROGER_DAH_DITS = gSubMenuSelection;
+			break;
 #endif
 
     }
@@ -1700,6 +1709,10 @@ void MENU_ShowCurrentSetting(void)
 
 		case MENU_CW_MSG_REPEAT:
 			gSubMenuSelection = gEeprom.CW_MESSAGE_REPEAT_DELAY;
+			break;
+
+		case MENU_CW_ROGER_DITS:
+			gSubMenuSelection = gEeprom.CW_ROGER_DAH_DITS;
 			break;
 #endif
 

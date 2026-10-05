@@ -85,6 +85,7 @@ static void ACTION_RepeatCWMsg2(void);
 static void ACTION_RepeatCWMsg3(void);
 static void ACTION_RepeatCWMsg4(void);
 static void ACTION_CWKeyerMode(void);
+static void ACTION_CWProperRoger(void);
 #ifdef ENABLE_CODE_PRACTICE
 static void ACTION_CPO(void);
 #endif
@@ -149,6 +150,7 @@ void (*const action_opt_table[])(void) = {
     [ACTION_OPT_CPO] = &ACTION_CPO,
 	#endif
 	[ACTION_OPT_CW_KEYER_MODE] = &ACTION_CWKeyerMode,
+	[ACTION_OPT_CW_PROPER_ROGER] = &ACTION_CWProperRoger,
 #endif
 
 #ifdef ENABLE_FEAT_F4HWN
@@ -748,6 +750,17 @@ static void ACTION_CWKeyerMode(void)
 
 	gCW_KeyerModePopup_500ms = 4;  // 2 seconds
 	gUpdateDisplay = true;
+}
+
+static void ACTION_CWProperRoger(void)
+{
+	// playback only drives the keyer in CW mode, same rule as playing from the menu
+	if (gTxVfo->Modulation != MODULATION_CW) {
+		gBeepToPlay = BEEP_500HZ_60MS_DOUBLE_BEEP_OPTIONAL;
+		return;
+	}
+
+	CW_StartProperRoger();
 }
 #endif
 

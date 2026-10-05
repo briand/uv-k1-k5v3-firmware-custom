@@ -410,6 +410,8 @@ gEeprom.FreqChannel[1]   = IS_FREQ_CHANNEL(Data16[5]) ? Data16[5] : (FREQ_CHANNE
 	gEeprom.CW_BREAKIN_ENABLE	  = (Data[2] < 0x80) ? ((Data[2] >> 6) & 0x01) : 1;  // bit 6: 0=break-in off, 1=break-in on, default on
 	// Data[3]: high bit = invalid, bits 0-6 = repeat delay (seconds)
 	gEeprom.CW_MESSAGE_REPEAT_DELAY = (Data[3] < 0x80) ? (Data[3] & 0x7F) : 4;  // default 4s
+	// Data[5]: proper roger dah length in dits. 0xFF (unused since v1.0.0) or out of range = default
+	gEeprom.CW_ROGER_DAH_DITS = (Data[5] >= CW_ROGER_DAH_DITS_MIN && Data[5] <= CW_ROGER_DAH_DITS_MAX) ? Data[5] : CW_ROGER_DAH_DITS_DEFAULT;
 #endif
 
     // 0F40..0F47
@@ -1123,7 +1125,7 @@ void SETTINGS_SaveSettings(void)
 	// State[3]: store menu value (delay/2) in bits 0-6, clear high bit to mark valid
 	State[3] = (gEeprom.CW_MESSAGE_REPEAT_DELAY) & 0x7F;
 	State[4] = (uint8_t)gEeprom.CW_KEYER_MODE;  // keyer mode: 0=A, 1=B, 2=Ultimatic, 3=Bug
-	State[5] = 0xFF;  // unused (was CW_ADC_CABLE_10K high)
+	State[5] = gEeprom.CW_ROGER_DAH_DITS;  // proper roger dah length in dits
 	State[6] = 0xFF;  // unused (was CW_ADC_CABLE_20K low)
 	State[7] = 0xFF;  // unused (was CW_ADC_CABLE_20K high)
     PY25Q16_WriteBuffer(0x00A140, SecBuf, 0x08, false);

@@ -105,6 +105,7 @@ static uint16_t s_playback_pos = 0; // index into playback buffer
 static uint8_t s_play_char_pattern = 0; // current char morse pattern (LSB-first)
 static uint8_t s_play_char_len = 0; // number of elements in current char
 static uint8_t s_play_elem_index = 0; // current element index within char
+static bool s_play_long_dah = false; // proper roger: hold each dah for gEeprom.CW_ROGER_DAH_DITS
 
 // Playback FSM states
 typedef enum {
@@ -289,17 +290,12 @@ static void CW_KeyerInit()
 }
 
 // --- Macro playback API implementation ---
-void CW_StartMacroPlayback(uint8_t macroIndex, bool repeat)
-{	
-    // Do nothing if recording or playback already in progress
-    if (gCW_Recording || gCW_PlaybackActive) return;
 
-    // Load the macro into a local buffer (decoded with spaces)
-    memset(s_playback_buf, 0, sizeof(s_playback_buf));
-    CW_LoadMacro(macroIndex, s_playback_buf, sizeof(s_playback_buf));
+// Prime the playback FSM to send whatever is in s_playback_buf from the start
+static void CW_BeginPlayback(bool repeat)
+{
     s_playback_buf_len = (uint16_t)strlen(s_playback_buf);
     s_playback_pos = 0;
-    gCW_PlaybackMacroIndex = macroIndex;
     s_play_elem_index = 0;
     s_play_char_len = 0;
     s_play_char_pattern = 0;
@@ -308,12 +304,25 @@ void CW_StartMacroPlayback(uint8_t macroIndex, bool repeat)
     gCW_PlaybackRepeat = repeat;
     gCW_MessageRepeatCountdown_500ms = 0;  // Clear any pending countdown
 
-    // Clear TX display and prime the playback FSM to start immediately
-    CW_ClearTxDisplay();
+    // Prime the playback FSM to start immediately
     s_play_space_pending = false;
     s_pb_state = PB_STATE_INTER_CHAR_GAP;
     s_elem_start_count = millis();
     gCW_PlaybackActive = (s_playback_buf_len > 0);
+}
+
+void CW_StartMacroPlayback(uint8_t macroIndex, bool repeat)
+{
+    // Do nothing if recording or playback already in progress
+    if (gCW_Recording || gCW_PlaybackActive) return;
+
+    // Load the macro into a local buffer (decoded with spaces)
+    memset(s_playback_buf, 0, sizeof(s_playback_buf));
+    CW_LoadMacro(macroIndex, s_playback_buf, sizeof(s_playback_buf));
+    gCW_PlaybackMacroIndex = macroIndex;
+    s_play_long_dah = false;
+    CW_ClearTxDisplay();
+    CW_BeginPlayback(repeat);
 
 #if CW_KEYER_DEBUG
     if (gCW_PlaybackActive) {
@@ -322,6 +331,19 @@ void CW_StartMacroPlayback(uint8_t macroIndex, bool repeat)
         UART_Send(buf, strlen(buf));
     }
 #endif
+}
+
+// Proper roger: R with the dah held for CWrgr dits (default 7), di-daaaaaaah-dit
+void CW_StartProperRoger(void)
+{
+    if (gCW_Recording || gCW_PlaybackActive) return;
+
+    strcpy(s_playback_buf, "R");
+    s_play_long_dah = true;
+    CW_BeginPlayback(false);
+
+    // Keep what was keyed before so the R reads as a reply to it
+    s_play_space_pending = (gCW_TX_DisplayIndex > 0);
 }
 
 // Stop playback immediately (user interrupted)
@@ -352,7 +374,9 @@ CW_Action_t CW_PlaybackHandleState(void)
 
     switch (s_pb_state) {
     case PB_STATE_ACTIVE_ELEMENT: {
-        const uint32_t target = s_active_is_dit ? s_dit_count : s_dah_count;
+        const uint32_t target = s_active_is_dit ? s_dit_count
+                              : s_play_long_dah ? gEeprom.CW_ROGER_DAH_DITS * (uint32_t)s_dit_count
+                              : s_dah_count;
         const uint32_t elapsed = millis_since(s_elem_start_count);
         if (elapsed < target) {
             return CW_ACTION_CARRIER_HOLD_ON;

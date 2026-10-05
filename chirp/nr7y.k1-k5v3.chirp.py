@@ -864,6 +864,12 @@ _NR7Y_CW_KEYER_MODES = [
     "Semi-Auto Bug",  # 3
 ]
 
+# Proper roger dah length in dits (full byte at _NR7Y_CW_SETTINGS_ADDR+5),
+# mirrors CW_ROGER_DAH_DITS_* in App/settings.h
+_NR7Y_CW_ROGER_DITS_MIN = 3
+_NR7Y_CW_ROGER_DITS_MAX = 20
+_NR7Y_CW_ROGER_DITS_DEFAULT = 7
+
 # Extended key actions for NR7Y firmware with CW modulator, mirroring
 # App/settings.h enum ACTION_OPT_t.
 #
@@ -873,8 +879,8 @@ _NR7Y_CW_KEYER_MODES = [
 # the feature is compiled out, which is why those only need filtering out of the
 # displayed choices -- but the RESCUE_OPS block shifts everything after it, so the
 # index mapping has to be assembled per build instead of hardcoded.  With
-# RESCUE_OPS off the CW actions sit at 21-28, CODE PRACTICE at 29 and CW KEYER
-# MODE at 30; with it on they are 23-30, 31 and 32.
+# RESCUE_OPS off the CW actions sit at 21-28, CODE PRACTICE at 29, CW KEYER MODE
+# at 30 and PROPER ROGER at 31; with it on they are 23-30, 31, 32 and 33.
 _NR7Y_ACTIONS_COMMON = [
     "NONE",            # 0:  ACTION_OPT_NONE
     "FLASHLIGHT",      # 1:  ACTION_OPT_FLASHLIGHT
@@ -919,6 +925,7 @@ _NR7Y_ACTIONS_CW = [
     # with the CW block.
     "CODE PRACTICE",
     "CW KEYER MODE",
+    "PROPER ROGER",
 ]
 
 # ENABLE_FEAT_F4HWN_BEAM, then ENABLE_FEAT_F4HWN_RXTX_LOG, then (since F4HWN
@@ -4172,6 +4179,18 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
         except Exception as e:
             LOG.error("CW repeat delay: %s", e)
 
+        # Proper Roger dah length
+        try:
+            rg = self._get_cw_roger_dits()
+            rs_rg = RadioSetting("cw_roger_dits", "Proper Roger Dah (dits)",
+                                 RadioSettingValueInteger(_NR7Y_CW_ROGER_DITS_MIN,
+                                                          _NR7Y_CW_ROGER_DITS_MAX, rg))
+            rs_rg.set_doc("Length of the dah in the PROPER ROGER key action, in dits "
+                          "(3 = plain R, default 7)")
+            cw.append(rs_rg)
+        except Exception as e:
+            LOG.error("CW roger dits: %s", e)
+
         # CW Macros (4 messages)
         macros = RadioSettingGroup("cw_macros", "CW Macros")
         for i in range(1, 5):
@@ -4267,6 +4286,8 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
                 self._set_cw_breakin(["OFF", "ON"].index(str(element.value)))
             elif name == "cw_repeat_delay":
                 self._set_cw_repeat_delay(int(element.value))
+            elif name == "cw_roger_dits":
+                self._set_cw_roger_dits(int(element.value))
             elif name.startswith("cw_msg"):
                 # "cw_msg1" → idx 1 … "cw_msg4" → idx 4
                 self._set_cw_msg(int(name[6:]), str(element.value))
@@ -4390,6 +4411,19 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
 
     def _set_cw_repeat_delay(self, delay):
         self._mmap_set(_NR7Y_CW_SETTINGS_ADDR + 3, max(0, min(127, int(delay))) & 0x7F)
+
+    # -- Proper roger dah length (full byte at CW byte 5) --
+
+    def _get_cw_roger_dits(self):
+        """Return proper roger dah length in dits (3-20)."""
+        b = self._mmap_byte(_NR7Y_CW_SETTINGS_ADDR + 5)
+        if not _NR7Y_CW_ROGER_DITS_MIN <= b <= _NR7Y_CW_ROGER_DITS_MAX:
+            return _NR7Y_CW_ROGER_DITS_DEFAULT  # blank/invalid EEPROM
+        return b
+
+    def _set_cw_roger_dits(self, dits):
+        dits = max(_NR7Y_CW_ROGER_DITS_MIN, min(_NR7Y_CW_ROGER_DITS_MAX, int(dits)))
+        self._mmap_set(_NR7Y_CW_SETTINGS_ADDR + 5, dits)
 
     # ------------------------------------------------------------------ CW macro read/write
 

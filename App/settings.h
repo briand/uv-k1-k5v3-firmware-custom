@@ -89,6 +89,11 @@ enum CW_IambicMode_t {
 };
 typedef enum CW_IambicMode_t CW_IambicMode_t;
 
+// Proper roger dah length in dits (CWrgr menu); 3 is a plain R
+#define CW_ROGER_DAH_DITS_MIN     3
+#define CW_ROGER_DAH_DITS_MAX     20
+#define CW_ROGER_DAH_DITS_DEFAULT 7
+
 #endif
 
 enum TxLockModes_t {
@@ -196,6 +201,7 @@ enum ACTION_OPT_t {
 #endif
 #ifdef ENABLE_CW_MODULATOR
     ACTION_OPT_CW_KEYER_MODE,
+    ACTION_OPT_CW_PROPER_ROGER,
 #endif
 #ifdef ENABLE_FEAT_F4HWN_BEAM
     ACTION_OPT_BEAM,
@@ -389,6 +395,7 @@ typedef struct {
 	uint16_t			  CW_KEY_INPUT_MENU;	// index of the chosen input method in the menu
 	bool     			  CW_BREAKIN_ENABLE;    // TX on key
 	uint8_t               CW_MESSAGE_REPEAT_DELAY;  // Repeat delay in seconds
+	uint8_t               CW_ROGER_DAH_DITS;    // proper roger dah length in dits
 #endif
 
 } EEPROM_Config_t;
