@@ -59,6 +59,12 @@ void CW_StartMacroPlayback(uint8_t macroIndex, bool repeat);
 // Send a "proper roger": R with the dah held for CWrgr dits, default 7 (di-daaaaaaah-dit)
 void CW_StartProperRoger(void);
 
+// The playback element just keyed lost setup_ms to TX/sidetone setup before it was
+// heard; add that back so it goes out full length. Playback only: stretching the
+// paddle keyer's timeline the same way puts it out of step with the operator's
+// squeezes, so hand keying keeps its first-element clipping.
+void CW_PlaybackExtendElement(uint32_t setup_ms);
+
 // Stop playback and cancel any pending repeat
 void CW_StopPlayback(void);
 

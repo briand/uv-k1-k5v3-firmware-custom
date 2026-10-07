@@ -86,6 +86,12 @@ void CW_Popup_Show(CW_PopupKind_t kind)
 	gUpdateDisplay = true;
 }
 
+void CW_Popup_Dismiss(CW_PopupKind_t kind)
+{
+	if (s_kind == kind)
+		Close(false);
+}
+
 CW_PopupKind_t CW_Popup_Kind(void)
 {
 	return s_kind;

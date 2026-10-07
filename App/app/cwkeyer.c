@@ -106,6 +106,7 @@ static uint8_t s_play_char_pattern = 0; // current char morse pattern (LSB-first
 static uint8_t s_play_char_len = 0; // number of elements in current char
 static uint8_t s_play_elem_index = 0; // current element index within char
 static bool s_play_long_dah = false; // proper roger: hold each dah for gEeprom.CW_ROGER_DAH_DITS
+static uint16_t s_play_setup_ms = 0; // TX/sidetone setup the current element lost at its start
 
 // Playback FSM states
 typedef enum {
@@ -350,6 +351,11 @@ void CW_StartProperRoger(void)
     s_play_space_pending = (gCW_TX_DisplayIndex > 0);
 }
 
+void CW_PlaybackExtendElement(uint32_t setup_ms)
+{
+    s_play_setup_ms = (setup_ms > UINT16_MAX) ? UINT16_MAX : (uint16_t)setup_ms;
+}
+
 // Stop playback immediately (user interrupted)
 void CW_StopPlayback(void)
 {
@@ -382,10 +388,11 @@ CW_Action_t CW_PlaybackHandleState(void)
                               : s_play_long_dah ? gEeprom.CW_ROGER_DAH_DITS * (uint32_t)s_dit_count
                               : s_dah_count;
         const uint32_t elapsed = millis_since(s_elem_start_count);
-        if (elapsed < target) {
+        if (elapsed < target + s_play_setup_ms) {
             return CW_ACTION_CARRIER_HOLD_ON;
         } else {
             // End element
+            s_play_setup_ms = 0;
             s_elem_start_count = cur_count;
             s_pb_state = PB_STATE_INTER_ELEMENT_GAP;
             return CW_ACTION_CARRIER_OFF;

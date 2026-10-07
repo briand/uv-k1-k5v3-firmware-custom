@@ -33,9 +33,11 @@ typedef enum {
 	CW_POPUP_KEY_INPUT,    // the action steps a pending input, applied when the popup times out
 	CW_POPUP_KEY_STUCK,    // the pending input failed the stuck-key check
 	CW_POPUP_BREAK_IN,
+	CW_POPUP_TX_TIMEOUT,   // a stuck key tripped the transmit timeout
 } CW_PopupKind_t;
 
 void           CW_Popup_Show(CW_PopupKind_t kind);
+void           CW_Popup_Dismiss(CW_PopupKind_t kind);  // close it if that kind is showing
 CW_PopupKind_t CW_Popup_Kind(void);
 uint8_t        CW_Popup_KeyInput(void);  // key input index the popup is showing
 

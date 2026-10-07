@@ -967,6 +967,10 @@ static void DrawCWPopup(void)
 			title = "BREAK-IN";
 			text  = gEeprom.CW_BREAKIN_ENABLE ? "ON" : "OFF";
 			break;
+		case CW_POPUP_TX_TIMEOUT:
+			title = "TX TIMEOUT";
+			text  = "RELEASE KEY";
+			break;
 		case CW_POPUP_KEY_INPUT:
 		case CW_POPUP_KEY_STUCK:
 			title = (kind == CW_POPUP_KEY_STUCK) ? "KEY STUCK" : "KEY INPUT";

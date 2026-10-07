@@ -22,6 +22,7 @@
 
 #include "app/cwapp.h"
 #include "app/cwkeyer.h"
+#include "app/cwguard.h"
 #include "app/cwmacro.h"
 #include "app/cwpopup.h"
 #include "app/app.h"
@@ -93,14 +94,35 @@ void CW_AppUpdate(void)
 
 	// ---- poll the keyer / playback engine for the next action ----
 	CW_Action_t action;
-	if (gCW_PlaybackActive)
+	const bool fromPlayback = gCW_PlaybackActive;
+	if (fromPlayback)
 		action = CW_PlaybackHandleState();
 	else
 		action = CW_HandleState();
 
+	// ---- transmit timeout: a stuck key or paddle drops TX and locks keying out ----
+	CW_GuardEvent_t guard;
+	action = CW_Guard_Filter(action, millis(), &guard);
+	if (guard == CW_GUARD_TRIPPED) {
+		CW_StopPlayback();
+		CW_Popup_Show(CW_POPUP_TX_TIMEOUT);
+	}
+	else if (guard == CW_GUARD_RELEASED) {
+		CW_Popup_Dismiss(CW_POPUP_TX_TIMEOUT);
+	}
+	else if (guard == CW_GUARD_LOCKED && CW_Popup_Kind() == CW_POPUP_NONE) {
+		CW_Popup_Show(CW_POPUP_TX_TIMEOUT);  // keep saying so until the key is released
+	}
+
 	// keying confirms and closes a settings popup (break-in off never enters TX)
 	if (action == CW_ACTION_CARRIER_ON)
 		CW_Popup_OnKeying();
+
+	// Playback started timing this element before the TX/sidetone setup below ran;
+	// whatever that setup takes is added back so the element isn't clipped. Paddle
+	// keying is left alone so the keyer stays in step with the operator's squeezes.
+	const bool     playbackKeyed = fromPlayback && action == CW_ACTION_CARRIER_ON;
+	const uint32_t setupStartMs  = millis();
 
 	// ---- local-only sidetone path (no RF) ----
 	// Used when recording a macro, reading ADC, breakin disabled, or code practice
@@ -201,6 +223,15 @@ void CW_AppUpdate(void)
 			}
 		default:
 		break;
+	}
+
+	if (playbackKeyed)
+		CW_PlaybackExtendElement(millis_since(setupStartMs));
+
+	// a timeout drops TX now instead of waiting out the hang time
+	if (guard == CW_GUARD_TRIPPED && gCW_State != CW_INACTIVE) {
+		gPttIsPressed = false;
+		CW_EndTxNow();
 	}
 
 	// ---- suspend timeout → end TX ----
