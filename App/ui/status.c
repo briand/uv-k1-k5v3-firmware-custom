@@ -246,14 +246,14 @@ void UI_DisplayStatus()
 #if defined(ENABLE_VOX) || defined(ENABLE_CW_MODULATOR)
     // VOX / BK indicator — shared position
     #ifdef ENABLE_CW_MODULATOR
-    if (gRxVfo->Modulation == MODULATION_CW && gEeprom.CW_BREAKIN_ENABLE) {
+    if (gCurrentVfo->Modulation == MODULATION_CW && gEeprom.CW_BREAKIN_ENABLE) {
         memcpy(line + x, gFontBK, sizeof(gFontBK));
         x1 = x + sizeof(gFontBK) + 1;
     } else
     #endif
     #ifdef ENABLE_VOX
     #ifdef ENABLE_CW_MODULATOR
-    if (gEeprom.VOX_SWITCH && gRxVfo->Modulation != MODULATION_CW) {
+    if (gEeprom.VOX_SWITCH && gCurrentVfo->Modulation != MODULATION_CW) {
     #else
     if (gEeprom.VOX_SWITCH) {
     #endif
