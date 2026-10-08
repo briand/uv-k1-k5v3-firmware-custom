@@ -1074,6 +1074,7 @@ void UI_DisplayMenu(void)
     top_right_badge[0] = '\0';
 
     bool already_printed = false;
+    bool cw_text_first_line = false;  // first line of String is CW text: print zeros dotted
 
     /* Brightness is set to max in some entries of this menu. Return it to the configured brightness
        level the "next" time we enter here.I.e., when we move from one menu to another.
@@ -1745,11 +1746,9 @@ void UI_DisplayMenu(void)
 					if (len == 0) {
 						strcpy(String, "empty");
 					} else {
-						// Drawn here rather than by the shared value printer below so
-						// zeros get the CW dotted glyph
+						// "<first 9 chars>\n<n> chars", laid out by the shared value printer below
 						CW_FormatMacroDisplay(macroIdx, String, 9);
-						UI_PrintStringCW(String, menu_item_x1, menu_item_x2, 2);
-						already_printed = true;
+						cw_text_first_line = true;
 					}
 				} else {
 					// record/play/repeat
@@ -1939,6 +1938,8 @@ void UI_DisplayMenu(void)
             {
                 if (small)
                     UI_PrintStringSmallNormal(String + i, menu_item_x1, menu_item_x2, y);
+                else if (cw_text_first_line && i == 0)
+                    UI_PrintStringCW(String + i, menu_item_x1, menu_item_x2, y);
                 else
                     UI_PrintString(String + i, menu_item_x1, menu_item_x2, y, 8);
 
