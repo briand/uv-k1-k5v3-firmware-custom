@@ -32,14 +32,21 @@
 uint32_t CW_RIT_RxFrequency(const VFO_Info_t *pVfo, uint32_t frequency);
 uint32_t CW_RIT_TxFrequency(const VFO_Info_t *pVfo, uint32_t frequency);
 
-// Adjust mode: * in CW or the RIT/XIT key action opens it; EXIT, * or 5 s idle closes it
+// Adjust mode: * in CW or the RIT/XIT key action opens it; EXIT, *, keying or 5 s idle closes it
 void CW_RIT_EnterAdjust(void);
 void CW_RIT_ToggleAdjust(void);
 bool CW_RIT_IsAdjusting(void);
 bool CW_RIT_ProcessKey(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld);  // true when the key was used
+void CW_RIT_OnKeying(void);
 void CW_RIT_Tick500ms(void);
 
-// Info-line tag: "R+0.12", "X-0.05", "RX+0.12", or "OFF" while adjusting with both switches off
+// Current offset (10 Hz units) and which switches apply it
+int16_t CW_RIT_Offset(void);
+bool    CW_RIT_RitOn(void);
+bool    CW_RIT_XitOn(void);
+void    CW_RIT_FormatOffset(char *buf);  // "+0.12" (kHz)
+
+// Info-line tag while an offset is applied: "R+0.12", "X-0.05" or "RX+0.12"
 bool CW_RIT_TagVisible(void);
 void CW_RIT_FormatTag(char *buf);
 

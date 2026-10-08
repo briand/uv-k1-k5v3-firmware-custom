@@ -856,6 +856,52 @@ void UI_DisplayAudioBar(void)
 }
 #endif
 
+#if defined(ENABLE_RSSI_BAR) || defined(ENABLE_CW_MODULATOR)
+// Received signal as the S-meter reports it: dBm, plus the S-unit (0-9) and dB over S9
+static int16_t GetSignalLevel(uint8_t *s_level, uint8_t *overS9dBm)
+{
+    const int16_t rssi_dBm =
+        BK4819_GetRSSI_dBm()
+#ifdef ENABLE_AM_FIX
+        + ((gSetting_AM_fix && gRxVfo->Modulation == MODULATION_AM) ? AM_fix_get_gain_diff() : 0)
+#endif
+        + dBmCorrTable[gRxVfo->Band];
+
+#ifdef ENABLE_FEAT_F4HWN
+    // IARU VHF/UHF S-meter: S9 = -93 dBm, 1 S-unit = 6 dB
+    // S(n) threshold = -93 + (n - 9) * 6
+
+    // if      (rssi_dBm >= -93)  s_level = 9;  // S9  = -93 dBm
+    // else if (rssi_dBm >= -99)  s_level = 8;  // S8  = -99 dBm
+    // else if (rssi_dBm >= -105) s_level = 7;  // S7  = -105 dBm
+    // else if (rssi_dBm >= -111) s_level = 6;  // S6  = -111 dBm
+    // else if (rssi_dBm >= -117) s_level = 5;  // S5  = -117 dBm
+    // else if (rssi_dBm >= -123) s_level = 4;  // S4  = -123 dBm
+    // else if (rssi_dBm >= -129) s_level = 3;  // S3  = -129 dBm
+    // else if (rssi_dBm >= -135) s_level = 2;  // S2  = -135 dBm
+    // else if (rssi_dBm >= -141) s_level = 1;  // S1  = -141 dBm
+    // else                       s_level = 0;  // S0 (below -141 dBm)
+
+    if (rssi_dBm >= -93)
+        *s_level = 9;
+    else if (rssi_dBm < -141)
+        *s_level = 0;
+    else
+        *s_level = (rssi_dBm + 147) / 6;
+
+    // Compute over-S9 dB directly
+    *overS9dBm = (*s_level == 9) ? (uint8_t)MIN(rssi_dBm - (-93), 40) : 0;
+#else
+    const int16_t s0_dBm = -gEeprom.S0_LEVEL;                  // S0 .. base level
+    int s0_9 = gEeprom.S0_LEVEL - gEeprom.S9_LEVEL;
+    *s_level   = MIN(MAX((int32_t)(rssi_dBm - s0_dBm)*100 / (s0_9*100/9), 0), 9); // S0 - S9
+    *overS9dBm = MIN(MAX(rssi_dBm + gEeprom.S9_LEVEL, 0), 99);
+#endif
+
+    return rssi_dBm;
+}
+#endif
+
 #ifdef ENABLE_CW_MODULATOR
 void DrawCWDecodeBar(void)
 {
@@ -998,6 +1044,67 @@ static void DrawCWPopup(void)
 		DrawCWPopupArrow(17,  leftIsFaster ? 28 : 31, leftIsFaster);
 		DrawCWPopupArrow(110, leftIsFaster ? 31 : 28, !leftIsFaster);
 	}
+}
+
+// Full-panel modal while RIT/XIT adjust mode is open. It covers the S-meter, so the
+// header carries the signal for peaking; below it the shared offset, which switches
+// apply it and where that puts you, then the adjust keys in keypad layout.
+static void DrawCWRitModal(void)
+{
+	static const char *const legend[4][3] = {
+		{"1 -10",  "2 RIT",  "3 +10"},
+		{"4 -100", "5 ZERO", "6 +100"},
+		{"7 -1K",  "8 XIT",  "9 +1K"},
+		{"* DONE", "0 DIAL", "EXIT DONE"},
+	};
+	static const uint8_t legendX[] = {2, 32, 62};
+
+	char    text[24];
+	uint8_t s_level;
+	uint8_t overS9dBm;
+	const int16_t dBm = GetSignalLevel(&s_level, &overS9dBm);
+	const bool    rit = CW_RIT_RitOn();
+	const bool    xit = CW_RIT_XitOn();
+
+	UI_DisplayClear();
+
+	// header: title and signal, inverted into a bar
+	UI_PrintStringSmallBold("RIT/XIT", 1, 0, 0);
+	if (overS9dBm)
+		sprintf(text, "S9+%u %ddBm", overS9dBm, dBm);
+	else
+		sprintf(text, "S%u %ddBm", s_level, dBm);
+	GUI_DisplaySmallest(text, LCD_WIDTH - 1 - strlen(text) * 4, 1, false, true);  // ends at x 125
+	for (uint8_t x = 0; x < LCD_WIDTH; x++)
+		gFrameBuffer[0][x] ^= 0x7F;
+
+	CW_RIT_FormatOffset(text);
+	strcat(text, " kHz");
+	UI_PrintString(text, 0, LCD_WIDTH - 1, 1, 8);
+
+	// switches, inverse when on
+	if (rit)
+		UI_PrintStringSmallNormalInverse("RIT", 2, 0, 3);
+	else
+		UI_PrintStringSmallNormal("RIT", 2, 0, 3);
+	if (xit)
+		UI_PrintStringSmallNormalInverse("XIT", 30, 0, 3);
+	else
+		UI_PrintStringSmallNormal("XIT", 30, 0, 3);
+
+	if (rit || xit) {
+		const uint32_t f = (uint32_t)((int32_t)gTxVfo->pRX->Frequency + CW_RIT_Offset());
+		sprintf(text, "%s %u.%03u.%02u", rit ? (xit ? "RX/TX" : "RX") : "TX", f / 100000, (f / 100) % 1000, f % 100);
+		GUI_DisplaySmallest(text, LCD_WIDTH - 1 - strlen(text) * 4, 25, false, true);
+	}
+
+	for (uint8_t row = 0; row < 4; row++)
+		for (uint8_t col = 0; col < 3; col++)
+			GUI_DisplaySmallest(legend[row][col], legendX[col], 33 + row * 6, false, true);
+
+	// the arrow keys follow SetNav: left/right on the UV-K1, up/down on the UV-K5
+	GUI_DisplaySmallest(gEeprom.SET_NAV ? "UP +10" : "> +10", 94, 33, false, true);
+	GUI_DisplaySmallest(gEeprom.SET_NAV ? "DN -10" : "< -10", 94, 39, false, true);
 }
 #endif
 
@@ -1226,57 +1333,14 @@ void DisplayRSSIBar(const bool now)
         memset(p_line, 0, LCD_WIDTH);
 #endif
 
+    uint8_t s_level;
+    uint8_t overS9dBm;
+    const int16_t rssi_dBm = GetSignalLevel(&s_level, &overS9dBm);
 #ifdef ENABLE_FEAT_F4HWN
-    int16_t rssi_dBm =
-        BK4819_GetRSSI_dBm()
-#ifdef ENABLE_AM_FIX
-        + ((gSetting_AM_fix && gRxVfo->Modulation == MODULATION_AM) ? AM_fix_get_gain_diff() : 0)
-#endif
-        + dBmCorrTable[gRxVfo->Band];
-
-    // IARU VHF/UHF S-meter: S9 = -93 dBm, 1 S-unit = 6 dB
-    // S(n) threshold = -93 + (n - 9) * 6
-    uint8_t s_level    = 0;
-    uint8_t overS9dBm  = 0;
-    uint8_t overS9Bars = 0;
-
-    // if      (rssi_dBm >= -93)  s_level = 9;  // S9  = -93 dBm
-    // else if (rssi_dBm >= -99)  s_level = 8;  // S8  = -99 dBm
-    // else if (rssi_dBm >= -105) s_level = 7;  // S7  = -105 dBm
-    // else if (rssi_dBm >= -111) s_level = 6;  // S6  = -111 dBm
-    // else if (rssi_dBm >= -117) s_level = 5;  // S5  = -117 dBm
-    // else if (rssi_dBm >= -123) s_level = 4;  // S4  = -123 dBm
-    // else if (rssi_dBm >= -129) s_level = 3;  // S3  = -129 dBm
-    // else if (rssi_dBm >= -135) s_level = 2;  // S2  = -135 dBm
-    // else if (rssi_dBm >= -141) s_level = 1;  // S1  = -141 dBm
-    // else                       s_level = 0;  // S0 (below -141 dBm)
-
-    if (rssi_dBm >= -93)
-        s_level = 9;
-    else if (rssi_dBm < -141)
-        s_level = 0;
-    else 
-        s_level = (rssi_dBm + 147) / 6;
-
-    if (s_level == 9) {
-        // Compute over-S9 dB directly
-        overS9dBm  = (uint8_t)MIN(rssi_dBm - (-93), 40);
-        overS9Bars = overS9dBm / 10;
-    }
+    const uint8_t overS9Bars = overS9dBm / 10;
     const int16_t display_rssi_dBm = (rssi_dBm > -53) ? -53 : rssi_dBm;
 #else
-    const int16_t s0_dBm   = -gEeprom.S0_LEVEL;                  // S0 .. base level
-    const int16_t rssi_dBm =
-        BK4819_GetRSSI_dBm()
-#ifdef ENABLE_AM_FIX
-        + ((gSetting_AM_fix && gRxVfo->Modulation == MODULATION_AM) ? AM_fix_get_gain_diff() : 0)
-#endif
-        + dBmCorrTable[gRxVfo->Band];
-
-    int s0_9 = gEeprom.S0_LEVEL - gEeprom.S9_LEVEL;
-    const uint8_t s_level = MIN(MAX((int32_t)(rssi_dBm - s0_dBm)*100 / (s0_9*100/9), 0), 9); // S0 - S9
-    uint8_t overS9dBm = MIN(MAX(rssi_dBm + gEeprom.S9_LEVEL, 0), 99);
-    uint8_t overS9Bars = MIN(overS9dBm/10, 4);
+    const uint8_t overS9Bars = MIN(overS9dBm/10, 4);
 #endif
 
 #ifdef ENABLE_FEAT_F4HWN
@@ -2381,7 +2445,7 @@ void UI_DisplayMain(void)
 
         // A RIT/XIT tag takes MONI's place at the right end. To keep the filter label
         // clear of it, CLASSIC moves the label into the repeater-shift slot, and TINY
-        // uses the short names 2 px further left so even the tag's inverse box has room
+        // uses the short names 2 px further left
 #ifdef ENABLE_CW_MODULATOR
         const bool ritTag = isMainVFO && vfoInfo->Modulation == MODULATION_CW && CW_RIT_TagVisible();
 #else
@@ -2494,22 +2558,11 @@ void UI_DisplayMain(void)
         */
 #ifdef ENABLE_CW_MODULATOR
         if (ritTag) {
-           // shown inverse while adjust mode is editing it
            CW_RIT_FormatTag(String);
-           const bool editing = CW_RIT_IsAdjusting();
-
-           if (gSetting_set_gui) {
-                // starts at 77 so a 7-character tag's inverse box ends on the last column
-                if (editing)
-                    UI_PrintStringSmallNormalInverse(String, 77, 0, line + 2);
-                else
-                    UI_PrintStringSmallNormal(String, LCD_WIDTH + 77, 0, line + 1);
-           } else {
-                if (editing)
-                    GUI_DisplaySmallestInverse(String, 100, line + 2, false, true, MIN(100 + strlen(String) * 4, LCD_WIDTH - 1));
-                else
-                    GUI_DisplaySmallest(String, 100, line == 0 ? 17 : 49, false, true);
-           }
+           if (gSetting_set_gui)
+                UI_PrintStringSmallNormal(String, LCD_WIDTH + 77, 0, line + 1);
+           else
+                GUI_DisplaySmallest(String, 100, line == 0 ? 17 : 49, false, true);
         }
         else
 #endif
@@ -2545,8 +2598,11 @@ void UI_DisplayMain(void)
 #endif
 
 #ifdef ENABLE_CW_MODULATOR
-    const bool showCWPopup = CW_Popup_Kind() != CW_POPUP_NONE && gCurrentFunction != FUNCTION_TRANSMIT;
-    if (showCWPopup && center_line == CENTER_LINE_NONE)
+    const bool showRitModal = CW_RIT_IsAdjusting();
+    const bool showCWPopup  = CW_Popup_Kind() != CW_POPUP_NONE && gCurrentFunction != FUNCTION_TRANSMIT;
+    if (showRitModal)
+        center_line = CENTER_LINE_IN_USE;     // modal covers the panel, keep the RSSI bar and RX marker off it
+    else if (showCWPopup && center_line == CENTER_LINE_NONE)
         center_line = CENTER_LINE_CW_POPUP;   // popup covers the middle line, keep the RSSI refresh off it
 #endif
 
@@ -2737,8 +2793,10 @@ void UI_DisplayMain(void)
 #endif
 
 #ifdef ENABLE_CW_MODULATOR
+    if (showRitModal)
+        DrawCWRitModal();
     if (showCWPopup)
-        DrawCWPopup();
+        DrawCWPopup();  // a quick-settings popup opened while adjusting sits on top
 #endif
 
     ST7565_BlitFullScreen();

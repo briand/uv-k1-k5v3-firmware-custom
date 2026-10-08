@@ -144,6 +144,12 @@ void CW_RIT_ToggleAdjust(void)
 		CW_RIT_EnterAdjust();
 }
 
+void CW_RIT_OnKeying(void)
+{
+	if (CW_RIT_IsAdjusting())
+		ExitAdjust();
+}
+
 void CW_RIT_Tick500ms(void)
 {
 	if (s_adjust_500ms == 0)
@@ -151,6 +157,8 @@ void CW_RIT_Tick500ms(void)
 
 	if (gTxVfo->Modulation != MODULATION_CW || gScreenToDisplay != DISPLAY_MAIN || --s_adjust_500ms == 0)
 		ExitAdjust();
+	else
+		gUpdateDisplay = true;  // keep the adjust modal's signal readout live
 }
 
 bool CW_RIT_ProcessKey(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
@@ -223,20 +231,34 @@ bool CW_RIT_ProcessKey(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 	return true;
 }
 
+int16_t CW_RIT_Offset(void)
+{
+	return s_offset;
+}
+
+bool CW_RIT_RitOn(void)
+{
+	return s_rit_on;
+}
+
+bool CW_RIT_XitOn(void)
+{
+	return s_xit_on;
+}
+
+void CW_RIT_FormatOffset(char *buf)
+{
+	const unsigned int magnitude = (s_offset < 0) ? -s_offset : s_offset;
+	sprintf(buf, "%c%u.%02u", (s_offset < 0) ? '-' : '+', magnitude / 100, magnitude % 100);
+}
+
 bool CW_RIT_TagVisible(void)
 {
-	return gTxVfo->Modulation == MODULATION_CW && (s_rit_on || s_xit_on || CW_RIT_IsAdjusting());
+	return gTxVfo->Modulation == MODULATION_CW && (s_rit_on || s_xit_on);
 }
 
 void CW_RIT_FormatTag(char *buf)
 {
-	const char *prefix = s_rit_on ? (s_xit_on ? "RX" : "R") : (s_xit_on ? "X" : NULL);
-
-	if (prefix == NULL) {
-		strcpy(buf, "OFF");
-		return;
-	}
-
-	const unsigned int magnitude = (s_offset < 0) ? -s_offset : s_offset;
-	sprintf(buf, "%s%c%u.%02u", prefix, (s_offset < 0) ? '-' : '+', magnitude / 100, magnitude % 100);
+	strcpy(buf, s_rit_on ? (s_xit_on ? "RX" : "R") : "X");
+	CW_RIT_FormatOffset(buf + strlen(buf));
 }

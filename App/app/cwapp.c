@@ -25,6 +25,7 @@
 #include "app/cwguard.h"
 #include "app/cwmacro.h"
 #include "app/cwpopup.h"
+#include "app/cwrit.h"
 #include "app/app.h"
 #include "app/menu.h"
 #include "audio.h"
@@ -114,9 +115,11 @@ void CW_AppUpdate(void)
 		CW_Popup_Show(CW_POPUP_TX_TIMEOUT);  // keep saying so until the key is released
 	}
 
-	// keying confirms and closes a settings popup (break-in off never enters TX)
-	if (action == CW_ACTION_CARRIER_ON)
+	// keying confirms and closes a settings popup or RIT/XIT adjust (break-in off never enters TX)
+	if (action == CW_ACTION_CARRIER_ON) {
 		CW_Popup_OnKeying();
+		CW_RIT_OnKeying();
+	}
 
 	// Playback started timing this element before the TX/sidetone setup below ran;
 	// whatever that setup takes is added back so the element isn't clipped. Paddle
