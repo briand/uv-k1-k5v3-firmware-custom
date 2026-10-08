@@ -59,6 +59,14 @@ void CW_StartMacroPlayback(uint8_t macroIndex, bool repeat);
 // Send a "proper roger": R with the dah held for CWrgr dits, default 7 (di-daaaaaaah-dit)
 void CW_StartProperRoger(void);
 
+// Play arbitrary text (macro character set, ' ' = word gap). With show false the
+// characters stay off the TX display line, e.g. a callsign the operator must copy.
+void CW_StartTextPlayback(const char *text, bool show);
+
+// True when the paddle/bug keyer has no character or word in progress, i.e. the
+// operator has paused for at least a word gap
+bool CW_KeyerIsIdle(void);
+
 // The playback element just keyed lost setup_ms to TX/sidetone setup before it was
 // heard; add that back so it goes out full length. Playback only: stretching the
 // paddle keyer's timeline the same way puts it out of step with the operator's

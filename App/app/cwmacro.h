@@ -105,6 +105,10 @@ void CW_StopRecording(void);
 
 // TX character display buffer (for showing what's being transmitted)
 #define CW_TX_DISPLAY_SIZE 16
+
+// Stands in during code practice for keying that decodes to no character. It is
+// not a CW character itself, so it never matches anything the operator is copying.
+#define CW_CHAR_UNKNOWN '*'
 extern char gCW_TX_Display[CW_TX_DISPLAY_SIZE];
 extern uint8_t gCW_TX_DisplayIndex;
 extern bool gCW_TX_DisplayUpdated;  // Flag: new data needs to be displayed

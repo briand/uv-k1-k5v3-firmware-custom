@@ -918,7 +918,7 @@ void DrawCWDecodeBar(void)
 	CW_GetTxDisplayTail(String, sizeof(String));
 
 	// Print the text shifted right so glyph can be placed at x=0; print text first
-	UI_PrintStringSmallNormal(String, 10, 0, line);
+	UI_PrintStringSmallCW(String, 10, line);
 
 	// Draw glyph after text so it can't be clobbered (drawn independently of DecodeBar)
 	if (gCW_PlaybackActive && (center_line == CENTER_LINE_NONE || center_line == CENTER_LINE_CW_DECODE)) {

@@ -17,6 +17,7 @@
 // Code practice (CPO) app skeleton
 
 #include "app/cpo.h"
+#include "app/cpocall.h"
 #include "audio.h"
 #include "driver/backlight.h"
 #include "driver/bk4819.h"
@@ -112,6 +113,7 @@ void CPO_Exit(void)
 	gCW_FlashlightSending = false;
 	GPIO_ResetOutputPin(GPIO_PIN_FLASHLIGHT);
 #endif
+	CPO_Call_SetMode(CPO_CALL_MODE_OFF);
 	gCW_CpoActive = false;
 	gRequestDisplayScreen = DISPLAY_MAIN;
 	gUpdateDisplay = true;
@@ -145,6 +147,8 @@ void CPO_Tick(void)
 	if (gCW_CpoBacklightOn) {
 		gBacklightCountdown_500ms = 2;
 	}
+
+	CPO_Call_Tick10ms();
 
 	if (s_needs_redraw | gCW_TX_DisplayUpdated) {
 		s_needs_redraw = false;
@@ -204,7 +208,12 @@ void CPO_ProcessKeys(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 		break;
 	case KEY_5:
 		CW_ClearTxDisplay();
+		CPO_Call_Restart();
 		gUpdateDisplay = true;
+		break;
+
+	case KEY_F:
+		CPO_Call_NextMode();
 		break;
 
 	default:

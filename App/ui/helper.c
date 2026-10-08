@@ -80,7 +80,7 @@ void UI_PrintStringBuffer(const char *pString, uint8_t * buffer, uint32_t char_w
     }
 }
 
-void UI_PrintString(const char *pString, uint8_t Start, uint8_t End, uint8_t Line, uint8_t Width)
+static void PrintStringBig(const char *pString, uint8_t Start, uint8_t End, uint8_t Line, uint8_t Width, bool dottedZero)
 {
     size_t i;
     size_t Length = strlen(pString);
@@ -94,10 +94,21 @@ void UI_PrintString(const char *pString, uint8_t Start, uint8_t End, uint8_t Lin
         if (pString[i] > ' ' && pString[i] < 127)
         {
             const unsigned int index = pString[i] - ' ' - 1;
-            memcpy(gFrameBuffer[Line + 0] + ofs, &gFontBig[index][0], 7);
-            memcpy(gFrameBuffer[Line + 1] + ofs, &gFontBig[index][7], 7);
+            const uint8_t *glyph = (dottedZero && pString[i] == '0') ? gFontBigZeroDotted : gFontBig[index];
+            memcpy(gFrameBuffer[Line + 0] + ofs, &glyph[0], 7);
+            memcpy(gFrameBuffer[Line + 1] + ofs, &glyph[7], 7);
         }
     }
+}
+
+void UI_PrintString(const char *pString, uint8_t Start, uint8_t End, uint8_t Line, uint8_t Width)
+{
+    PrintStringBig(pString, Start, End, Line, Width, false);
+}
+
+void UI_PrintStringCW(const char *pString, uint8_t Start, uint8_t End, uint8_t Line)
+{
+    PrintStringBig(pString, Start, End, Line, 8, true);
 }
 
 void UI_PrintStringSmall(const char *pString, uint8_t Start, uint8_t End, uint8_t Line, uint8_t char_width, const uint8_t *font)
@@ -116,6 +127,19 @@ void UI_PrintStringSmall(const char *pString, uint8_t Start, uint8_t End, uint8_
 void UI_PrintStringSmallNormal(const char *pString, uint8_t Start, uint8_t End, uint8_t Line)
 {
     UI_PrintStringSmall(pString, Start, End, Line, ARRAY_SIZE(gFontSmall[0]), (const uint8_t *)gFontSmall);
+}
+
+void UI_PrintStringSmallCW(const char *pString, uint8_t Start, uint8_t Line)
+{
+    const unsigned int char_spacing = sizeof(gFontSmallZeroDotted) + 1;
+
+    UI_PrintStringSmallNormal(pString, Start, 0, Line);
+    // Redraw each zero in the slot UI_PrintStringBuffer gave it
+    for (size_t i = 0; pString[i] != '\0'; i++) {
+        if (pString[i] == '0') {
+            memcpy(gFrameBuffer[Line] + Start + 1 + i * char_spacing, gFontSmallZeroDotted, sizeof(gFontSmallZeroDotted));
+        }
+    }
 }
 
 void UI_PrintStringSmallNormalInverse(const char *pString, uint8_t Start, uint8_t End, uint8_t Line)

@@ -24,6 +24,7 @@
 #include "external/printf/printf.h"
 #include "settings.h"
 #include "app/cpo.h"
+#include "app/cpocall.h"
 #include "ui/cpo.h"
 #include "ui/helper.h"
 
@@ -32,13 +33,28 @@ void UI_DisplayCPO(void)
 	char String[24];
 	const uint8_t tx_len = CW_GetTxDisplayTail(String, 17);
 
+	static const char *const titles[] = {"Code Practice", "Send Callsigns", "Copy Callsigns"};
+
 	UI_DisplayClear();
-	UI_PrintStringSmallNormal("Code Practice", 0, 127, 0);
+	UI_PrintStringSmallNormal(titles[gCW_CpoCallMode], 0, 127, 0);
 	if (tx_len > 0) {
-		UI_PrintString(String, 0, 0, 3, 8);
+		UI_PrintStringCW(String, 0, 0, 3);
+	}
+	if (gCW_CpoCallMode != CPO_CALL_MODE_OFF) {
+		// Left-aligned like the keyed line so each character sits above its copy
+		char call_line[CPO_CALL_LINE_SIZE];
+		CPO_Call_GetCallLine(call_line);
+		UI_PrintStringCW(call_line, 0, 0, 1);
+		if (gCW_CpoCallResult == CPO_CALL_RESULT_HIT) {
+			UI_PrintStringSmallNormal("OK", 0, 127, 5);
+		} else if (gCW_CpoCallResult == CPO_CALL_RESULT_MISS) {
+			UI_PrintStringSmallNormal("MISS", 0, 127, 5);
+		}
+		sprintf_(String, "%u/%u", gCW_CpoCallHits, gCW_CpoCallMisses);
+		UI_PrintStringSmallNormal(String, 44, 104, 6);
 	}
 	sprintf_(String, "%u WPM", gEeprom.CW_KEY_WPM);
-	UI_PrintStringSmallNormal(String, 2, 0, 6);	
+	UI_PrintStringSmallNormal(String, 2, 0, 6);
     if (gCW_CpoBacklightOn) {
 		UI_PrintStringSmallNormal("*", 107, 0, 6);
 	}

@@ -107,6 +107,7 @@ static uint8_t s_play_char_len = 0; // number of elements in current char
 static uint8_t s_play_elem_index = 0; // current element index within char
 static bool s_play_long_dah = false; // proper roger: hold each dah for gEeprom.CW_ROGER_DAH_DITS
 static uint16_t s_play_setup_ms = 0; // TX/sidetone setup the current element lost at its start
+static bool s_play_hidden = false; // keep played characters off the TX display line
 
 // Playback FSM states
 typedef enum {
@@ -307,6 +308,7 @@ static void CW_BeginPlayback(bool repeat)
 
     // Prime the playback FSM to start immediately
     s_play_space_pending = false;
+    s_play_hidden = false;
     s_pb_state = PB_STATE_INTER_CHAR_GAP;
     s_elem_start_count = millis();
     gCW_PlaybackActive = (s_playback_buf_len > 0);
@@ -349,6 +351,23 @@ void CW_StartProperRoger(void)
 
     // Keep what was keyed before so the R reads as a reply to it
     s_play_space_pending = (gCW_TX_DisplayIndex > 0);
+}
+
+void CW_StartTextPlayback(const char *text, bool show)
+{
+    if (gCW_Recording || gCW_PlaybackActive) return;
+
+    strncpy(s_playback_buf, text, sizeof(s_playback_buf) - 1);
+    s_playback_buf[sizeof(s_playback_buf) - 1] = '\0';
+    s_play_long_dah = false;
+    CW_BeginPlayback(false);
+    s_play_hidden = !show;
+}
+
+bool CW_KeyerIsIdle(void)
+{
+    return (s_KeyerFSMState == CWK_STATE_IDLE || s_KeyerFSMState == CWK_STATE_EMIT_NONE)
+        && s_bug_state == BUG_STATE_IDLE;
 }
 
 void CW_PlaybackExtendElement(uint32_t setup_ms)
@@ -454,7 +473,9 @@ CW_Action_t CW_PlaybackHandleState(void)
             return CW_ACTION_NONE;
         }
         // Update TX centerline display with the next char (respect pending space)
-        CW_AddToTxDisplay(ch, s_play_space_pending);
+        if (!s_play_hidden) {
+            CW_AddToTxDisplay(ch, s_play_space_pending);
+        }
         s_play_space_pending = false;
 
         // Get morse pattern for char 

@@ -1724,7 +1724,7 @@ void UI_DisplayMenu(void)
 					const uint8_t display_len = CW_GetTxDisplayTail(display, sizeof(display));
 					
 					// Display the recording text on line 2
-					UI_PrintString(display, menu_item_x1, 0, 2, 8);
+					UI_PrintStringCW(display, menu_item_x1, 0, 2);
 					
 					// Show cursor under next position
 					char cursor[2] = "^";
@@ -1745,7 +1745,11 @@ void UI_DisplayMenu(void)
 					if (len == 0) {
 						strcpy(String, "empty");
 					} else {
+						// Drawn here rather than by the shared value printer below so
+						// zeros get the CW dotted glyph
 						CW_FormatMacroDisplay(macroIdx, String, 9);
+						UI_PrintStringCW(String, menu_item_x1, menu_item_x2, 2);
+						already_printed = true;
 					}
 				} else {
 					// record/play/repeat
