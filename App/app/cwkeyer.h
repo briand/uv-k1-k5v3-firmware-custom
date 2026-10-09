@@ -59,6 +59,9 @@ void CW_StartMacroPlayback(uint8_t macroIndex, bool repeat);
 // Send a "proper roger": R with the dah held for CWrgr dits, default 9 (di-daaaaaaaaah-dit)
 void CW_StartProperRoger(void);
 
+// True while playback is sending a proper roger
+bool CW_PlaybackIsProperRoger(void);
+
 // Play arbitrary text (macro character set, ' ' = word gap). With show false the
 // characters stay off the TX display line, e.g. a callsign the operator must copy.
 void CW_StartTextPlayback(const char *text, bool show);

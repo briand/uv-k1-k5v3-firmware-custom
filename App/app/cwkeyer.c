@@ -353,6 +353,11 @@ void CW_StartProperRoger(void)
     s_play_space_pending = (gCW_TX_DisplayIndex > 0);
 }
 
+bool CW_PlaybackIsProperRoger(void)
+{
+    return gCW_PlaybackActive && s_play_long_dah;
+}
+
 void CW_StartTextPlayback(const char *text, bool show)
 {
     if (gCW_Recording || gCW_PlaybackActive) return;

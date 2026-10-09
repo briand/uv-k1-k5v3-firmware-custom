@@ -127,6 +127,11 @@ void CW_AppUpdate(void)
 	const bool     playbackKeyed = fromPlayback && action == CW_ACTION_CARRIER_ON;
 	const uint32_t setupStartMs  = millis();
 
+	// Test: a proper roger lights the LED amber (red and green together) while it keys.
+	// Worked out here because the local-only path below clears the action.
+	const bool rogerLit = fromPlayback && CW_PlaybackIsProperRoger()
+		&& (action == CW_ACTION_CARRIER_ON || action == CW_ACTION_CARRIER_HOLD_ON);
+
 	// ---- local-only sidetone path (no RF) ----
 	// Used when recording a macro, reading ADC, breakin disabled, or code practice
 	if (gCW_Recording || !gEeprom.CW_BREAKIN_ENABLE
@@ -230,6 +235,15 @@ void CW_AppUpdate(void)
 
 	if (playbackKeyed)
 		CW_PlaybackExtendElement(millis_since(setupStartMs));
+
+	// After the RF path, which turns green off when TX starts and red off on suspend.
+	// Only on a change, so a held element doesn't rewrite the register every poll.
+	static bool s_rogerLit;
+	if (rogerLit != s_rogerLit) {
+		s_rogerLit = rogerLit;
+		BK4819_ToggleGpioOut(BK4819_GPIO6_PIN2_GREEN, rogerLit);
+		BK4819_ToggleGpioOut(BK4819_GPIO5_PIN1_RED, rogerLit);
+	}
 
 	// a timeout drops TX now instead of waiting out the hang time
 	if (guard == CW_GUARD_TRIPPED && gCW_State != CW_INACTIVE) {
