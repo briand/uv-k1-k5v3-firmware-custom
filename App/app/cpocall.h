@@ -14,12 +14,15 @@
  *     limitations under the License.
  */
 
-// Callsign drill for code practice. F cycles off -> send -> copy:
+// Callsign drill for code practice. F cycles off -> send -> copy -> copy QTH:
 //   send: a random callsign is shown and the operator keys it
 //   copy: the callsign is played on the sidetone and the operator keys back what
 //         they heard; a hit is answered with "dit dit", a miss replays the call,
 //         and the third miss on one call reveals it and moves on. Sending part
 //         of the call then ? (W1?) asks for a repeat and notes the part on screen.
+//   copy QTH: copy, drilling US state, Canadian province and country codes
+//         (app/cpoqth.c) in place of callsigns; what the code stands for is
+//         named once it is shown
 // Every character is scored as it is decoded.
 
 #ifndef APP_CPOCALL_H
@@ -35,6 +38,7 @@ typedef enum {
 	CPO_CALL_MODE_OFF = 0,
 	CPO_CALL_MODE_SEND,
 	CPO_CALL_MODE_COPY,
+	CPO_CALL_MODE_COPY_QTH,
 } CPO_CallMode_t;
 
 typedef enum {
@@ -46,7 +50,7 @@ typedef enum {
 // Switch mode; resets the score and starts on a new callsign
 void CPO_Call_SetMode(CPO_CallMode_t mode);
 
-// F key: off -> send -> copy -> off
+// F key: off -> send -> copy -> copy QTH -> off
 void CPO_Call_NextMode(void);
 
 // 5 key: clear the line and restart the current callsign unscored (replayed in copy)
@@ -62,6 +66,10 @@ void CPO_Call_Tick10ms(void);
 // Text for the callsign line: the call in send mode or once copied/revealed,
 // otherwise the notes so far, e.g. "W1A?" (just "?" with none)
 void CPO_Call_GetCallLine(char out[CPO_CALL_LINE_SIZE]);
+
+// Copy QTH: the state or country the code stands for once the code is shown,
+// otherwise NULL
+const char *CPO_Call_GetName(void);
 
 extern CPO_CallMode_t gCW_CpoCallMode;
 extern char gCW_CpoCall[CPO_CALL_MAX_LEN + 1];

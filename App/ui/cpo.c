@@ -25,8 +25,33 @@
 #include "settings.h"
 #include "app/cpo.h"
 #include "app/cpocall.h"
+#include "app/cpoqth.h"
 #include "ui/cpo.h"
 #include "ui/helper.h"
+
+// Clear of a two-letter code on the large callsign line, with room for
+// CPO_QTH_NAME_LINE_LEN small characters to the right edge
+#define QTH_NAME_X 28
+
+// Beside the code on the callsign line, wrapped at a space onto its second line
+static void DrawQthName(const char *name)
+{
+	char line[CPO_QTH_NAME_LINE_LEN + 1];
+	size_t cut = strlen(name);
+
+	if (cut > CPO_QTH_NAME_LINE_LEN) {
+		cut = CPO_QTH_NAME_LINE_LEN;
+		while (cut > 0 && name[cut] != ' ') {
+			cut--;
+		}
+	}
+	memcpy(line, name, cut);
+	line[cut] = '\0';
+	UI_PrintStringSmallNormal(line, QTH_NAME_X, 0, 1);
+	if (name[cut] == ' ') {
+		UI_PrintStringSmallNormal(name + cut + 1, QTH_NAME_X, 0, 2);
+	}
+}
 
 void UI_DisplayCPO(void)
 {
@@ -36,7 +61,7 @@ void UI_DisplayCPO(void)
 	// plain practice keeps the narrower one so more free-form sending stays in view
 	const uint8_t tx_len = CW_GetTxDisplayTail(String, drill ? UI_CW_LARGE_MAX_LEN + 1 : 17);
 
-	static const char *const titles[] = {"Code Practice", "Send Callsigns", "Copy Callsigns"};
+	static const char *const titles[] = {"Code Practice", "Send Callsigns", "Copy Callsigns", "Copy State/Country"};
 
 	UI_DisplayClear();
 	UI_PrintStringSmallNormal(titles[gCW_CpoCallMode], 0, 127, 0);
@@ -51,6 +76,10 @@ void UI_DisplayCPO(void)
 		char call_line[CPO_CALL_LINE_SIZE];
 		CPO_Call_GetCallLine(call_line);
 		UI_PrintStringCWLarge(call_line, 0, 1);
+		const char *name = CPO_Call_GetName();
+		if (name) {
+			DrawQthName(name);
+		}
 		if (gCW_CpoCallResult == CPO_CALL_RESULT_HIT) {
 			UI_PrintStringSmallNormal("OK", 0, 127, 5);
 		} else if (gCW_CpoCallResult == CPO_CALL_RESULT_MISS) {

@@ -19,6 +19,7 @@
 #include <string.h>
 
 #include "app/cpocall.h"
+#include "app/cpoqth.h"
 #include "app/cwkeyer.h"
 #include "app/cwmacro.h"
 #include "driver/bk4819.h"
@@ -58,6 +59,7 @@ static uint8_t s_pos = 0;          // index in gCW_CpoCall of the next expected 
 static uint8_t s_tries = 0;        // misses on the current callsign
 static uint8_t s_known = 0;        // copy mode: leading characters confirmed by a partial + ?
 static bool s_revealed = false;    // copy mode: the call may be shown in full
+static const char *s_name = NULL;  // copy QTH: what the code stands for
 static CPO_CallStep_t s_step = CPO_STEP_NONE;
 static uint16_t s_wait_10ms = 0;   // counts down only while the operator is idle
 static bool s_paused = false;      // operator has paused since s_step was set
@@ -81,17 +83,15 @@ static char RandLetter(uint8_t count)
 	return 'A' + (char)(Rand() % count);
 }
 
-static void NewCall(void)
+static bool IsCopyMode(void)
+{
+	return gCW_CpoCallMode == CPO_CALL_MODE_COPY || gCW_CpoCallMode == CPO_CALL_MODE_COPY_QTH;
+}
+
+static void NewCallsign(void)
 {
 	char *p = gCW_CpoCall;
 	uint8_t suffix_len;
-
-	// Fold in the time the operator finished the last call so the sequence
-	// doesn't repeat from session to session. xorshift must never sit at zero.
-	s_rng_state ^= millis();
-	if (s_rng_state == 0) {
-		s_rng_state = 0x2545F491;
-	}
 
 	if (Rand() % 3 != 0) {
 		// US: 1x2, 1x3, 2x1, 2x2 or 2x3
@@ -126,6 +126,23 @@ static void NewCall(void)
 		*p++ = RandLetter(26);
 	}
 	*p = '\0';
+}
+
+static void NewCall(void)
+{
+	// Fold in the time the operator finished the last call so the sequence
+	// doesn't repeat from session to session. xorshift must never sit at zero.
+	s_rng_state ^= millis();
+	if (s_rng_state == 0) {
+		s_rng_state = 0x2545F491;
+	}
+
+	if (gCW_CpoCallMode == CPO_CALL_MODE_COPY_QTH) {
+		s_name = CPO_Qth_Pick(Rand(), gCW_CpoCall);
+	} else {
+		s_name = NULL;
+		NewCallsign();
+	}
 }
 
 static void StopPlayback(void)
@@ -163,7 +180,7 @@ static void Begin(CPO_CallStep_t step, bool play)
 	gCW_CpoCallResult = CPO_CALL_RESULT_NONE;
 	s_pos = 0;
 	CW_ClearTxDisplay();
-	if (play && gCW_CpoCallMode == CPO_CALL_MODE_COPY) {
+	if (play && IsCopyMode()) {
 		CW_StartTextPlayback(gCW_CpoCall, false);
 	}
 	gUpdateDisplay = true;
@@ -176,14 +193,14 @@ void CPO_Call_SetMode(CPO_CallMode_t mode)
 	gCW_CpoCallHits = 0;
 	gCW_CpoCallMisses = 0;
 	Begin(CPO_STEP_NEXT, false);
-	if (mode == CPO_CALL_MODE_COPY) {
+	if (IsCopyMode()) {
 		Schedule(CPO_STEP_RETRY, 0);   // first play, held until the keyer is idle
 	}
 }
 
 void CPO_Call_NextMode(void)
 {
-	CPO_Call_SetMode(gCW_CpoCallMode == CPO_CALL_MODE_COPY
+	CPO_Call_SetMode(gCW_CpoCallMode == CPO_CALL_MODE_COPY_QTH
 		? CPO_CALL_MODE_OFF
 		: (CPO_CallMode_t)(gCW_CpoCallMode + 1));
 }
@@ -214,7 +231,7 @@ void CPO_Call_OnChar(char ch)
 		CW_AddToTxDisplay(ch, false);   // the encoder put it on the old line
 	}
 
-	if (ch == '?' && gCW_CpoCallMode == CPO_CALL_MODE_COPY) {
+	if (ch == '?' && IsCopyMode()) {
 		// Asking for a repeat, as on the air: no penalty. Everything keyed before
 		// the ? has already matched, so it goes on the notes (which only grow).
 		if (s_pos > s_known) {
@@ -230,7 +247,7 @@ void CPO_Call_OnChar(char ch)
 			gCW_CpoCallMisses++;
 		}
 		gCW_CpoCallResult = CPO_CALL_RESULT_MISS;
-		if (gCW_CpoCallMode == CPO_CALL_MODE_COPY && ++s_tries >= CPO_CALL_MAX_TRIES) {
+		if (IsCopyMode() && ++s_tries >= CPO_CALL_MAX_TRIES) {
 			s_revealed = true;
 			Schedule(CPO_STEP_NEXT, CPO_CALL_REVEAL_10MS);
 		} else {
@@ -241,7 +258,7 @@ void CPO_Call_OnChar(char ch)
 			gCW_CpoCallHits++;
 		}
 		gCW_CpoCallResult = CPO_CALL_RESULT_HIT;
-		if (gCW_CpoCallMode == CPO_CALL_MODE_COPY) {
+		if (IsCopyMode()) {
 			s_revealed = true;
 			Schedule(CPO_STEP_ACK, CPO_CALL_ACK_10MS);
 		} else {
@@ -281,4 +298,9 @@ void CPO_Call_GetCallLine(char out[CPO_CALL_LINE_SIZE])
 	memcpy(out, gCW_CpoCall, s_known);
 	out[s_known] = '?';
 	out[s_known + 1] = '\0';
+}
+
+const char *CPO_Call_GetName(void)
+{
+	return s_revealed ? s_name : NULL;
 }
