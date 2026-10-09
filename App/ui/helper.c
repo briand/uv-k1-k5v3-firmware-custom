@@ -129,6 +129,40 @@ void UI_PrintStringSmallNormal(const char *pString, uint8_t Start, uint8_t End, 
     UI_PrintStringSmall(pString, Start, End, Line, ARRAY_SIZE(gFontSmall[0]), (const uint8_t *)gFontSmall);
 }
 
+// Frequency-font glyph for c, or NULL for the few CW characters it lacks
+static const uint8_t *CWLargeGlyph(char c)
+{
+    if (c == '0')
+        return gFontBigDigitZeroDotted;
+    if (c == 'O')
+        return gFontBigDigits[0];
+    if (c > '0' && c <= '9')
+        return gFontBigDigits[c - '0'];
+    if (c == '-')
+        return gFontBigDigits[10];
+
+    const char *p = (c != '\0') ? strchr(gFontBigTextChars, c) : NULL;
+    return p ? gFontBigText[p - gFontBigTextChars] : NULL;
+}
+
+void UI_PrintStringCWLarge(const char *pString, uint8_t Start, uint8_t Line)
+{
+    for (size_t i = 0; pString[i] != '\0'; i++) {
+        const char         c     = pString[i];
+        const unsigned int ofs   = Start + i * UI_CW_LARGE_PITCH;
+        const uint8_t     *glyph = CWLargeGlyph(c);
+
+        if (glyph) {
+            memcpy(gFrameBuffer[Line + 0] + ofs, glyph, 10);
+            memcpy(gFrameBuffer[Line + 1] + ofs, glyph + 10, 10);
+        } else if (c > ' ' && c < 127) {
+            // e.g. '&': the regular big font, centred in the cell
+            memcpy(gFrameBuffer[Line + 0] + ofs + 1, &gFontBig[c - ' ' - 1][0], 7);
+            memcpy(gFrameBuffer[Line + 1] + ofs + 1, &gFontBig[c - ' ' - 1][7], 7);
+        }
+    }
+}
+
 void UI_PrintStringSmallCW(const char *pString, uint8_t Start, uint8_t Line)
 {
     const unsigned int char_spacing = sizeof(gFontSmallZeroDotted) + 1;
