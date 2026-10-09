@@ -336,7 +336,7 @@ void CW_StartMacroPlayback(uint8_t macroIndex, bool repeat)
 #endif
 }
 
-// Proper roger: R with the dah held for CWrgr dits (default 7), di-daaaaaaah-dit
+// Proper roger: R with the dah held for CWrgr dits (default 9), di-daaaaaaaaah-dit
 void CW_StartProperRoger(void)
 {
     if (gCW_Recording || gCW_PlaybackActive) return;

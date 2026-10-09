@@ -868,7 +868,7 @@ _NR7Y_CW_KEYER_MODES = [
 # mirrors CW_ROGER_DAH_DITS_* in App/settings.h
 _NR7Y_CW_ROGER_DITS_MIN = 3
 _NR7Y_CW_ROGER_DITS_MAX = 20
-_NR7Y_CW_ROGER_DITS_DEFAULT = 7
+_NR7Y_CW_ROGER_DITS_DEFAULT = 9
 
 # Break-in hang time in 10 ms units (full byte at _NR7Y_CW_SETTINGS_ADDR+7),
 # mirrors CW_HANG_10MS_* in App/settings.h
@@ -4210,7 +4210,7 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
                                  RadioSettingValueInteger(_NR7Y_CW_ROGER_DITS_MIN,
                                                           _NR7Y_CW_ROGER_DITS_MAX, rg))
             rs_rg.set_doc("Length of the dah in the PROPER ROGER key action, in dits "
-                          "(3 = plain R, default 7)")
+                          "(3 = plain R, default 9)")
             cw.append(rs_rg)
         except Exception as e:
             LOG.error("CW roger dits: %s", e)

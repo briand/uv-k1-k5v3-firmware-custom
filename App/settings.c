@@ -47,6 +47,34 @@ static void SETTINGS_LoadEepromDtmf(uint32_t addr, char *dest, size_t size, cons
     }
 }
 
+#ifdef ENABLE_CW_MODULATOR
+// Put the CW key layout over the stored one and mark the CW settings block as done.
+// Writes only these two 8-byte blocks: the rest of gEeprom isn't loaded yet at this
+// point, so SETTINGS_SaveSettings would write half-read settings back.
+static void WriteCWKeyLayout(uint8_t cwBlock[8])
+{
+    uint8_t keys[8];
+
+    gEeprom.KEY_1_SHORT_PRESS_ACTION = KEY_1_SHORT_DEFAULT;
+    gEeprom.KEY_1_LONG_PRESS_ACTION  = KEY_1_LONG_DEFAULT;
+    gEeprom.KEY_2_SHORT_PRESS_ACTION = KEY_2_SHORT_DEFAULT;
+    gEeprom.KEY_2_LONG_PRESS_ACTION  = KEY_2_LONG_DEFAULT;
+    gEeprom.KEY_M_LONG_PRESS_ACTION  = KEY_M_LONG_DEFAULT;
+
+    // 0E90..0E97, packed as SETTINGS_SaveSettings does
+    PY25Q16_ReadBuffer(0x00A0A8, keys, sizeof(keys));
+    keys[0] = (keys[0] & 0x01) | (gEeprom.KEY_M_LONG_PRESS_ACTION << 1);  // bit 0 is the beep setting
+    keys[1] = gEeprom.KEY_1_SHORT_PRESS_ACTION;
+    keys[2] = gEeprom.KEY_1_LONG_PRESS_ACTION;
+    keys[3] = gEeprom.KEY_2_SHORT_PRESS_ACTION;
+    keys[4] = gEeprom.KEY_2_LONG_PRESS_ACTION;
+    PY25Q16_WriteBuffer(0x00A0A8, keys, sizeof(keys), false);
+
+    cwBlock[6] = CW_KEY_LAYOUT_MARKER;
+    PY25Q16_WriteBuffer(0x00A140, cwBlock, 8, false);
+}
+#endif
+
 void SETTINGS_InitEEPROM(void)
 {
     uint8_t Data[16] = {0};
@@ -289,11 +317,11 @@ gEeprom.FreqChannel[1]   = IS_FREQ_CHANNEL(Data16[5]) ? Data16[5] : (FREQ_CHANNE
     // 0E90..0E97
     PY25Q16_ReadBuffer(0x00A0A8, Data, 8);
     gEeprom.BEEP_CONTROL                 = Data[0] & 1;
-    gEeprom.KEY_M_LONG_PRESS_ACTION      = ((Data[0] >> 1) < ACTION_OPT_LEN) ? (Data[0] >> 1) : ACTION_OPT_NONE;
-    gEeprom.KEY_1_SHORT_PRESS_ACTION     = (Data[1] < ACTION_OPT_LEN) ? Data[1] : ACTION_OPT_MONITOR;
-    gEeprom.KEY_1_LONG_PRESS_ACTION      = (Data[2] < ACTION_OPT_LEN) ? Data[2] : ACTION_OPT_NONE;
-    gEeprom.KEY_2_SHORT_PRESS_ACTION     = (Data[3] < ACTION_OPT_LEN) ? Data[3] : ACTION_OPT_SCAN;
-    gEeprom.KEY_2_LONG_PRESS_ACTION      = (Data[4] < ACTION_OPT_LEN) ? Data[4] : ACTION_OPT_NONE;
+    gEeprom.KEY_M_LONG_PRESS_ACTION      = ((Data[0] >> 1) < ACTION_OPT_LEN) ? (Data[0] >> 1) : KEY_M_LONG_DEFAULT;
+    gEeprom.KEY_1_SHORT_PRESS_ACTION     = (Data[1] < ACTION_OPT_LEN) ? Data[1] : KEY_1_SHORT_DEFAULT;
+    gEeprom.KEY_1_LONG_PRESS_ACTION      = (Data[2] < ACTION_OPT_LEN) ? Data[2] : KEY_1_LONG_DEFAULT;
+    gEeprom.KEY_2_SHORT_PRESS_ACTION     = (Data[3] < ACTION_OPT_LEN) ? Data[3] : KEY_2_SHORT_DEFAULT;
+    gEeprom.KEY_2_LONG_PRESS_ACTION      = (Data[4] < ACTION_OPT_LEN) ? Data[4] : KEY_2_LONG_DEFAULT;
     gEeprom.SCAN_RESUME_MODE             = (Data[5] < 105)            ? Data[5] : 14;
     gEeprom.AUTO_KEYPAD_LOCK             = (Data[6] < 41)             ? Data[6] : 0;
 #ifdef ENABLE_FEAT_F4HWN
@@ -415,6 +443,13 @@ gEeprom.FreqChannel[1]   = IS_FREQ_CHANNEL(Data16[5]) ? Data16[5] : (FREQ_CHANNE
 	// Data[7]: break-in hang time in 10 ms units. 0xFF (unused since v1.0.0) or out of range = 300 ms.
 	// Byte 6 is skipped on purpose: pre-1.0 betas kept an ADC low byte there that reads as a valid time.
 	gEeprom.CW_HANG_10MS = (Data[7] >= CW_HANG_10MS_MIN && Data[7] <= CW_HANG_10MS_MAX) ? Data[7] : CW_HANG_10MS_DEFAULT;
+
+	// Data[6]: CW key layout marker. A stored key action is only replaced when it's out
+	// of range, so a radio would keep the factory's layout forever. Write ours once;
+	// after that, changes from the menu or CHIRP stick. Reset ALL erases the marker and
+	// the actions together, and both then come back as the CW layout.
+	if (Data[6] != CW_KEY_LAYOUT_MARKER)
+		WriteCWKeyLayout(Data);
 #endif
 
     // 0F40..0F47
@@ -1129,7 +1164,7 @@ void SETTINGS_SaveSettings(void)
 	State[3] = (gEeprom.CW_MESSAGE_REPEAT_DELAY) & 0x7F;
 	State[4] = (uint8_t)gEeprom.CW_KEYER_MODE;  // keyer mode: 0=A, 1=B, 2=Ultimatic, 3=Bug
 	State[5] = gEeprom.CW_ROGER_DAH_DITS;  // proper roger dah length in dits
-	State[6] = 0xFF;  // unused (was CW_ADC_CABLE_20K low)
+	State[6] = CW_KEY_LAYOUT_MARKER;  // keep the key layout from being written again (was CW_ADC_CABLE_20K low)
 	State[7] = gEeprom.CW_HANG_10MS;  // break-in hang time in 10 ms units
     PY25Q16_WriteBuffer(0x00A140, SecBuf, 0x08, false);
 #endif

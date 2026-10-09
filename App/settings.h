@@ -92,12 +92,17 @@ typedef enum CW_IambicMode_t CW_IambicMode_t;
 // Proper roger dah length in dits (CWrgr menu); 3 is a plain R
 #define CW_ROGER_DAH_DITS_MIN     3
 #define CW_ROGER_DAH_DITS_MAX     20
-#define CW_ROGER_DAH_DITS_DEFAULT 7
+#define CW_ROGER_DAH_DITS_DEFAULT 9
 
 // Break-in hang time in 10 ms units (CWhang menu): how long TX stays up after the last element
 #define CW_HANG_10MS_MIN          1
 #define CW_HANG_10MS_MAX          200
 #define CW_HANG_10MS_DEFAULT      30
+
+// CW settings byte 6 once the CW key layout (KEY_*_DEFAULT below) has been written over
+// the stored one. Bump it to write the layout again on the next boot, e.g. after the
+// actions are renumbered. Pre-1.0 betas kept an ADC calibration byte here.
+#define CW_KEY_LAYOUT_MARKER      0xC1
 
 #endif
 
@@ -223,6 +228,22 @@ enum ACTION_OPT_t {
 #endif
     ACTION_OPT_LEN
 };
+
+// Side key and M long actions when none are stored, e.g. after Reset ALL. CW builds
+// also write theirs once over a stored layout; see CW_KEY_LAYOUT_MARKER.
+#ifdef ENABLE_CW_MODULATOR
+    #define KEY_1_SHORT_DEFAULT  ACTION_OPT_CW_PROPER_ROGER
+    #define KEY_1_LONG_DEFAULT   ACTION_OPT_PLAY_CWMSG1   // a CQ recorded in message 1
+    #define KEY_2_SHORT_DEFAULT  ACTION_OPT_CW_SPEED
+    #define KEY_2_LONG_DEFAULT   ACTION_OPT_CW_KEY_INPUT  // on F2: F1 becomes a paddle in the side button inputs
+    #define KEY_M_LONG_DEFAULT   ACTION_OPT_MONITOR
+#else
+    #define KEY_1_SHORT_DEFAULT  ACTION_OPT_MONITOR
+    #define KEY_1_LONG_DEFAULT   ACTION_OPT_NONE
+    #define KEY_2_SHORT_DEFAULT  ACTION_OPT_SCAN
+    #define KEY_2_LONG_DEFAULT   ACTION_OPT_NONE
+    #define KEY_M_LONG_DEFAULT   ACTION_OPT_NONE
+#endif
 
 #ifdef ENABLE_VOICE
     enum VOICE_Prompt_t

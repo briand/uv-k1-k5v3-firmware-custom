@@ -56,7 +56,7 @@ bool CW_CheckKeyerInputs(uint8_t new_mode);
 // If repeat is true, playback will restart after CW_MESSAGE_REPEAT_DELAY expires.
 void CW_StartMacroPlayback(uint8_t macroIndex, bool repeat);
 
-// Send a "proper roger": R with the dah held for CWrgr dits, default 7 (di-daaaaaaah-dit)
+// Send a "proper roger": R with the dah held for CWrgr dits, default 9 (di-daaaaaaaaah-dit)
 void CW_StartProperRoger(void);
 
 // Play arbitrary text (macro character set, ' ' = word gap). With show false the
