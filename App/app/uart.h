@@ -19,6 +19,7 @@
 #define APP_UART_H
 
 #include <stdbool.h>
+#include <stdint.h>
 
 enum
 {
@@ -30,8 +31,12 @@ enum
 #endif
 };
 
-bool UART_IsCommandAvailable(uint32_t Port);
-void UART_HandleCommand(uint32_t Port);
-
+#if defined(ENABLE_UART)
+void UART_ResetRxParser(void);
 #endif
 
+bool UART_IsCommandAvailable(uint32_t Port);
+void UART_HandleCommand(uint32_t Port);
+void UART_ServiceCommands(void);
+
+#endif

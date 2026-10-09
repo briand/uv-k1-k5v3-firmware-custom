@@ -18,6 +18,10 @@
 #include "audio.h"
 #include "misc.h"
 
+#if defined(ENABLE_UART) || defined(ENABLE_USB)
+#include "app/uart.h"
+#endif
+
 #ifdef ENABLE_SCAN_RANGES
 #include "chFrScanner.h"
 #endif
@@ -73,7 +77,7 @@ static uint16_t blacklistFreqs[15];
 static uint8_t blacklistFreqsIdx;
 #endif
 
-const char *bwOptions[] = {"25", "12.5", "6.25"};
+const char *const bwOptions[] = {"25", "12.5", "6.25"};
 const uint8_t modulationTypeTuneSteps[] = {100, 50, 10};
 const uint8_t modTypeReg47Values[] = {1, 7, 5};
 
@@ -176,7 +180,7 @@ char freqInputString[11];
 uint8_t menuState = 0;
 uint16_t listenT = 0;
 
-RegisterSpec registerSpecs[] = {
+const RegisterSpec registerSpecs[] = {
     {},
     {"LNAs", BK4819_REG_13, 8, 0b11, 1},
     {"LNA", BK4819_REG_13, 5, 0b111, 1},
@@ -2608,6 +2612,9 @@ void APP_RunSpectrum()
 
     while (isInitialized)
     {
+#if defined(ENABLE_UART) || defined(ENABLE_USB)
+        UART_ServiceCommands();
+#endif
         Tick();
     }
 

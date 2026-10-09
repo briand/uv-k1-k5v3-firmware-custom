@@ -156,6 +156,12 @@ static void CW_KeyerDeinit()
 {
     CW_KeyerResetRuntime();
 
+    // PA10 (USART1 RX) must be handed back first: CW_ConfigurePortGround(true)
+    // disabled USART1, stopped the RX DMA channel and left PA10 driving low, and
+    // nothing else in the firmware undoes that short of a power cycle. Leaving it
+    // captured kills the hardware serial port (CHIRP sees no reply at all, which
+    // surfaces as a "short header") for the rest of the session.
+    CW_ConfigurePortGround(false);
     CW_ConfigurePortRing(false); // make sure PB15 is an input with no pullup, to avoid affecting the line if shorted to mic (keyer rework)
     CW_ConfigureUsbPaddlePins(false); // restore PA11/PA12 to USB AF if USB paddle mode was active
 
@@ -270,8 +276,10 @@ static void CW_KeyerInit()
     // treats either port contact as the key - so PORT_GROUND alone is sufficient
     // to decide whether the ring pin should be configured.
     CW_ConfigurePortRing(uses_port_ground);
-    if (uses_port_ground)
-        CW_ConfigurePortGround(true);
+    // Unconditional, not "if (uses_port_ground)": switching straight from a port
+    // mode to a non-port CW mode never runs CW_KeyerDeinit(), so this is the only
+    // place that gives PA10/USART1 back in that path.
+    CW_ConfigurePortGround(uses_port_ground);
     CW_ConfigureUsbPaddlePins(uses_usb_port);
 
     gCW_KeyerUsingSD1 = (key_input_mode & CW_KEY_FLAG_SIDE1) != 0;

@@ -411,23 +411,7 @@ void RADIO_ConfigureChannel(const unsigned int VFO, const unsigned int configure
             pVfo->CHANNEL_BANDWIDTH = !!((d4 >> 1) & 1u);  // WIDE=0, NARROW=1
             pVfo->OUTPUT_POWER      =   ((d4 >> 2) & 7u);
             pVfo->BUSY_CHANNEL_LOCK = !!((d4 >> 5) & 1u);
-			#ifdef ENABLE_EXTRA_FILTER
-				// For CW/SSB, bit 6 encodes NARROWEST instead of TX_LOCK
-				// (TX_LOCK is inapplicable to those modes).
-				if (((
-#ifdef ENABLE_CW_MODULATOR
-				    pVfo->Modulation == MODULATION_CW ||
-#endif
-				    pVfo->Modulation == MODULATION_USB))
-				    && ((d4 >> 6) & 1u)) {
-					pVfo->CHANNEL_BANDWIDTH = BANDWIDTH_NARROWEST;
-					pVfo->TX_LOCK = false;
-				} else {
-					pVfo->TX_LOCK = !!((d4 >> 6) & 1u);
-				}
-			#else
-            	pVfo->TX_LOCK = !!((d4 >> 6) & 1u);
-			#endif
+            pVfo->TX_LOCK           = !!((d4 >> 6) & 1u);
         }
 
         if (data[5] == 0xFF)
@@ -814,28 +798,50 @@ void RADIO_SelectVfos(void)
     RADIO_SelectCurrentVfo();
 }
 
-BK4819_FilterBandwidth_t RADIO_GetAMFilterBandwidth(const VFO_Info_t *pVfo)
+// Single place that turns the stored one-bit wide/narrow selection into an
+// actual RF filter. The bit means the same thing everywhere ("this channel is
+// the narrow one"); only this function knows what that costs in kilohertz, and
+// it differs per modulation:
+//
+//   FM       wide 25k     narrow 12.5k  (SetNFM upgrades narrow to 6.25k)
+//   AM       wide 25k     narrow BW_AM
+//   CW/USB   wide 6.25k   narrow 2.0k   (SetNFM does not apply)
+//
+// CW and SSB never want 12.5k or wider, so their pair is shifted down a notch.
+// That is deliberately independent of SetNFM, which is documented as an FM
+// setting and has no business moving an SSB passband.
+BK4819_FilterBandwidth_t RADIO_ResolveFilter(const VFO_Info_t *pVfo)
 {
-    // On BK4829, AM "wide" intentionally reuses the wider RF filter preset.
-    return (pVfo->CHANNEL_BANDWIDTH == BANDWIDTH_WIDE) ? BK4819_FILTER_BW_WIDE : BK4819_FILTER_BW_AM;
+    const bool narrow = (pVfo->CHANNEL_BANDWIDTH != BANDWIDTH_WIDE);
+
+#ifdef ENABLE_EXTRA_FILTER
+    if (
+    #ifdef ENABLE_CW_MODULATOR
+        pVfo->Modulation == MODULATION_CW ||
+    #endif
+        pVfo->Modulation == MODULATION_USB)
+    {
+        return narrow ? BK4819_FILTER_BW_NARROWEST : BK4819_FILTER_BW_NARROWER;
+    }
+#endif
+
+    if (pVfo->Modulation == MODULATION_AM)
+    {
+        // On BK4829, AM "wide" intentionally reuses the wider RF filter preset.
+        return narrow ? BK4819_FILTER_BW_AM : BK4819_FILTER_BW_WIDE;
+    }
+
+#ifdef ENABLE_FEAT_F4HWN_NARROWER
+    if (narrow && gSetting_set_nfm == 1)
+        return BK4819_FILTER_BW_NARROWER;
+#endif
+
+    return narrow ? BK4819_FILTER_BW_NARROW : BK4819_FILTER_BW_WIDE;
 }
 
 void RADIO_SetupRegisters(bool switchToForeground)
 {
-    BK4819_FilterBandwidth_t Bandwidth = gRxVfo->CHANNEL_BANDWIDTH;
-
-#ifdef ENABLE_EXTRA_FILTER
-    // BANDWIDTH_NARROWEST (2) != BK4819_FILTER_BW_NARROWEST (4); translate explicitly.
-    if (Bandwidth == (BK4819_FilterBandwidth_t)BANDWIDTH_NARROWEST)
-        Bandwidth = BK4819_FILTER_BW_NARROWEST;
-#endif
-
-    #ifdef ENABLE_FEAT_F4HWN_NARROWER
-        if(Bandwidth == BK4819_FILTER_BW_NARROW && gSetting_set_nfm == 1)
-        {
-            Bandwidth = BK4819_FILTER_BW_NARROWER;
-        }
-    #endif
+    const BK4819_FilterBandwidth_t Bandwidth = RADIO_ResolveFilter(gRxVfo);
 
 #ifdef ENABLE_CW_MODULATOR
     // For CW/SSB in monitor mode: keep the PA enabled to avoid the
@@ -855,32 +861,7 @@ void RADIO_SetupRegisters(bool switchToForeground)
 
     BK4819_ToggleGpioOut(BK4819_GPIO6_PIN2_GREEN, false);
 
-    if (gRxVfo->Modulation == MODULATION_AM)
-        BK4819_SetFilterBandwidth(RADIO_GetAMFilterBandwidth(gRxVfo), true);
-    else
-    {
-        switch (Bandwidth)
-        {
-            default:
-                Bandwidth = BK4819_FILTER_BW_WIDE;
-                [[fallthrough]];
-            case BK4819_FILTER_BW_WIDE:
-            case BK4819_FILTER_BW_NARROW:
-		    case BK4819_FILTER_BW_NARROWER:
-                #ifdef ENABLE_AM_FIX
-    //              BK4819_SetFilterBandwidth(Bandwidth, gRxVfo->Modulation == MODULATION_AM && gSetting_AM_fix);
-                    BK4819_SetFilterBandwidth(Bandwidth, true);
-                #else
-                    BK4819_SetFilterBandwidth(Bandwidth, false);
-                #endif
-                break;
-#ifdef ENABLE_EXTRA_FILTER
-            case BK4819_FILTER_BW_NARROWEST:
-                BK4819_SetFilterBandwidth(BK4819_FILTER_BW_NARROWEST, false);
-                break;
-#endif
-        }
-    }
+    BK4819_SetFilterBandwidth(Bandwidth, true);
 
     BK4819_ToggleGpioOut(BK4819_GPIO5_PIN1_RED, false);
 
@@ -1085,20 +1066,7 @@ void RADIO_SetupRegisters(bool switchToForeground)
 
 void RADIO_SetTxParameters(void)
 {
-	BK4819_FilterBandwidth_t Bandwidth = gCurrentVfo->CHANNEL_BANDWIDTH;
-
-#ifdef ENABLE_EXTRA_FILTER
-    // BANDWIDTH_NARROWEST (2) != BK4819_FILTER_BW_NARROWEST (4); translate explicitly.
-    if (Bandwidth == (BK4819_FilterBandwidth_t)BANDWIDTH_NARROWEST)
-        Bandwidth = BK4819_FILTER_BW_NARROWEST;
-#endif
-
-    #ifdef ENABLE_FEAT_F4HWN_NARROWER
-        if(Bandwidth == BK4819_FILTER_BW_NARROW && gSetting_set_nfm == 1)
-        {
-            Bandwidth = BK4819_FILTER_BW_NARROWER;
-        }
-    #endif
+	const BK4819_FilterBandwidth_t Bandwidth = RADIO_ResolveFilter(gCurrentVfo);
 
 #ifdef ENABLE_CW_MODULATOR
 	if(gTxVfo->Modulation != MODULATION_CW)
@@ -1109,26 +1077,7 @@ void RADIO_SetTxParameters(void)
 
     BK4819_ToggleGpioOut(BK4819_GPIO0_PIN28_RX_ENABLE, false);
 
-	switch (Bandwidth)
-	{
-		default:
-			Bandwidth = BK4819_FILTER_BW_WIDE;
-			[[fallthrough]];
-		case BK4819_FILTER_BW_WIDE:
-		case BK4819_FILTER_BW_NARROW:
-			#ifdef ENABLE_AM_FIX
-//				BK4819_SetFilterBandwidth(Bandwidth, gCurrentVfo->Modulation == MODULATION_AM && gSetting_AM_fix);
-				BK4819_SetFilterBandwidth(Bandwidth, true);
-			#else
-				BK4819_SetFilterBandwidth(Bandwidth, false);
-			#endif
-			break;
-	#ifdef ENABLE_EXTRA_FILTER
-		case BK4819_FILTER_BW_NARROWEST:
-			BK4819_SetFilterBandwidth(BK4819_FILTER_BW_NARROWEST, false);
-			break;
-	#endif
-	}	
+	BK4819_SetFilterBandwidth(Bandwidth, true);
 
 	uint32_t tx_frequency = gCurrentVfo->pTX->Frequency;
 #ifdef ENABLE_CW_MODULATOR
@@ -1266,7 +1215,7 @@ void RADIO_SetModulation(ModulationMode_t modulation)
                 BK4819_WriteRegister(0x55, 0x31a9);
             #endif
 
-            BK4819_SetFilterBandwidth(RADIO_GetAMFilterBandwidth(gRxVfo), true);
+            BK4819_SetFilterBandwidth(RADIO_ResolveFilter(gRxVfo), true);
             break;
         }
 
@@ -1512,14 +1461,7 @@ void RADIO_SendCssTail(void)
 
 void RADIO_SendEndOfTransmission(void)
 {
-    BK4819_FilterBandwidth_t Bandwidth = gCurrentVfo->CHANNEL_BANDWIDTH;
-
-    #ifdef ENABLE_FEAT_F4HWN_NARROWER
-        if(Bandwidth == BK4819_FILTER_BW_NARROW && gSetting_set_nfm == 1)
-        {
-            Bandwidth = BK4819_FILTER_BW_NARROWER;
-        }
-    #endif
+    const BK4819_FilterBandwidth_t Bandwidth = RADIO_ResolveFilter(gCurrentVfo);
 
 #ifdef ENABLE_CW_MODULATOR
 	if (gTxVfo->Modulation != MODULATION_CW && gTxVfo->Modulation != MODULATION_USB) {

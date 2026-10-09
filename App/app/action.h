@@ -55,6 +55,14 @@ void ACTION_SwitchFilter(void);
         void ACTION_RxTxLog(void);
     #endif
 #endif
+
+#ifdef ENABLE_FEAT_F4HWN_ACTION_PICKER
+#define ACTION_PICKER_TIMEOUT_500MS 10u
+extern uint8_t gActionPickerKey;
+extern uint8_t gActionPickerSelection[2];
+extern uint8_t gActionPickerTimeout_500ms;
+bool ACTION_PickerProcessKey(KEY_Code_t key, bool isPressed, bool isHeld);
+#endif
 void ACTION_Handle(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld);
 
 #endif

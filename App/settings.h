@@ -200,6 +200,9 @@ enum ACTION_OPT_t {
 #ifdef ENABLE_FEAT_F4HWN_RXTX_LOG
     ACTION_OPT_RXTX_LOG,
 #endif
+#ifdef ENABLE_FEAT_F4HWN_FOXHUNT
+    ACTION_OPT_FOXHUNT,
+#endif
     ACTION_OPT_LEN
 };
 
@@ -424,7 +427,7 @@ void SETTINGS_SaveSettings(void);
 void SETTINGS_SaveChannelName(uint16_t channel, const char * name);
 void SETTINGS_SaveChannel(uint16_t Channel, uint8_t VFO, const VFO_Info_t *pVFO, uint8_t Mode);
 void SETTINGS_SaveBatteryCalibration(const uint16_t * batteryCalibration);
-void SETTINGS_UpdateChannel(uint16_t channel, const VFO_Info_t *pVFO, bool keep, bool check, bool save);
+void SETTINGS_UpdateChannel(uint16_t channel, const VFO_Info_t *pVFO, bool keep);
 void SETTINGS_WriteBuildOptions(void);
 #ifdef ENABLE_FEAT_F4HWN_RESUME_STATE
     void SETTINGS_WriteCurrentState(void);
@@ -435,4 +438,23 @@ void SETTINGS_WriteBuildOptions(void);
 #ifdef ENABLE_FEAT_F4HWN
     void SETTINGS_ResetTxLock(void);
 #endif
+
+// ---- EEPROM schema ----
+//
+// Schema 1 (pre-v1.4) reused bit 6 of the channel flags byte as a NARROWEST
+// selector on CW/USB records, which meant TX_LOCK could never be set on those
+// channels and F Lock could not gate them. Schema 2 gives bit 6 back to
+// TX_LOCK and keeps the filter in bit 1 as a plain wide/narrow flag.
+//
+// The marker lives at the end of the settings block, in the same 4K sector as
+// the version string, so it costs no extra erase cycle. Pre-v1.4 firmware never
+// wrote it, so an un-migrated radio reads back erased 0xFF.
+#define EEPROM_SCHEMA_ADDR     0x00A170
+#define EEPROM_SCHEMA_LEGACY   1   // pre-v1.4; stored as 0x00 or erased 0xFF
+#define EEPROM_SCHEMA_CURRENT  2   // v1.4: bit 6 is TX_LOCK, bit 1 is the filter
+
+#ifdef ENABLE_CW_MODULATOR
+    void SETTINGS_MigrateFilterSchema(void);
+#endif
+
 #endif

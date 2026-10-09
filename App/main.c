@@ -177,19 +177,17 @@ void Main(void)
         #ifdef ENABLE_FEAT_F4HWN
             gEeprom.KEY_LOCK = 0;
             SETTINGS_SaveSettings();
+            #ifdef ENABLE_FEAT_F4HWN_MENU_CAT
+                gMenuLevel    = MENU_LEVEL_ITEMS;
+                gMenuCategory = CAT_ALL;
+            #endif
             gMenuCursor = UI_MENU_GetMenuIdx(FIRST_HIDDEN_MENU_ITEM);
             gSubMenuSelection = gSetting_F_LOCK;
         #endif
     }
 
-    // count the number of menu items
-    gMenuListCount = 0;
-    while (MenuList[gMenuListCount].name[0] != '\0') {
-        if(!gF_LOCK && MenuList[gMenuListCount].menu_id == FIRST_HIDDEN_MENU_ITEM)
-            break;
-
-        gMenuListCount++;
-    }
+    // build the current menu view (Etape 1: vue = All, identite)
+    UI_MENU_BuildView();
 
     // wait for user to release all butts before moving on
     if (GPIO_IsPttPressed() ||
