@@ -112,6 +112,22 @@ void CW_Popup_Speed(void)
 		gBeepToPlay = BEEP_500HZ_60MS_DOUBLE_BEEP_OPTIONAL;  // up/down only reach the main screen
 }
 
+// Move the pending key input one place through the CWkey menu's list, wrapping
+static void StepKeyInput(int8_t direction)
+{
+	const uint8_t count = ARRAY_SIZE(CW_KEY_INPUT_menu_to_bitmap);
+
+	s_key_input = (uint8_t)((s_key_input + count + direction) % count);
+}
+
+// Up/down as +1/-1, flipped like the menu and dial when SetNav is off
+static int8_t KeyDirection(KEY_Code_t Key)
+{
+	const int8_t direction = (Key == KEY_UP) ? 1 : -1;
+
+	return gEeprom.SET_NAV ? direction : -direction;
+}
+
 void CW_Popup_StepKeyInput(void)
 {
 	if (s_kind != CW_POPUP_KEY_INPUT) {
@@ -121,8 +137,8 @@ void CW_Popup_StepKeyInput(void)
 		}
 		s_key_input = gEeprom.CW_KEY_INPUT_MENU;
 	}
-	else if (++s_key_input >= ARRAY_SIZE(CW_KEY_INPUT_menu_to_bitmap)) {
-		s_key_input = 0;
+	else {
+		StepKeyInput(1);
 	}
 
 	CW_Popup_Show(CW_POPUP_KEY_INPUT);
@@ -142,13 +158,18 @@ bool CW_Popup_ProcessKey(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 		return true;
 	}
 
+	if (s_kind == CW_POPUP_KEY_INPUT && (Key == KEY_UP || Key == KEY_DOWN)) {
+		if (bKeyPressed) {  // first press and every auto-repeat while held
+			StepKeyInput(KeyDirection(Key));
+			s_500ms = CW_POPUP_SHOW_500MS;
+			gUpdateDisplay = true;
+		}
+		return true;
+	}
+
 	if (s_kind == CW_POPUP_SPEED && (Key == KEY_UP || Key == KEY_DOWN)) {
 		if (bKeyPressed) {  // first press and every auto-repeat while held
-			int8_t direction = (Key == KEY_UP) ? 1 : -1;
-			if (!gEeprom.SET_NAV)
-				direction = -direction;  // same arrow orientation as dial tuning
-
-			const int wpm = gEeprom.CW_KEY_WPM + direction;
+			const int wpm = gEeprom.CW_KEY_WPM + KeyDirection(Key);
 			if (wpm < CW_WPM_MIN || wpm > CW_WPM_MAX) {
 				gBeepToPlay = BEEP_500HZ_60MS_DOUBLE_BEEP_OPTIONAL;
 			} else {

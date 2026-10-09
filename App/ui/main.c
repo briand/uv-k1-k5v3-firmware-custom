@@ -933,26 +933,6 @@ void DrawCWDecodeBar(void)
 	ST7565_BlitLine(line);
 }
 
-static const char *CWPopupFilterName(void)
-{
-#ifdef ENABLE_EXTRA_FILTER
-	// CW and SSB read the filter bit as 6.25k / 2.0k, see RADIO_ResolveFilter()
-	if (gTxVfo->Modulation == MODULATION_CW || gTxVfo->Modulation == MODULATION_USB)
-		return (gTxVfo->CHANNEL_BANDWIDTH == BANDWIDTH_WIDE) ? "6k" : "2k";
-#endif
-
-	switch (gTxVfo->CHANNEL_BANDWIDTH) {
-		case BANDWIDTH_NARROW:
-#ifdef ENABLE_FEAT_F4HWN_NARROWER
-			if (gSetting_set_nfm == 1)
-				return "NARROW+";
-#endif
-			return "NARROW";
-		default:
-			return "WIDE";
-	}
-}
-
 // Menu name split over two rows: all but its last line on the first, the last line below
 static void DrawCWPopupKeyInput(uint8_t index)
 {
@@ -1005,14 +985,6 @@ static void DrawCWPopup(void)
 			title = "CW SPEED";
 			sprintf(value, "%u WPM", gEeprom.CW_KEY_WPM);
 			break;
-		case CW_POPUP_FILTER:
-			title = "FILTER";
-			text  = CWPopupFilterName();
-			break;
-		case CW_POPUP_BREAK_IN:
-			title = "BREAK-IN";
-			text  = gEeprom.CW_BREAKIN_ENABLE ? "ON" : "OFF";
-			break;
 		case CW_POPUP_TX_TIMEOUT:
 			title = "TX TIMEOUT";
 			text  = "RELEASE KEY";
@@ -1037,12 +1009,15 @@ static void DrawCWPopup(void)
 	else
 		DrawCWPopupKeyInput(CW_Popup_KeyInput());
 
-	if (kind == CW_POPUP_SPEED) {
-		// Each arrow sits on the side of the key that does it. The left key (KEY_UP) speeds
-		// up with UP/DOWN navigation and slows down with the UV-K1's LEFT/RIGHT navigation.
-		const bool leftIsFaster = gEeprom.SET_NAV;
-		DrawCWPopupArrow(17,  leftIsFaster ? 28 : 31, leftIsFaster);
-		DrawCWPopupArrow(110, leftIsFaster ? 31 : 28, !leftIsFaster);
+	// Each arrow sits on the side of the key that does it: up is a step up (faster, or the
+	// next key input), and the left key (KEY_UP) steps up with UP/DOWN navigation and down
+	// with the UV-K1's LEFT/RIGHT navigation. Key input names keep their wide first row
+	// clear by putting the arrows beside the second, which is at most 8 characters.
+	if (kind == CW_POPUP_SPEED || kind == CW_POPUP_KEY_INPUT) {
+		const uint8_t top    = (kind == CW_POPUP_SPEED) ? 28 : 34;
+		const bool    leftUp = gEeprom.SET_NAV;
+		DrawCWPopupArrow(17,  leftUp ? top : top + 3, leftUp);
+		DrawCWPopupArrow(110, leftUp ? top + 3 : top, !leftUp);
 	}
 }
 

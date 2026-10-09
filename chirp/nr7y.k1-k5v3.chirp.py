@@ -886,8 +886,8 @@ _NR7Y_CW_HANG_10MS_DEFAULT = 30
 # displayed choices -- but the RESCUE_OPS block shifts everything after it, so the
 # index mapping has to be assembled per build instead of hardcoded.  With
 # RESCUE_OPS off the CW actions sit at 21-28, CODE PRACTICE at 29, then CW KEYER
-# MODE, PROPER ROGER, RIT/XIT ADJUST, CW SPEED, FILTER WIDTH, CW KEY INPUT and CW
-# BREAK-IN at 30-36; with it on everything from the CW actions moves up by 2.
+# MODE, PROPER ROGER, CW SPEED, FILTER WIDTH, CW KEY INPUT and CW BREAK-IN at
+# 30-35; with it on everything from the CW actions moves up by 2.
 _NR7Y_ACTIONS_COMMON = [
     "NONE",            # 0:  ACTION_OPT_NONE
     "FLASHLIGHT",      # 1:  ACTION_OPT_FLASHLIGHT
@@ -933,7 +933,6 @@ _NR7Y_ACTIONS_CW = [
     "CODE PRACTICE",
     "CW KEYER MODE",
     "PROPER ROGER",
-    "RIT/XIT ADJUST",
     "CW SPEED",
     "FILTER WIDTH",
     "CW KEY INPUT",

@@ -136,13 +136,6 @@ void CW_RIT_EnterAdjust(void)
 	gUpdateDisplay = true;
 }
 
-void CW_RIT_ToggleAdjust(void)
-{
-	if (CW_RIT_IsAdjusting())
-		ExitAdjust();
-	else
-		CW_RIT_EnterAdjust();
-}
 
 void CW_RIT_OnKeying(void)
 {

@@ -32,9 +32,8 @@
 uint32_t CW_RIT_RxFrequency(const VFO_Info_t *pVfo, uint32_t frequency);
 uint32_t CW_RIT_TxFrequency(const VFO_Info_t *pVfo, uint32_t frequency);
 
-// Adjust mode: * in CW or the RIT/XIT key action opens it; EXIT, *, keying or 5 s idle closes it
+// Adjust mode: * in CW opens it; EXIT, *, keying or 5 s idle closes it
 void CW_RIT_EnterAdjust(void);
-void CW_RIT_ToggleAdjust(void);
 bool CW_RIT_IsAdjusting(void);
 bool CW_RIT_ProcessKey(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld);  // true when the key was used
 void CW_RIT_OnKeying(void);

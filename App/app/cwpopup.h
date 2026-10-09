@@ -29,10 +29,8 @@ typedef enum {
 	CW_POPUP_NONE = 0,
 	CW_POPUP_KEYER_MODE,
 	CW_POPUP_SPEED,        // up/down change WPM live; keying, EXIT or 2 s idle keep it
-	CW_POPUP_FILTER,
-	CW_POPUP_KEY_INPUT,    // the action steps a pending input, applied when the popup times out
+	CW_POPUP_KEY_INPUT,    // up/down or the action step a pending input, applied when the popup times out
 	CW_POPUP_KEY_STUCK,    // the pending input failed the stuck-key check
-	CW_POPUP_BREAK_IN,
 	CW_POPUP_TX_TIMEOUT,   // a stuck key tripped the transmit timeout
 } CW_PopupKind_t;
 

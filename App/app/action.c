@@ -58,7 +58,6 @@
 #ifdef ENABLE_CW_MODULATOR
 #include "app/cwkeyer.h"
 #include "app/cwpopup.h"
-#include "app/cwrit.h"
 
     #ifdef ENABLE_CODE_PRACTICE
         #include "app/cpo.h"
@@ -88,7 +87,6 @@ static void ACTION_RepeatCWMsg3(void);
 static void ACTION_RepeatCWMsg4(void);
 static void ACTION_CWKeyerMode(void);
 static void ACTION_CWProperRoger(void);
-static void ACTION_CWFilter(void);
 static void ACTION_CWBreakIn(void);
 #ifdef ENABLE_CODE_PRACTICE
 static void ACTION_CPO(void);
@@ -155,9 +153,8 @@ void (*const action_opt_table[])(void) = {
 	#endif
 	[ACTION_OPT_CW_KEYER_MODE] = &ACTION_CWKeyerMode,
 	[ACTION_OPT_CW_PROPER_ROGER] = &ACTION_CWProperRoger,
-	[ACTION_OPT_CW_RIT] = &CW_RIT_ToggleAdjust,
 	[ACTION_OPT_CW_SPEED] = &CW_Popup_Speed,
-	[ACTION_OPT_CW_FILTER] = &ACTION_CWFilter,
+	[ACTION_OPT_CW_FILTER] = &ACTION_SwitchFilter,  // same 6k <-> 2k toggle as F + long 4
 	[ACTION_OPT_CW_KEY_INPUT] = &CW_Popup_StepKeyInput,
 	[ACTION_OPT_CW_BREAK_IN] = &ACTION_CWBreakIn,
 #endif
@@ -766,20 +763,12 @@ static void ACTION_CWKeyerMode(void)
 	CW_Popup_Show(CW_POPUP_KEYER_MODE);
 }
 
-// Same W -> N -> 2k cycle as F + long 4, with the popup to say where it landed
-static void ACTION_CWFilter(void)
-{
-	ACTION_SwitchFilter();
-	CW_Popup_Show(CW_POPUP_FILTER);
-}
-
-// Same toggle as F+7 in CW
+// Same toggle as F+7 in CW; the status bar icon shows the new state
 static void ACTION_CWBreakIn(void)
 {
 	gEeprom.CW_BREAKIN_ENABLE = !gEeprom.CW_BREAKIN_ENABLE;
 	gRequestSaveSettings = true;
 	gUpdateStatus = true;
-	CW_Popup_Show(CW_POPUP_BREAK_IN);
 }
 
 static void ACTION_CWProperRoger(void)
