@@ -27,11 +27,14 @@
 #include "audio.h"
 #include "settings.h"
 #include "misc.h"
+#include "radio.h"
 #include "py32f071_ll_dma.h"
 #include "py32f071_ll_tim.h"
 #include "py32f071_ll_gpio.h"
 #include "py32f071_ll_rcc.h"
 #include "py32f071_ll_usart.h"
+#include "driver/bk4819.h"
+#include "driver/bk4819-regs.h"
 #include "driver/gpio.h"
 #include "driver/systick.h"
 #include "driver/millis.h"
@@ -105,6 +108,13 @@ static uint16_t s_playback_pos = 0; // index into playback buffer
 static uint8_t s_play_char_pattern = 0; // current char morse pattern (LSB-first)
 static uint8_t s_play_char_len = 0; // number of elements in current char
 static uint8_t s_play_elem_index = 0; // current element index within char
+static bool s_play_long_dah = false; // proper roger: hold each dah for gEeprom.CW_ROGER_DAH_DITS
+static uint16_t s_play_setup_ms = 0; // TX/sidetone setup the current element lost at its start
+static bool s_play_hidden = false; // keep played characters off the TX display line
+static bool s_play_cue = false; // the sidetone dit of CW_ErrorBeep
+static uint8_t s_play_eff_wpm = 0; // Farnsworth effective speed of the playback, 0 = keyer spacing
+static uint16_t s_play_char_gap_count = 0; // playback's char gap: s_char_gap_count, or stretched to s_play_eff_wpm
+static uint16_t s_play_word_gap_count = 0; // playback's word gap, likewise
 
 // Playback FSM states
 typedef enum {
@@ -193,30 +203,57 @@ void CW_KeyerReconfigure(bool enable)
     s_cfg_dirty = true; // Defer init until idle or gap
 }
 
-// Sidetone tuning-gain curve: level 0 is off (handled by BK4819_REG_70_TONE1_VALUE).
-// Levels 1-6 are spread linearly from CW_SIDETONE_MIN_GAIN to CW_SIDETONE_MAX_GAIN so
-// the lowest non-off level doesn't have to start all the way down at zero gain.
-// Retune by editing these two constants and rebuilding; the table below is
-// evaluated at compile time so no multiply/divide happens on the CW critical path.
-#define CW_SIDETONE_LEVELS    6    // number of non-off menu levels (1-6)
-#define CW_SIDETONE_MIN_GAIN  1    // gain at level 1
-#define CW_SIDETONE_MAX_GAIN  127  // gain at level 6 (BK4819 7-bit tuning-gain field max)
+// Sidetone gain curve: level 0 is off (handled by BK4819_REG_70_TONE1_VALUE).
+// The Tone1 tuning gain alone bottoms out at 1, which is still loud with the volume
+// knob turned up for a weak station, so each level also sets the AF DAC gain
+// (REG_48, ~2 dB/step) while the sidetone plays. The DAC values are absolute: while
+// listening, RX audio's DAC gain is 0xF (RADIO_SetModulation), which is what the old
+// 6-level sidetone played at, so level 15 is the old top level and the scale doesn't
+// depend on the DAC calibration. Relative to level 15:
+//   1-7:   DAC 0, tuning gain halves per step     -72 to -36 dB, 6 dB/step
+//   8-10:  full tuning gain, DAC 0/3/6            -30, -24, -18 dB
+//   11-15: full tuning gain, DAC 8/11/13/14/15    -14, -8, -4, -2, 0 dB
+// Levels 6 and 11-15 are the old levels 1-6 (see s_cw_sidetone_code_to_level).
+// RX audio gets its own DAC gain back after the hang time (RADIO_SetModulation, RADIO_SetupRegisters).
+// Retune by editing the table and rebuilding.
+typedef struct {
+    uint8_t tone_gain;  // BK4819 Tone1 tuning gain, 0-127
+    uint8_t dac_gain;   // AF DAC gain, 0-15
+} CW_SidetoneStep_t;
 
-#define CW_SIDETONE_GAIN_AT(level) \
-    (CW_SIDETONE_MIN_GAIN + ((CW_SIDETONE_MAX_GAIN - CW_SIDETONE_MIN_GAIN) * ((level) - 1)) / (CW_SIDETONE_LEVELS - 1))
-
-static const uint8_t s_sidetone_gain[CW_SIDETONE_LEVELS + 1] = {
-    0, // level 0 = off
-    CW_SIDETONE_GAIN_AT(1), CW_SIDETONE_GAIN_AT(2), CW_SIDETONE_GAIN_AT(3),
-    CW_SIDETONE_GAIN_AT(4), CW_SIDETONE_GAIN_AT(5), CW_SIDETONE_GAIN_AT(6),
+static const CW_SidetoneStep_t s_sidetone[CW_SIDETONE_LEVEL_MAX + 1] = {
+    {   0,  0 },  // level 0 = off
+    {   1,  0 }, {   2,  0 }, {   4,  0 }, {   8,  0 }, {  16,  0 }, {  32,  0 }, {  64,  0 },
+    { 127,  0 }, { 127,  3 }, { 127,  6 },
+    { 127,  8 }, { 127, 11 }, { 127, 13 }, { 127, 14 }, { 127, 15 },
 };
 
-uint8_t CW_SidetoneLevelToGain(uint8_t level)
+void CW_ApplySidetoneGain(void)
 {
-    if (level > CW_SIDETONE_LEVELS) {
-        level = CW_SIDETONE_LEVELS;
+    uint8_t level = gEeprom.CW_SIDETONE_LEVEL;
+    if (level > CW_SIDETONE_LEVEL_MAX) {
+        level = CW_SIDETONE_LEVEL_MAX;
     }
-    return s_sidetone_gain[level];
+    const CW_SidetoneStep_t *step = &s_sidetone[level];
+
+    BK4819_WriteRegister(BK4819_REG_70, BK4819_REG_70_TONE1_VALUE(step->tone_gain));
+    BK4819_SetAfDacGain(step->dac_gain);
+}
+
+// Farnsworth spacing (ARRL, KE3Z): characters keep the keyer's timing and only the
+// char and word gaps stretch, so the text averages s_play_eff_wpm. PARIS is 31 dits
+// of elements and element gaps plus 19 of char and word gaps (four 3s and a 7);
+// at the effective speed those gaps get whatever is left of its 60/eff seconds.
+static void CW_UpdatePlaybackGaps(void)
+{
+    if (s_play_eff_wpm == 0 || s_play_eff_wpm >= gEeprom.CW_KEY_WPM) {
+        s_play_char_gap_count = s_char_gap_count;
+        s_play_word_gap_count = s_word_gap_count;
+        return;
+    }
+    const uint32_t gaps_ticks = TICKS_PER_MINUTE / s_play_eff_wpm - 31U * s_dit_count;
+    s_play_char_gap_count = 3U * gaps_ticks / 19U;
+    s_play_word_gap_count = 7U * gaps_ticks / 19U;
 }
 
 void CW_UpdateWPM()
@@ -230,6 +267,7 @@ void CW_UpdateWPM()
     s_ext_gap_count = 3U * dit_ticks / 2U; // after 1.5 dits, hold char gap if key pressed
     s_char_gap_count = 3U * dit_ticks; // inter-char gap = 3 dits
     s_word_gap_count = 7U * dit_ticks; // inter-word gap = 7 dits
+    CW_UpdatePlaybackGaps();
 
 #if CW_KEYER_DEBUG
     char buf[80];
@@ -289,17 +327,13 @@ static void CW_KeyerInit()
 }
 
 // --- Macro playback API implementation ---
-void CW_StartMacroPlayback(uint8_t macroIndex, bool repeat)
-{	
-    // Do nothing if recording or playback already in progress
-    if (gCW_Recording || gCW_PlaybackActive) return;
 
-    // Load the macro into a local buffer (decoded with spaces)
-    memset(s_playback_buf, 0, sizeof(s_playback_buf));
-    CW_LoadMacro(macroIndex, s_playback_buf, sizeof(s_playback_buf));
+// Prime the playback FSM to send whatever is in s_playback_buf from the start.
+// eff_wpm is the Farnsworth effective speed, 0 for the keyer's own spacing.
+static void CW_BeginPlayback(bool repeat, uint8_t eff_wpm)
+{
     s_playback_buf_len = (uint16_t)strlen(s_playback_buf);
     s_playback_pos = 0;
-    gCW_PlaybackMacroIndex = macroIndex;
     s_play_elem_index = 0;
     s_play_char_len = 0;
     s_play_char_pattern = 0;
@@ -308,12 +342,30 @@ void CW_StartMacroPlayback(uint8_t macroIndex, bool repeat)
     gCW_PlaybackRepeat = repeat;
     gCW_MessageRepeatCountdown_500ms = 0;  // Clear any pending countdown
 
-    // Clear TX display and prime the playback FSM to start immediately
-    CW_ClearTxDisplay();
+    // Prime the playback FSM to start immediately
     s_play_space_pending = false;
+    s_play_hidden = false;
+    s_play_cue = false;
+    s_play_eff_wpm = eff_wpm;
+    CW_UpdatePlaybackGaps();
     s_pb_state = PB_STATE_INTER_CHAR_GAP;
-    s_elem_start_count = millis();
+    // Lead in with the keyer's own char gap: only the gaps between characters stretch
+    s_elem_start_count = millis() - (s_play_char_gap_count - s_char_gap_count);
     gCW_PlaybackActive = (s_playback_buf_len > 0);
+}
+
+void CW_StartMacroPlayback(uint8_t macroIndex, bool repeat)
+{
+    // Do nothing if recording or playback already in progress
+    if (gCW_Recording || gCW_PlaybackActive) return;
+
+    // Load the macro into a local buffer (decoded with spaces)
+    memset(s_playback_buf, 0, sizeof(s_playback_buf));
+    CW_LoadMacro(macroIndex, s_playback_buf, sizeof(s_playback_buf));
+    gCW_PlaybackMacroIndex = macroIndex;
+    s_play_long_dah = false;
+    CW_ClearTxDisplay();
+    CW_BeginPlayback(repeat, 0);
 
 #if CW_KEYER_DEBUG
     if (gCW_PlaybackActive) {
@@ -322,6 +374,76 @@ void CW_StartMacroPlayback(uint8_t macroIndex, bool repeat)
         UART_Send(buf, strlen(buf));
     }
 #endif
+}
+
+// Proper roger: R with the dah held for CWrgr dits (default 9), di-daaaaaaaaah-dit
+void CW_StartProperRoger(void)
+{
+    if (gCW_Recording || gCW_PlaybackActive) return;
+
+    strcpy(s_playback_buf, "R");
+    s_play_long_dah = true;
+    CW_BeginPlayback(false, 0);
+
+    // Skip the char-gap lead-in so the first dit keys on the next poll. Reaching
+    // the side key already takes longer than a char gap after any keyed element.
+    s_elem_start_count = millis() - s_char_gap_count;
+
+    // Keep what was keyed before so the R reads as a reply to it
+    s_play_space_pending = (gCW_TX_DisplayIndex > 0);
+}
+
+bool CW_PlaybackIsProperRoger(void)
+{
+    return gCW_PlaybackActive && s_play_long_dah;
+}
+
+void CW_StartTextPlayback(const char *text, bool show, uint8_t eff_wpm)
+{
+    if (gCW_Recording || gCW_PlaybackActive) return;
+
+    strncpy(s_playback_buf, text, sizeof(s_playback_buf) - 1);
+    s_playback_buf[sizeof(s_playback_buf) - 1] = '\0';
+    s_play_long_dah = false;
+    CW_BeginPlayback(false, eff_wpm);
+    s_play_hidden = !show;
+}
+
+void CW_ErrorBeep(void)
+{
+    if (CW_PlaybackIsCue())
+        return;  // one at a time: the dit already playing answers this press too
+
+    // Only CW runs the sidetone path, and the dit must not cut into keying, other
+    // playback, a repeating macro's pause (starting playback cancels the repeat) or
+    // a recording. Those get the double beep, which is silent in CW.
+    if (gTxVfo->Modulation != MODULATION_CW || gCW_Recording || gCW_PlaybackActive
+        || gCW_PlaybackRepeat || !CW_KeyerIsIdle()) {
+        gBeepToPlay = BEEP_500HZ_60MS_DOUBLE_BEEP_OPTIONAL;
+        return;
+    }
+
+    CW_StartTextPlayback("E", false, 0);
+    s_play_cue = true;
+
+    // skip the char-gap lead-in so the dit answers the key press right away
+    s_elem_start_count = millis() - s_char_gap_count;
+}
+
+bool CW_PlaybackIsCue(void)
+{
+    return gCW_PlaybackActive && s_play_cue;
+}
+
+bool CW_KeyerIsIdle(void)
+{
+    return (s_KeyerFSMState == CWK_STATE_IDLE || s_KeyerFSMState == CWK_STATE_EMIT_NONE)
+        && s_bug_state == BUG_STATE_IDLE;
+}
+
+void CW_PlaybackExtendElement(uint32_t setup_ms)
+{
+    s_play_setup_ms = (setup_ms > UINT16_MAX) ? UINT16_MAX : (uint16_t)setup_ms;
 }
 
 // Stop playback immediately (user interrupted)
@@ -352,12 +474,15 @@ CW_Action_t CW_PlaybackHandleState(void)
 
     switch (s_pb_state) {
     case PB_STATE_ACTIVE_ELEMENT: {
-        const uint32_t target = s_active_is_dit ? s_dit_count : s_dah_count;
+        const uint32_t target = s_active_is_dit ? s_dit_count
+                              : s_play_long_dah ? gEeprom.CW_ROGER_DAH_DITS * (uint32_t)s_dit_count
+                              : s_dah_count;
         const uint32_t elapsed = millis_since(s_elem_start_count);
-        if (elapsed < target) {
+        if (elapsed < target + s_play_setup_ms) {
             return CW_ACTION_CARRIER_HOLD_ON;
         } else {
             // End element
+            s_play_setup_ms = 0;
             s_elem_start_count = cur_count;
             s_pb_state = PB_STATE_INTER_ELEMENT_GAP;
             return CW_ACTION_CARRIER_OFF;
@@ -392,7 +517,7 @@ CW_Action_t CW_PlaybackHandleState(void)
 
     case PB_STATE_INTER_CHAR_GAP: {
         const uint32_t elapsed = millis_since(s_elem_start_count);
-        if (elapsed < s_char_gap_count) {
+        if (elapsed < s_play_char_gap_count) {
             return CW_ACTION_NONE;
         }
         // Move to next character (if any)
@@ -419,7 +544,9 @@ CW_Action_t CW_PlaybackHandleState(void)
             return CW_ACTION_NONE;
         }
         // Update TX centerline display with the next char (respect pending space)
-        CW_AddToTxDisplay(ch, s_play_space_pending);
+        if (!s_play_hidden) {
+            CW_AddToTxDisplay(ch, s_play_space_pending);
+        }
         s_play_space_pending = false;
 
         // Get morse pattern for char 
@@ -444,10 +571,10 @@ CW_Action_t CW_PlaybackHandleState(void)
 
     case PB_STATE_INTER_WORD_GAP: {
         const uint32_t elapsed = millis_since(s_elem_start_count);
-        if (elapsed >= s_word_gap_count) {
+        if (elapsed >= s_play_word_gap_count) {
             // Word gap done - advance to char-gap state with the same origin
-            // preserved. elapsed (>=7) already exceeds s_char_gap_count (3), so
-            // the next char is read immediately with no extra wait.
+            // preserved. elapsed (>=7) already exceeds s_play_char_gap_count (3),
+            // so the next char is read immediately with no extra wait.
             s_pb_state = PB_STATE_INTER_CHAR_GAP;
         }
         return CW_ACTION_NONE;

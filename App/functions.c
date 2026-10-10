@@ -276,7 +276,7 @@ void FUNCTION_Transmit_CW()
 	// Don't send AF to RF during CW
 	BK4819_EnterTxMute();	
 
-	BK4819_WriteRegister(BK4819_REG_70, BK4819_REG_70_TONE1_VALUE(CW_SidetoneLevelToGain(gEeprom.CW_SIDETONE_LEVEL)));
+	CW_ApplySidetoneGain();
 	BK4819_SetAF(BK4819_AF_ALAM);
 
 	gEnableSpeaker = true;

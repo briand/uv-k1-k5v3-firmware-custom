@@ -17,6 +17,10 @@
  // CW Macro system implementation
 
 #include "app/cwmacro.h"
+#ifdef ENABLE_CODE_PRACTICE
+#include "app/cpo.h"
+#include "app/cpocall.h"
+#endif
 #include "driver/eeprom.h"
 #include "driver/uart.h"
 #include "external/printf/printf.h"
@@ -437,7 +441,19 @@ void CW_EncoderProcessElement(CW_ElementType_t element)
 				if (can_update_display) {
 					CW_AddToTxDisplay(ch, s_encoder_space_pending);
 				}
+#ifdef ENABLE_CODE_PRACTICE
+				CPO_Call_OnChar(ch);   // no-op unless the callsign drill is running
+#endif
 			}
+#ifdef ENABLE_CODE_PRACTICE
+			else if (gCW_CpoActive) {
+				// An unknown pattern, or a run past 6 elements (a held paddle, the 8-dit
+				// error signal), is dropped everywhere else. Practice shows it so a
+				// fumble can't pass unseen, and the callsign drill scores it as a miss.
+				CW_AddToTxDisplay(CW_CHAR_UNKNOWN, s_encoder_space_pending);
+				CPO_Call_OnChar(CW_CHAR_UNKNOWN);
+			}
+#endif
 			
 			// Reset for next character
 			s_encoder_pattern = 0;
@@ -509,8 +525,8 @@ void CW_AddToTxDisplay(char ch, bool hasSpace)
 	UART_Send(buf, strlen(buf));
 #endif
 	
-	// Add space first if needed
-	if (hasSpace) {
+	// Add space first if needed (never as the first character on the line)
+	if (hasSpace && gCW_TX_DisplayIndex > 0) {
 		if (gCW_TX_DisplayIndex >= CW_TX_DISPLAY_SIZE - 1) {
 			// Buffer full, shift left by 1 to make room
 			memmove(gCW_TX_Display, gCW_TX_Display + 1, CW_TX_DISPLAY_SIZE - 2);

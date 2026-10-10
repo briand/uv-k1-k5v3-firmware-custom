@@ -34,6 +34,8 @@
 #ifdef ENABLE_CW_MODULATOR
 	#include "app/cwmacro.h"
 	#include "app/cwkeyer.h"
+	#include "app/cwpopup.h"
+	#include "app/cwrit.h"
     #include "driver/millis.h"
 #endif
 #include "bitmaps.h"
@@ -50,6 +52,7 @@
 #include "ui/helper.h"
 #include "ui/inputbox.h"
 #include "ui/main.h"
+#include "ui/menu.h"
 #include "ui/ui.h"
 #include "audio.h"
 #include "menu.h"
@@ -853,6 +856,52 @@ void UI_DisplayAudioBar(void)
 }
 #endif
 
+#if defined(ENABLE_RSSI_BAR) || defined(ENABLE_CW_MODULATOR)
+// Received signal as the S-meter reports it: dBm, plus the S-unit (0-9) and dB over S9
+static int16_t GetSignalLevel(uint8_t *s_level, uint8_t *overS9dBm)
+{
+    const int16_t rssi_dBm =
+        BK4819_GetRSSI_dBm()
+#ifdef ENABLE_AM_FIX
+        + ((gSetting_AM_fix && gRxVfo->Modulation == MODULATION_AM) ? AM_fix_get_gain_diff() : 0)
+#endif
+        + dBmCorrTable[gRxVfo->Band];
+
+#ifdef ENABLE_FEAT_F4HWN
+    // IARU VHF/UHF S-meter: S9 = -93 dBm, 1 S-unit = 6 dB
+    // S(n) threshold = -93 + (n - 9) * 6
+
+    // if      (rssi_dBm >= -93)  s_level = 9;  // S9  = -93 dBm
+    // else if (rssi_dBm >= -99)  s_level = 8;  // S8  = -99 dBm
+    // else if (rssi_dBm >= -105) s_level = 7;  // S7  = -105 dBm
+    // else if (rssi_dBm >= -111) s_level = 6;  // S6  = -111 dBm
+    // else if (rssi_dBm >= -117) s_level = 5;  // S5  = -117 dBm
+    // else if (rssi_dBm >= -123) s_level = 4;  // S4  = -123 dBm
+    // else if (rssi_dBm >= -129) s_level = 3;  // S3  = -129 dBm
+    // else if (rssi_dBm >= -135) s_level = 2;  // S2  = -135 dBm
+    // else if (rssi_dBm >= -141) s_level = 1;  // S1  = -141 dBm
+    // else                       s_level = 0;  // S0 (below -141 dBm)
+
+    if (rssi_dBm >= -93)
+        *s_level = 9;
+    else if (rssi_dBm < -141)
+        *s_level = 0;
+    else
+        *s_level = (rssi_dBm + 147) / 6;
+
+    // Compute over-S9 dB directly
+    *overS9dBm = (*s_level == 9) ? (uint8_t)MIN(rssi_dBm - (-93), 40) : 0;
+#else
+    const int16_t s0_dBm = -gEeprom.S0_LEVEL;                  // S0 .. base level
+    int s0_9 = gEeprom.S0_LEVEL - gEeprom.S9_LEVEL;
+    *s_level   = MIN(MAX((int32_t)(rssi_dBm - s0_dBm)*100 / (s0_9*100/9), 0), 9); // S0 - S9
+    *overS9dBm = MIN(MAX(rssi_dBm + gEeprom.S9_LEVEL, 0), 99);
+#endif
+
+    return rssi_dBm;
+}
+#endif
+
 #ifdef ENABLE_CW_MODULATOR
 void DrawCWDecodeBar(void)
 {
@@ -869,7 +918,7 @@ void DrawCWDecodeBar(void)
 	CW_GetTxDisplayTail(String, sizeof(String));
 
 	// Print the text shifted right so glyph can be placed at x=0; print text first
-	UI_PrintStringSmallNormal(String, 10, 0, line);
+	UI_PrintStringSmallCW(String, 10, line);
 
 	// Draw glyph after text so it can't be clobbered (drawn independently of DecodeBar)
 	if (gCW_PlaybackActive && (center_line == CENTER_LINE_NONE || center_line == CENTER_LINE_CW_DECODE)) {
@@ -882,6 +931,175 @@ void DrawCWDecodeBar(void)
 	}
 
 	ST7565_BlitLine(line);
+}
+
+// Menu name split over two rows: all but its last line on the first, the last line below
+static void DrawCWPopupKeyInput(uint8_t index)
+{
+	char row[20];
+	const char *name = gSubMenu_CW_KEY_INPUT[index];
+	const char *last = strrchr(name, '\n');
+	const size_t len = last ? (size_t)(last - name) : strlen(name);
+
+	memcpy(row, name, len);
+	row[len] = '\0';
+	for (char *p = row; *p; p++)
+		if (*p == '\n')
+			*p = ' ';
+
+	UI_PrintStringSmallNormal(row, 9, 118, 3);
+	if (last)
+		UI_PrintStringSmallNormal(last + 1, 9, 118, 4);
+}
+
+// Arrowhead 4 px deep and 7 px across with its tip at (x, y), pointing along (dx, dy)
+static void DrawCWPopupArrow(uint8_t x, uint8_t y, int8_t dx, int8_t dy)
+{
+	for (int8_t depth = 0; depth < 4; depth++)
+		for (int8_t side = -depth; side <= depth; side++)
+			UI_DrawPixelBuffer(gFrameBuffer, x - depth * dx + side * dy, y - depth * dy + side * dx, true);
+}
+
+// Boxed popup over the middle of the main screen for the CW setting a key action just changed.
+// Covers lines 1-5 between x=7 and x=120, clear of the RX blink marker at x=0-6.
+static void DrawCWPopup(void)
+{
+	static const char *const modeNames[] = {
+		[CW_IAMBIC_MODE_A]        = "IAMBIC A",
+		[CW_IAMBIC_MODE_B]        = "IAMBIC B",
+		[CW_KEYER_MODE_ULTIMATIC] = "ULTIMATIC",
+		[CW_IAMBIC_MODE_BUG]      = "BUG",
+	};
+
+	const CW_PopupKind_t kind = CW_Popup_Kind();
+	char        value[12];
+	const char *title;
+	const char *text = value;  // big-font value; NULL for the two-row key input layout
+
+	switch (kind) {
+		case CW_POPUP_KEYER_MODE:
+			title = "CW KEYER";
+			text  = (gEeprom.CW_KEYER_MODE < ARRAY_SIZE(modeNames)) ? modeNames[gEeprom.CW_KEYER_MODE] : "";
+			break;
+		case CW_POPUP_SPEED:
+			title = "CW SPEED";
+			sprintf(value, "%u WPM", gEeprom.CW_KEY_WPM);
+			break;
+		case CW_POPUP_TX_TIMEOUT:
+			title = "TX TIMEOUT";
+			text  = "RELEASE KEY";
+			break;
+		case CW_POPUP_KEY_INPUT:
+		case CW_POPUP_KEY_STUCK:
+			title = (kind == CW_POPUP_KEY_STUCK) ? "KEY STUCK" : "KEY INPUT";
+			text  = NULL;
+			break;
+		default:
+			return;
+	}
+
+	for (uint8_t line = 1; line <= 5; line++)
+		memset(gFrameBuffer[line] + 7, 0, 114);
+
+	UI_DrawRectangleBuffer(gFrameBuffer, 8, 9, 119, 46, true);
+	UI_PrintStringSmallBold(title, 9, 118, 2);
+
+	if (text)
+		UI_PrintString(text, 9, 118, 3, 8);
+	else
+		DrawCWPopupKeyInput(CW_Popup_KeyInput());
+
+	// Each arrow sits on the side of the key that does it and is drawn the way SetNav
+	// names the keys. With UP/DOWN the left key (KEY_UP) steps up (faster, or the next key
+	// input); with the UV-K1's LEFT/RIGHT it steps down. Key input names keep their wide
+	// first row clear by putting the arrows beside the second, at most 8 characters.
+	if (kind == CW_POPUP_SPEED || kind == CW_POPUP_KEY_INPUT) {
+		const bool speed = (kind == CW_POPUP_SPEED);
+		if (gEeprom.SET_NAV) {
+			const uint8_t top = speed ? 28 : 34;
+			DrawCWPopupArrow(17,  top,     0, -1);
+			DrawCWPopupArrow(110, top + 3, 0, 1);
+		}
+		else {
+			const uint8_t mid = speed ? 31 : 35;
+			DrawCWPopupArrow(15,  mid, -1, 0);
+			DrawCWPopupArrow(112, mid, 1, 0);
+		}
+	}
+
+	// A key input change only happens on MENU, so the title carries the confirm mark at
+	// the left end, over MENU, and cancel at the right, over EXIT. With UP/DOWN navigation
+	// (the UV-K5) the arrows don't spell out the key row, so an M names the key.
+	if (kind == CW_POPUP_KEY_INPUT) {
+		uint8_t confirmX = 11;
+		if (gEeprom.SET_NAV) {
+			UI_PrintStringSmallNormal("M", 11, 0, 2);  // drawn at x 12-17
+			confirmX = 20;
+		}
+		memcpy(gFrameBuffer[2] + confirmX, BITMAP_Confirm, sizeof(BITMAP_Confirm));
+		memcpy(gFrameBuffer[2] + 110, BITMAP_Cancel, sizeof(BITMAP_Cancel));
+	}
+}
+
+// Full-panel modal while RIT/XIT adjust mode is open. It covers the S-meter, so the
+// header carries the signal for peaking; below it the shared offset, which switches
+// apply it and where that puts you, then the adjust keys in keypad layout.
+static void DrawCWRitModal(void)
+{
+	static const char *const legend[4][3] = {
+		{"1 -10",  "2 RIT",  "3 +10"},
+		{"4 -100", "5 ZERO", "6 +100"},
+		{"7 -1K",  "8 XIT",  "9 +1K"},
+		{"* DONE", "0 DIAL", "EXIT DONE"},
+	};
+	static const uint8_t legendX[] = {2, 32, 62};
+
+	char    text[24];
+	uint8_t s_level;
+	uint8_t overS9dBm;
+	const int16_t dBm = GetSignalLevel(&s_level, &overS9dBm);
+	const bool    rit = CW_RIT_RitOn();
+	const bool    xit = CW_RIT_XitOn();
+
+	UI_DisplayClear();
+
+	// header: title and signal, inverted into a bar
+	UI_PrintStringSmallBold("RIT/XIT", 1, 0, 0);
+	if (overS9dBm)
+		sprintf(text, "S9+%u %ddBm", overS9dBm, dBm);
+	else
+		sprintf(text, "S%u %ddBm", s_level, dBm);
+	GUI_DisplaySmallest(text, LCD_WIDTH - 1 - strlen(text) * 4, 1, false, true);  // ends at x 125
+	for (uint8_t x = 0; x < LCD_WIDTH; x++)
+		gFrameBuffer[0][x] ^= 0x7F;
+
+	CW_RIT_FormatOffset(text);
+	strcat(text, " kHz");
+	UI_PrintString(text, 0, LCD_WIDTH - 1, 1, 8);
+
+	// switches, inverse when on
+	if (rit)
+		UI_PrintStringSmallNormalInverse("RIT", 2, 0, 3);
+	else
+		UI_PrintStringSmallNormal("RIT", 2, 0, 3);
+	if (xit)
+		UI_PrintStringSmallNormalInverse("XIT", 30, 0, 3);
+	else
+		UI_PrintStringSmallNormal("XIT", 30, 0, 3);
+
+	if (rit || xit) {
+		const uint32_t f = (uint32_t)((int32_t)gTxVfo->pRX->Frequency + CW_RIT_Offset());
+		sprintf(text, "%s %u.%03u.%02u", rit ? (xit ? "RX/TX" : "RX") : "TX", f / 100000, (f / 100) % 1000, f % 100);
+		GUI_DisplaySmallest(text, LCD_WIDTH - 1 - strlen(text) * 4, 25, false, true);
+	}
+
+	for (uint8_t row = 0; row < 4; row++)
+		for (uint8_t col = 0; col < 3; col++)
+			GUI_DisplaySmallest(legend[row][col], legendX[col], 33 + row * 6, false, true);
+
+	// the arrow keys follow SetNav: left/right on the UV-K1, up/down on the UV-K5
+	GUI_DisplaySmallest(gEeprom.SET_NAV ? "UP +10" : "> +10", 94, 33, false, true);
+	GUI_DisplaySmallest(gEeprom.SET_NAV ? "DN -10" : "< -10", 94, 39, false, true);
 }
 #endif
 
@@ -1110,57 +1328,14 @@ void DisplayRSSIBar(const bool now)
         memset(p_line, 0, LCD_WIDTH);
 #endif
 
+    uint8_t s_level;
+    uint8_t overS9dBm;
+    const int16_t rssi_dBm = GetSignalLevel(&s_level, &overS9dBm);
 #ifdef ENABLE_FEAT_F4HWN
-    int16_t rssi_dBm =
-        BK4819_GetRSSI_dBm()
-#ifdef ENABLE_AM_FIX
-        + ((gSetting_AM_fix && gRxVfo->Modulation == MODULATION_AM) ? AM_fix_get_gain_diff() : 0)
-#endif
-        + dBmCorrTable[gRxVfo->Band];
-
-    // IARU VHF/UHF S-meter: S9 = -93 dBm, 1 S-unit = 6 dB
-    // S(n) threshold = -93 + (n - 9) * 6
-    uint8_t s_level    = 0;
-    uint8_t overS9dBm  = 0;
-    uint8_t overS9Bars = 0;
-
-    // if      (rssi_dBm >= -93)  s_level = 9;  // S9  = -93 dBm
-    // else if (rssi_dBm >= -99)  s_level = 8;  // S8  = -99 dBm
-    // else if (rssi_dBm >= -105) s_level = 7;  // S7  = -105 dBm
-    // else if (rssi_dBm >= -111) s_level = 6;  // S6  = -111 dBm
-    // else if (rssi_dBm >= -117) s_level = 5;  // S5  = -117 dBm
-    // else if (rssi_dBm >= -123) s_level = 4;  // S4  = -123 dBm
-    // else if (rssi_dBm >= -129) s_level = 3;  // S3  = -129 dBm
-    // else if (rssi_dBm >= -135) s_level = 2;  // S2  = -135 dBm
-    // else if (rssi_dBm >= -141) s_level = 1;  // S1  = -141 dBm
-    // else                       s_level = 0;  // S0 (below -141 dBm)
-
-    if (rssi_dBm >= -93)
-        s_level = 9;
-    else if (rssi_dBm < -141)
-        s_level = 0;
-    else 
-        s_level = (rssi_dBm + 147) / 6;
-
-    if (s_level == 9) {
-        // Compute over-S9 dB directly
-        overS9dBm  = (uint8_t)MIN(rssi_dBm - (-93), 40);
-        overS9Bars = overS9dBm / 10;
-    }
+    const uint8_t overS9Bars = overS9dBm / 10;
     const int16_t display_rssi_dBm = (rssi_dBm > -53) ? -53 : rssi_dBm;
 #else
-    const int16_t s0_dBm   = -gEeprom.S0_LEVEL;                  // S0 .. base level
-    const int16_t rssi_dBm =
-        BK4819_GetRSSI_dBm()
-#ifdef ENABLE_AM_FIX
-        + ((gSetting_AM_fix && gRxVfo->Modulation == MODULATION_AM) ? AM_fix_get_gain_diff() : 0)
-#endif
-        + dBmCorrTable[gRxVfo->Band];
-
-    int s0_9 = gEeprom.S0_LEVEL - gEeprom.S9_LEVEL;
-    const uint8_t s_level = MIN(MAX((int32_t)(rssi_dBm - s0_dBm)*100 / (s0_9*100/9), 0), 9); // S0 - S9
-    uint8_t overS9dBm = MIN(MAX(rssi_dBm + gEeprom.S9_LEVEL, 0), 99);
-    uint8_t overS9Bars = MIN(overS9dBm/10, 4);
+    const uint8_t overS9Bars = MIN(overS9dBm/10, 4);
 #endif
 
 #ifdef ENABLE_FEAT_F4HWN
@@ -2263,6 +2438,17 @@ void UI_DisplayMain(void)
 #if ENABLE_FEAT_F4HWN
         const uint8_t displayBandwidth = vfoInfo->CHANNEL_BANDWIDTH;
 
+        // A RIT/XIT tag takes MONI's place at the right end. To keep the filter label
+        // clear of it, CLASSIC moves the label into the repeater-shift slot, and TINY
+        // uses the short names 2 px further left
+#ifdef ENABLE_CW_MODULATOR
+        const bool ritTag = isMainVFO && vfoInfo->Modulation == MODULATION_CW && CW_RIT_TagVisible();
+#else
+        const bool ritTag = false;
+#endif
+        const uint8_t bwX     = LCD_WIDTH + (ritTag ? 56 : 80);
+        const uint8_t bwTinyX = ritTag ? 89 : 91;
+
 #ifdef ENABLE_EXTRA_FILTER
         // CW and SSB resolve the same wide/narrow bit to 6.25k and 2.0k, so
         // W/N here would read as the FM widths and mislead the operator. Name
@@ -2277,9 +2463,9 @@ void UI_DisplayMain(void)
             const char *ssbName = (displayBandwidth == BANDWIDTH_WIDE) ? "6k" : "2k";
 
             if (gSetting_set_gui)
-                UI_PrintStringSmallNormal(ssbName, LCD_WIDTH + 80, 0, line + 1);
+                UI_PrintStringSmallNormal(ssbName, bwX, 0, line + 1);
             else
-                GUI_DisplaySmallest(ssbName, 91, line == 0 ? 17 : 49, false, true);
+                GUI_DisplaySmallest(ssbName, bwTinyX, line == 0 ? 17 : 49, false, true);
         }
         else
 #endif
@@ -2299,23 +2485,25 @@ void UI_DisplayMain(void)
             if (gSetting_set_gui)
             {
                 const char *bandWidthNames[] = {"W", "N", "N+"};
-                UI_PrintStringSmallNormal(bandWidthNames[displayBandwidth + narrower], LCD_WIDTH + 80, 0, line + 1);
+                UI_PrintStringSmallNormal(bandWidthNames[displayBandwidth + narrower], bwX, 0, line + 1);
             }
             else
             {
                 const char *bandWidthNames[] = {"WIDE", "NAR", "NAR+"};
-                GUI_DisplaySmallest(bandWidthNames[displayBandwidth + narrower], 91, line == 0 ? 17 : 49, false, true);
+                const char *bandWidthShort[] = {"W", "N", "N+"};
+                GUI_DisplaySmallest((ritTag ? bandWidthShort : bandWidthNames)[displayBandwidth + narrower], bwTinyX, line == 0 ? 17 : 49, false, true);
             }
         #else
             if (gSetting_set_gui)
             {
                 const char *bandWidthNames[] = {"W", "N"};
-                UI_PrintStringSmallNormal(bandWidthNames[displayBandwidth], LCD_WIDTH + 80, 0, line + 1);
+                UI_PrintStringSmallNormal(bandWidthNames[displayBandwidth], bwX, 0, line + 1);
             }
             else
             {
                 const char *bandWidthNames[] = {"WIDE", "NAR"};
-                GUI_DisplaySmallest(bandWidthNames[displayBandwidth], 91, line == 0 ? 17 : 49, false, true);
+                const char *bandWidthShort[] = {"W", "N"};
+                GUI_DisplaySmallest((ritTag ? bandWidthShort : bandWidthNames)[displayBandwidth], bwTinyX, line == 0 ? 17 : 49, false, true);
             }
         #endif
         }
@@ -2363,6 +2551,16 @@ void UI_DisplayMain(void)
             }
         }
         */
+#ifdef ENABLE_CW_MODULATOR
+        if (ritTag) {
+           CW_RIT_FormatTag(String);
+           if (gSetting_set_gui)
+                UI_PrintStringSmallNormal(String, LCD_WIDTH + 77, 0, line + 1);
+           else
+                GUI_DisplaySmallest(String, 100, line == 0 ? 17 : 49, false, true);
+        }
+        else
+#endif
         if (isMainVFO) {
            if (gMonitor) {
                 strcpy(String, "MONI");
@@ -2392,6 +2590,15 @@ void UI_DisplayMain(void)
 #if defined(ENABLE_SCAN_RANGES) && defined(ENABLE_FEAT_F4HWN) && defined(ENABLE_FEAT_F4HWN_SCAN_SUBAUDIBLE) && ENABLE_FEAT_F4HWN_SCAN_SUBAUDIBLE
     if (isMainOnly() && gScanRangeStart && gScanRangeCssCode != 0xFF)
         UI_PrintScanRangeCss(String, 2, 46, 6);
+#endif
+
+#ifdef ENABLE_CW_MODULATOR
+    const bool showRitModal = CW_RIT_IsAdjusting();
+    const bool showCWPopup  = CW_Popup_Kind() != CW_POPUP_NONE && gCurrentFunction != FUNCTION_TRANSMIT;
+    if (showRitModal)
+        center_line = CENTER_LINE_IN_USE;     // modal covers the panel, keep the RSSI bar and RX marker off it
+    else if (showCWPopup && center_line == CENTER_LINE_NONE)
+        center_line = CENTER_LINE_CW_POPUP;   // popup covers the middle line, keep the RSSI refresh off it
 #endif
 
     if (center_line == CENTER_LINE_NONE)
@@ -2578,6 +2785,13 @@ void UI_DisplayMain(void)
     //#ifdef ENABLE_FEAT_F4HWN_RESCUE_OPS
     //}
     //#endif
+#endif
+
+#ifdef ENABLE_CW_MODULATOR
+    if (showRitModal)
+        DrawCWRitModal();
+    if (showCWPopup)
+        DrawCWPopup();  // a quick-settings popup opened while adjusting sits on top
 #endif
 
     ST7565_BlitFullScreen();

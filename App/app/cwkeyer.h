@@ -37,9 +37,10 @@ CW_Action_t CW_HandleState(void);
 // Set CW keyer speed from EEPROM; updates internal timing parameters
 void CW_UpdateWPM();
 
-// Map a raw sidetone menu level (0=off, 1-6) to the BK4819 Tone1 tuning-gain
-// value (0-127) used for the actual register write.
-uint8_t CW_SidetoneLevelToGain(uint8_t level);
+// Set the BK4819 Tone1 tuning gain and AF DAC gain for the CWvol level (0=off, 1-15).
+// The DAC gain also scales RX audio, so RX needs its own back before it's heard again
+// (RADIO_SetModulation or RADIO_SetupRegisters).
+void CW_ApplySidetoneGain(void);
 
 // Reset keyer state, to transition modes like CPO safely
 void CW_KeyerResetRuntime(void);
@@ -55,6 +56,38 @@ bool CW_CheckKeyerInputs(uint8_t new_mode);
 // Start playback of macro (0-3). Sets playback active flag and loads macro.
 // If repeat is true, playback will restart after CW_MESSAGE_REPEAT_DELAY expires.
 void CW_StartMacroPlayback(uint8_t macroIndex, bool repeat);
+
+// Send a "proper roger": R with the dah held for CWrgr dits, default 9 (di-daaaaaaaaah-dit)
+void CW_StartProperRoger(void);
+
+// True while playback is sending a proper roger
+bool CW_PlaybackIsProperRoger(void);
+
+// Play arbitrary text (macro character set, ' ' = word gap). With show false the
+// characters stay off the TX display line, e.g. a callsign the operator must copy.
+// eff_wpm below the keyer speed stretches the gaps between characters and words
+// (Farnsworth) so the text averages eff_wpm; 0 keeps the keyer's own spacing.
+void CW_StartTextPlayback(const char *text, bool show, uint8_t eff_wpm);
+
+// The error double beep for a refused key press (a setting at its limit, a key with no
+// job), as a single dit on the sidetone in CW, where beeps can't sound because the
+// BK4819 runs in baseband. The dit never transmits, stays off the TX display line and
+// doesn't count as keying. Outside CW, or while keying, playback, a repeating macro or
+// a recording is under way, it's the usual double beep.
+void CW_ErrorBeep(void);
+
+// True while playback is sending CW_ErrorBeep's dit
+bool CW_PlaybackIsCue(void);
+
+// True when the paddle/bug keyer has no character or word in progress, i.e. the
+// operator has paused for at least a word gap
+bool CW_KeyerIsIdle(void);
+
+// The playback element just keyed lost setup_ms to TX/sidetone setup before it was
+// heard; add that back so it goes out full length. Playback only: stretching the
+// paddle keyer's timeline the same way puts it out of step with the operator's
+// squeezes, so hand keying keeps its first-element clipping.
+void CW_PlaybackExtendElement(uint32_t setup_ms);
 
 // Stop playback and cancel any pending repeat
 void CW_StopPlayback(void);

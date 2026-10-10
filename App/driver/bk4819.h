@@ -156,6 +156,7 @@ uint8_t  BK4819_GetExNoiceIndicator(void);
 uint16_t BK4819_GetVoiceAmplitudeOut(void);
 uint8_t  BK4819_GetAfTxRx(void);
 void     BK4819_SetRxAudioGain(void);
+void     BK4819_SetAfDacGain(uint8_t dacGain);
 
 bool     BK4819_GetFrequencyScanResult(uint32_t *pFrequency);
 BK4819_CssScanResult_t BK4819_GetCxCSSScanResult(uint32_t *pCdcssFreq, uint16_t *pCtcssFreq);

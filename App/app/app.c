@@ -915,8 +915,8 @@ static void CheckRadioInterrupts(void)
         return;
 
 	#ifdef ENABLE_CW_MODULATOR
-		if (gCW_CpoActive || ( gCurrentFunction == FUNCTION_TRANSMIT && gTxVfo->Modulation == MODULATION_CW))
-			return;  // no interrupts during CW TX or CPO app
+		if (gCW_CpoActive || CW_LocalSidetoneHeld() || ( gCurrentFunction == FUNCTION_TRANSMIT && gTxVfo->Modulation == MODULATION_CW))
+			return;  // no interrupts during CW TX, the local sidetone or CPO app
 	#endif
 
     while (BK4819_ReadRegister(BK4819_REG_0C) & 1u) { // BK chip interrupt request

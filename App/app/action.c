@@ -57,6 +57,7 @@
 
 #ifdef ENABLE_CW_MODULATOR
 #include "app/cwkeyer.h"
+#include "app/cwpopup.h"
 
     #ifdef ENABLE_CODE_PRACTICE
         #include "app/cpo.h"
@@ -84,6 +85,9 @@ static void ACTION_RepeatCWMsg1(void);
 static void ACTION_RepeatCWMsg2(void);
 static void ACTION_RepeatCWMsg3(void);
 static void ACTION_RepeatCWMsg4(void);
+static void ACTION_CWKeyerMode(void);
+static void ACTION_CWProperRoger(void);
+static void ACTION_CWBreakIn(void);
 #ifdef ENABLE_CODE_PRACTICE
 static void ACTION_CPO(void);
 #endif
@@ -147,6 +151,11 @@ void (*const action_opt_table[])(void) = {
     #ifdef ENABLE_CODE_PRACTICE
     [ACTION_OPT_CPO] = &ACTION_CPO,
 	#endif
+	[ACTION_OPT_CW_KEYER_MODE] = &ACTION_CWKeyerMode,
+	[ACTION_OPT_CW_PROPER_ROGER] = &ACTION_CWProperRoger,
+	[ACTION_OPT_CW_SPEED] = &CW_Popup_Speed,
+	[ACTION_OPT_CW_KEY_INPUT] = &CW_Popup_StepKeyInput,
+	[ACTION_OPT_CW_BREAK_IN] = &ACTION_CWBreakIn,
 #endif
 
 #ifdef ENABLE_FEAT_F4HWN
@@ -353,12 +362,18 @@ void ACTION_SwitchDemodul(void)
 {
     gRequestSaveChannel = 1;
 
+#ifdef ENABLE_CW_MODULATOR
+    const ModulationMode_t previous = gTxVfo->Modulation;
+#endif
+
     gTxVfo->Modulation++;
 
     if(gTxVfo->Modulation == MODULATION_UKNOWN)
         gTxVfo->Modulation = MODULATION_FM;
 
 #ifdef ENABLE_CW_MODULATOR
+	RADIO_CW_ApplyModeFilter(gTxVfo, previous);
+
 	// Arm/dearm keyer ownership immediately so a very quick PTT press after
 	// switching to CW cannot beat deferred reconfigure/save paths.
 	CW_KeyerReconfigure(gTxVfo->Modulation == MODULATION_CW);
@@ -567,6 +582,10 @@ void ACTION_Handle(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
     }
 
     // held or released after short press
+#ifdef ENABLE_CW_MODULATOR
+    CW_Popup_OnAction(func);
+#endif
+
 #ifdef ENABLE_FEAT_F4HWN_ACTION_PICKER
     ACTION_Execute(func);
 #else
@@ -732,6 +751,39 @@ static void ACTION_RepeatCWMsg4(void)
 {
 	CW_StartMacroPlayback(3, true);
 }
+
+// Cycle Iambic A -> Iambic B -> Ultimatic -> Bug, same effect as the CWkmod menu
+static void ACTION_CWKeyerMode(void)
+{
+	if (gEeprom.CW_KEYER_MODE >= CW_IAMBIC_MODE_BUG)
+		gEeprom.CW_KEYER_MODE = CW_IAMBIC_MODE_A;
+	else
+		gEeprom.CW_KEYER_MODE++;
+
+	CW_KeyerResetRuntime();  // avoid stale squeeze/tracker state bleeding across mode switch
+	gRequestSaveSettings = true;
+
+	CW_Popup_Show(CW_POPUP_KEYER_MODE);
+}
+
+// Same toggle as F+7 in CW; the status bar icon shows the new state
+static void ACTION_CWBreakIn(void)
+{
+	gEeprom.CW_BREAKIN_ENABLE = !gEeprom.CW_BREAKIN_ENABLE;
+	gRequestSaveSettings = true;
+	gUpdateStatus = true;
+}
+
+static void ACTION_CWProperRoger(void)
+{
+	// playback only drives the keyer in CW mode, same rule as playing from the menu
+	if (gTxVfo->Modulation != MODULATION_CW) {
+		gBeepToPlay = BEEP_500HZ_60MS_DOUBLE_BEEP_OPTIONAL;
+		return;
+	}
+
+	CW_StartProperRoger();
+}
 #endif
 
 
@@ -862,7 +914,12 @@ void ACTION_Wn(void)
 
     pVfo->CHANNEL_BANDWIDTH = !pVfo->CHANNEL_BANDWIDTH;
 
-    if (pVfo->Modulation == MODULATION_AM)
+    // AM, USB and CW read the bit as their own filter pair, see RADIO_ResolveFilter()
+    if (pVfo->Modulation == MODULATION_AM || pVfo->Modulation == MODULATION_USB
+#ifdef ENABLE_CW_MODULATOR
+        || pVfo->Modulation == MODULATION_CW
+#endif
+    )
     {
         BK4819_SetFilterBandwidth(RADIO_ResolveFilter(pVfo), true);
         return;

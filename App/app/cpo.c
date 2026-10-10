@@ -17,6 +17,7 @@
 // Code practice (CPO) app skeleton
 
 #include "app/cpo.h"
+#include "app/cpocall.h"
 #include "audio.h"
 #include "driver/backlight.h"
 #include "driver/bk4819.h"
@@ -39,7 +40,10 @@
 bool gCW_CpoActive = false;
 bool gCW_CpoBacklightOn = false;
 static bool s_needs_redraw = false;
-bool wpm_changed = false;
+// Settings practice can change, as they were on entry: CPO_Exit saves only if one moved
+static uint8_t s_entry_wpm;
+static uint8_t s_entry_farnsworth_wpm;
+static bool s_entry_farnsworth_auto;
 static bool s_flashlight_sending = false;
 #ifdef ENABLE_CW_MODULATOR
 static ModulationMode_t s_saved_modulation = MODULATION_CW;
@@ -69,7 +73,9 @@ void CPO_Enter(void)
 	s_needs_redraw = true;
 	gRequestDisplayScreen = DISPLAY_CPO;
 	gUpdateDisplay = true;
-    wpm_changed = false;
+	s_entry_wpm = gEeprom.CW_KEY_WPM;
+	s_entry_farnsworth_wpm = gEeprom.CW_FARNSWORTH_WPM;
+	s_entry_farnsworth_auto = gEeprom.CW_FARNSWORTH_AUTO;
     gCW_FlashlightSending = s_flashlight_sending;
 
 	// Park the radio for the session rather than asking for a VFO reconfigure --
@@ -112,6 +118,7 @@ void CPO_Exit(void)
 	gCW_FlashlightSending = false;
 	GPIO_ResetOutputPin(GPIO_PIN_FLASHLIGHT);
 #endif
+	CPO_Call_SetMode(CPO_CALL_MODE_OFF);
 	gCW_CpoActive = false;
 	gRequestDisplayScreen = DISPLAY_MAIN;
 	gUpdateDisplay = true;
@@ -131,9 +138,11 @@ void CPO_Exit(void)
 	// This avoids a brief window where generic PTT can race before CW keyer resumes ownership.
 	gFlagReconfigureVfos = true;
 	CW_KeyerResetRuntime();
-    if( wpm_changed ) {
-        gRequestSaveSettings = true;
-    }
+	if (gEeprom.CW_KEY_WPM != s_entry_wpm
+		|| gEeprom.CW_FARNSWORTH_WPM != s_entry_farnsworth_wpm
+		|| gEeprom.CW_FARNSWORTH_AUTO != s_entry_farnsworth_auto) {
+		gRequestSaveSettings = true;
+	}
 }
 
 void CPO_Tick(void)
@@ -145,6 +154,8 @@ void CPO_Tick(void)
 	if (gCW_CpoBacklightOn) {
 		gBacklightCountdown_500ms = 2;
 	}
+
+	CPO_Call_Tick10ms();
 
 	if (s_needs_redraw | gCW_TX_DisplayUpdated) {
 		s_needs_redraw = false;
@@ -168,7 +179,6 @@ void CPO_ProcessKeys(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 			CW_UpdateWPM();
 #endif
 			gUpdateDisplay = true;
-            wpm_changed = true;
 		}
 		break;
 
@@ -179,7 +189,6 @@ void CPO_ProcessKeys(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 			CW_UpdateWPM();
 #endif
 			gUpdateDisplay = true;
-            wpm_changed = true;
         }
 		break;
 
@@ -204,7 +213,21 @@ void CPO_ProcessKeys(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 		break;
 	case KEY_5:
 		CW_ClearTxDisplay();
+		CPO_Call_Restart();
 		gUpdateDisplay = true;
+		break;
+
+	case KEY_F:
+		CPO_Call_NextMode();
+		break;
+
+	case KEY_2:
+	case KEY_8:
+		CPO_Call_StepSpacing(Key == KEY_2);
+		break;
+
+	case KEY_0:
+		CPO_Call_ToggleAutoSpacing();
 		break;
 
 	default:

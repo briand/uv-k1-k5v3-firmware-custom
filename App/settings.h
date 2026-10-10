@@ -89,6 +89,24 @@ enum CW_IambicMode_t {
 };
 typedef enum CW_IambicMode_t CW_IambicMode_t;
 
+// Proper roger dah length in dits (CWrgr menu); 3 is a plain R
+#define CW_ROGER_DAH_DITS_MIN     3
+#define CW_ROGER_DAH_DITS_MAX     20
+#define CW_ROGER_DAH_DITS_DEFAULT 9
+
+// Sidetone level (CWvol menu): 0 = off; see CW_ApplySidetoneGain for the gain curve
+#define CW_SIDETONE_LEVEL_MAX     15
+#define CW_SIDETONE_LEVEL_DEFAULT 7
+
+// Break-in hang time in 10 ms units (CWhang menu): how long TX stays up after the last element
+#define CW_HANG_10MS_MIN          1
+#define CW_HANG_10MS_MAX          200
+#define CW_HANG_10MS_DEFAULT      30
+
+// Copy practice effective speed (Farnsworth): the slowest the gaps between
+// characters can stretch to. It always stays below the keyer speed (max 45).
+#define CW_FARNSWORTH_WPM_MIN     5
+
 #endif
 
 enum TxLockModes_t {
@@ -203,8 +221,36 @@ enum ACTION_OPT_t {
 #ifdef ENABLE_FEAT_F4HWN_FOXHUNT
     ACTION_OPT_FOXHUNT,
 #endif
+// A key bind is stored as this enum's number, so new actions go on the end: one
+// inserted earlier renumbers everything after it and remaps binds already set.
+// The CHIRP driver lists the actions in this same order.
+#ifdef ENABLE_CW_MODULATOR
+    ACTION_OPT_CW_KEYER_MODE,
+    ACTION_OPT_CW_PROPER_ROGER,
+    ACTION_OPT_CW_SPEED,
+    ACTION_OPT_CW_KEY_INPUT,
+    ACTION_OPT_CW_BREAK_IN,
+#endif
     ACTION_OPT_LEN
 };
+
+// Side key and M long actions used while the stored one is unset (erased 0xFF, or
+// anything else past ACTION_OPT_LEN): a fresh radio, or after Reset ALL. A stored
+// action always wins, so a layout set from the menu or CHIRP is never replaced.
+// The CHIRP driver carries the same table.
+#ifdef ENABLE_CW_MODULATOR
+    #define KEY_1_SHORT_DEFAULT  ACTION_OPT_CW_PROPER_ROGER
+    #define KEY_1_LONG_DEFAULT   ACTION_OPT_PLAY_CWMSG1   // a CQ recorded in message 1
+    #define KEY_2_SHORT_DEFAULT  ACTION_OPT_CW_SPEED
+    #define KEY_2_LONG_DEFAULT   ACTION_OPT_CW_KEY_INPUT  // on F2: F1 becomes a paddle in the side button inputs
+    #define KEY_M_LONG_DEFAULT   ACTION_OPT_MONITOR
+#else
+    #define KEY_1_SHORT_DEFAULT  ACTION_OPT_MONITOR
+    #define KEY_1_LONG_DEFAULT   ACTION_OPT_NONE
+    #define KEY_2_SHORT_DEFAULT  ACTION_OPT_SCAN
+    #define KEY_2_LONG_DEFAULT   ACTION_OPT_NONE
+    #define KEY_M_LONG_DEFAULT   ACTION_OPT_NONE
+#endif
 
 #ifdef ENABLE_VOICE
     enum VOICE_Prompt_t
@@ -379,13 +425,17 @@ typedef struct {
 #endif
 #ifdef ENABLE_CW_MODULATOR
 	uint8_t			  	  CW_TONE_FREQUENCY; 	// Actual frequency in 10s of Hz (e.g. 60 for 600 Hz), stored in eeprom as 50 Hz steps from 450 (0=450, 1=500, ..., 15=1200), default 600
-	uint8_t               CW_SIDETONE_LEVEL;	// CW sidetone level: raw menu index 0=off, 1-6 = volume level (see CW_SidetoneLevelToGain for the actual BK4819 gain curve)
+	uint8_t               CW_SIDETONE_LEVEL;	// CW sidetone level: raw menu index 0=off, 1-15 = volume level (see CW_ApplySidetoneGain for the actual BK4819 gain curve)
 	CW_IambicMode_t       CW_KEYER_MODE;		// Iambic A, Iambic B, Ultimatic, or Bug/SAB (keyer disabled when CW_KEY_INPUT == HANDKEY)
 	uint8_t               CW_KEY_WPM;			// actual WPM
 	uint8_t               CW_KEY_INPUT;			// Bitmapped button/port input selections for CW keyer
 	uint16_t			  CW_KEY_INPUT_MENU;	// index of the chosen input method in the menu
 	bool     			  CW_BREAKIN_ENABLE;    // TX on key
 	uint8_t               CW_MESSAGE_REPEAT_DELAY;  // Repeat delay in seconds
+	uint8_t               CW_ROGER_DAH_DITS;    // proper roger dah length in dits
+	uint8_t               CW_HANG_10MS;         // break-in hang time in 10 ms units
+	uint8_t               CW_FARNSWORTH_WPM;    // copy practice effective speed, 0 = keyer spacing
+	bool                  CW_FARNSWORTH_AUTO;   // copy practice narrows and widens the spacing on its own
 #endif
 
 } EEPROM_Config_t;

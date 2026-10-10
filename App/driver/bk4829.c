@@ -1635,11 +1635,16 @@ uint8_t BK4819_GetAfTxRx(void)
 }
 
 void BK4819_SetRxAudioGain(void) {
+    BK4819_SetAfDacGain(gEeprom.DAC_GAIN);
+}
+
+// REG_48 with the AF DAC gain (0 ~ 15) overridden, e.g. to scale the CW sidetone
+void BK4819_SetAfDacGain(uint8_t dacGain) {
     BK4819_WriteRegister(BK4819_REG_48,
         (11u << 12)                |     // ??? .. 0 ~ 15, doesn't seem to make any difference
         ( 0u << 10)                |     // AF Rx Gain-1
         (gEeprom.VOLUME_GAIN << 4) |     // AF Rx Gain-2
-        (gEeprom.DAC_GAIN    << 0));     // AF DAC Gain (after Gain-1 and Gain-2)
+        ((dacGain & 0x0F)    << 0));     // AF DAC Gain (after Gain-1 and Gain-2)
 }
 
 bool BK4819_GetFrequencyScanResult(uint32_t *pFrequency)
