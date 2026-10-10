@@ -121,6 +121,7 @@ void CW_AppUpdate(void)
 	// ---- poll the keyer / playback engine for the next action ----
 	CW_Action_t action;
 	const bool fromPlayback = gCW_PlaybackActive;
+	const bool cue          = CW_PlaybackIsCue();  // before polling: a paddle can stop it mid-element
 	if (fromPlayback)
 		action = CW_PlaybackHandleState();
 	else
@@ -140,8 +141,9 @@ void CW_AppUpdate(void)
 		CW_Popup_Show(CW_POPUP_TX_TIMEOUT);  // keep saying so until the key is released
 	}
 
-	// keying confirms and closes a settings popup or RIT/XIT adjust (break-in off never enters TX)
-	if (action == CW_ACTION_CARRIER_ON) {
+	// keying confirms and closes a settings popup or RIT/XIT adjust (break-in off never
+	// enters TX). An error-beep dit answers a key press in them, so it leaves them up.
+	if (action == CW_ACTION_CARRIER_ON && !cue) {
 		CW_Popup_OnKeying();
 		CW_RIT_OnKeying();
 	}
@@ -158,8 +160,8 @@ void CW_AppUpdate(void)
 		&& (action == CW_ACTION_CARRIER_ON || action == CW_ACTION_CARRIER_HOLD_ON);
 
 	// ---- local-only sidetone path (no RF) ----
-	// Used when recording a macro, reading ADC, breakin disabled, or code practice
-	if (gCW_Recording || !gEeprom.CW_BREAKIN_ENABLE
+	// Used when recording a macro, reading ADC, breakin disabled, code practice, or an error-beep dit
+	if (gCW_Recording || !gEeprom.CW_BREAKIN_ENABLE || cue
 #ifdef ENABLE_CODE_PRACTICE
 		|| gCW_CpoActive
 #endif

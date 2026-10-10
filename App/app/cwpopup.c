@@ -18,7 +18,6 @@
 
 #include "app/cwkeyer.h"
 #include "app/cwpopup.h"
-#include "audio.h"
 #include "functions.h"
 #include "misc.h"
 #include "settings.h"
@@ -111,7 +110,7 @@ void CW_Popup_Speed(void)
 	else if (gScreenToDisplay == DISPLAY_MAIN)
 		CW_Popup_Show(CW_POPUP_SPEED);
 	else
-		gBeepToPlay = BEEP_500HZ_60MS_DOUBLE_BEEP_OPTIONAL;  // up/down only reach the main screen
+		CW_ErrorBeep();  // up/down only reach the main screen
 }
 
 static void StepSpeed(int8_t direction)
@@ -119,7 +118,7 @@ static void StepSpeed(int8_t direction)
 	const int wpm = gEeprom.CW_KEY_WPM + direction;
 
 	if (wpm < CW_WPM_MIN || wpm > CW_WPM_MAX) {
-		gBeepToPlay = BEEP_500HZ_60MS_DOUBLE_BEEP_OPTIONAL;
+		CW_ErrorBeep();
 		return;
 	}
 
@@ -148,7 +147,7 @@ void CW_Popup_StepKeyInput(void)
 {
 	if (s_kind != CW_POPUP_KEY_INPUT) {
 		if (gScreenToDisplay != DISPLAY_MAIN) {
-			gBeepToPlay = BEEP_500HZ_60MS_DOUBLE_BEEP_OPTIONAL;  // nowhere to show the pending choice
+			CW_ErrorBeep();  // nowhere to show the pending choice
 			return;
 		}
 		s_key_input = gEeprom.CW_KEY_INPUT_MENU;

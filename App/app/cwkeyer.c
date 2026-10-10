@@ -27,6 +27,7 @@
 #include "audio.h"
 #include "settings.h"
 #include "misc.h"
+#include "radio.h"
 #include "py32f071_ll_dma.h"
 #include "py32f071_ll_tim.h"
 #include "py32f071_ll_gpio.h"
@@ -110,6 +111,7 @@ static uint8_t s_play_elem_index = 0; // current element index within char
 static bool s_play_long_dah = false; // proper roger: hold each dah for gEeprom.CW_ROGER_DAH_DITS
 static uint16_t s_play_setup_ms = 0; // TX/sidetone setup the current element lost at its start
 static bool s_play_hidden = false; // keep played characters off the TX display line
+static bool s_play_cue = false; // the sidetone dit of CW_ErrorBeep
 static uint8_t s_play_eff_wpm = 0; // Farnsworth effective speed of the playback, 0 = keyer spacing
 static uint16_t s_play_char_gap_count = 0; // playback's char gap: s_char_gap_count, or stretched to s_play_eff_wpm
 static uint16_t s_play_word_gap_count = 0; // playback's word gap, likewise
@@ -343,6 +345,7 @@ static void CW_BeginPlayback(bool repeat, uint8_t eff_wpm)
     // Prime the playback FSM to start immediately
     s_play_space_pending = false;
     s_play_hidden = false;
+    s_play_cue = false;
     s_play_eff_wpm = eff_wpm;
     CW_UpdatePlaybackGaps();
     s_pb_state = PB_STATE_INTER_CHAR_GAP;
@@ -404,6 +407,32 @@ void CW_StartTextPlayback(const char *text, bool show, uint8_t eff_wpm)
     s_play_long_dah = false;
     CW_BeginPlayback(false, eff_wpm);
     s_play_hidden = !show;
+}
+
+void CW_ErrorBeep(void)
+{
+    if (CW_PlaybackIsCue())
+        return;  // one at a time: the dit already playing answers this press too
+
+    // Only CW runs the sidetone path, and the dit must not cut into keying, other
+    // playback, a repeating macro's pause (starting playback cancels the repeat) or
+    // a recording. Those get the double beep, which is silent in CW.
+    if (gTxVfo->Modulation != MODULATION_CW || gCW_Recording || gCW_PlaybackActive
+        || gCW_PlaybackRepeat || !CW_KeyerIsIdle()) {
+        gBeepToPlay = BEEP_500HZ_60MS_DOUBLE_BEEP_OPTIONAL;
+        return;
+    }
+
+    CW_StartTextPlayback("E", false, 0);
+    s_play_cue = true;
+
+    // skip the char-gap lead-in so the dit answers the key press right away
+    s_elem_start_count = millis() - s_char_gap_count;
+}
+
+bool CW_PlaybackIsCue(void)
+{
+    return gCW_PlaybackActive && s_play_cue;
 }
 
 bool CW_KeyerIsIdle(void)

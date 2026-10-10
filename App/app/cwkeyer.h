@@ -69,6 +69,16 @@ bool CW_PlaybackIsProperRoger(void);
 // (Farnsworth) so the text averages eff_wpm; 0 keeps the keyer's own spacing.
 void CW_StartTextPlayback(const char *text, bool show, uint8_t eff_wpm);
 
+// The error double beep for a refused key press (a setting at its limit, a key with no
+// job), as a single dit on the sidetone in CW, where beeps can't sound because the
+// BK4819 runs in baseband. The dit never transmits, stays off the TX display line and
+// doesn't count as keying. Outside CW, or while keying, playback, a repeating macro or
+// a recording is under way, it's the usual double beep.
+void CW_ErrorBeep(void);
+
+// True while playback is sending CW_ErrorBeep's dit
+bool CW_PlaybackIsCue(void);
+
 // True when the paddle/bug keyer has no character or word in progress, i.e. the
 // operator has paused for at least a word gap
 bool CW_KeyerIsIdle(void);

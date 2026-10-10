@@ -18,8 +18,8 @@
 
 #include <string.h>
 
+#include "app/cwkeyer.h"
 #include "app/cwrit.h"
-#include "audio.h"
 #include "driver/bk4819.h"
 #include "frequencies.h"
 #include "functions.h"
@@ -82,7 +82,7 @@ static void Nudge(int16_t delta)
 
 	if (next > CW_RIT_LIMIT || next < -CW_RIT_LIMIT) {
 		next = (next > 0) ? CW_RIT_LIMIT : -CW_RIT_LIMIT;
-		gBeepToPlay = BEEP_500HZ_60MS_DOUBLE_BEEP_OPTIONAL;
+		CW_ErrorBeep();
 	}
 
 	s_offset = next;
@@ -98,7 +98,7 @@ static void MoveToDial(void)
 	    || s_offset == 0 || !(s_rit_on || s_xit_on)
 	    || dial < frequencyBandTable[gTxVfo->Band].lower || dial > frequencyBandTable[gTxVfo->Band].upper
 	    || RX_freq_check(dial) < 0) {
-		gBeepToPlay = BEEP_500HZ_60MS_DOUBLE_BEEP_OPTIONAL;
+		CW_ErrorBeep();
 		return;
 	}
 
@@ -122,7 +122,7 @@ static void ExitAdjust(void)
 void CW_RIT_EnterAdjust(void)
 {
 	if (gTxVfo->Modulation != MODULATION_CW || gScreenToDisplay != DISPLAY_MAIN) {
-		gBeepToPlay = BEEP_500HZ_60MS_DOUBLE_BEEP_OPTIONAL;
+		CW_ErrorBeep();
 		return;
 	}
 
@@ -217,7 +217,7 @@ bool CW_RIT_ProcessKey(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 
 		default:  // MENU, F
 			if (pressed)
-				gBeepToPlay = BEEP_500HZ_60MS_DOUBLE_BEEP_OPTIONAL;
+				CW_ErrorBeep();
 			break;
 	}
 
