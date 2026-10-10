@@ -103,10 +103,9 @@ typedef enum CW_IambicMode_t CW_IambicMode_t;
 #define CW_HANG_10MS_MAX          200
 #define CW_HANG_10MS_DEFAULT      30
 
-// CW settings byte 6 once the CW key layout (KEY_*_DEFAULT below) has been written over
-// the stored one. Bump it to write the layout again on the next boot, e.g. after the
-// actions are renumbered. Pre-1.0 betas kept an ADC calibration byte here.
-#define CW_KEY_LAYOUT_MARKER      0xC1
+// Copy practice effective speed (Farnsworth): the slowest the gaps between
+// characters can stretch to. It always stays below the keyer speed (max 45).
+#define CW_FARNSWORTH_WPM_MIN     5
 
 #endif
 
@@ -213,14 +212,6 @@ enum ACTION_OPT_t {
 #if defined(ENABLE_CW_MODULATOR) && defined(ENABLE_CODE_PRACTICE)
     ACTION_OPT_CPO,
 #endif
-#ifdef ENABLE_CW_MODULATOR
-    ACTION_OPT_CW_KEYER_MODE,
-    ACTION_OPT_CW_PROPER_ROGER,
-    ACTION_OPT_CW_SPEED,
-    ACTION_OPT_CW_FILTER,
-    ACTION_OPT_CW_KEY_INPUT,
-    ACTION_OPT_CW_BREAK_IN,
-#endif
 #ifdef ENABLE_FEAT_F4HWN_BEAM
     ACTION_OPT_BEAM,
 #endif
@@ -230,11 +221,24 @@ enum ACTION_OPT_t {
 #ifdef ENABLE_FEAT_F4HWN_FOXHUNT
     ACTION_OPT_FOXHUNT,
 #endif
+// A key bind is stored as this enum's number, so new actions go on the end: one
+// inserted earlier renumbers everything after it and remaps binds already set.
+// The CHIRP driver lists the actions in this same order.
+#ifdef ENABLE_CW_MODULATOR
+    ACTION_OPT_CW_KEYER_MODE,
+    ACTION_OPT_CW_PROPER_ROGER,
+    ACTION_OPT_CW_SPEED,
+    ACTION_OPT_CW_FILTER,
+    ACTION_OPT_CW_KEY_INPUT,
+    ACTION_OPT_CW_BREAK_IN,
+#endif
     ACTION_OPT_LEN
 };
 
-// Side key and M long actions when none are stored, e.g. after Reset ALL. CW builds
-// also write theirs once over a stored layout; see CW_KEY_LAYOUT_MARKER.
+// Side key and M long actions used while the stored one is unset (erased 0xFF, or
+// anything else past ACTION_OPT_LEN): a fresh radio, or after Reset ALL. A stored
+// action always wins, so a layout set from the menu or CHIRP is never replaced.
+// The CHIRP driver carries the same table.
 #ifdef ENABLE_CW_MODULATOR
     #define KEY_1_SHORT_DEFAULT  ACTION_OPT_CW_PROPER_ROGER
     #define KEY_1_LONG_DEFAULT   ACTION_OPT_PLAY_CWMSG1   // a CQ recorded in message 1
@@ -431,6 +435,8 @@ typedef struct {
 	uint8_t               CW_MESSAGE_REPEAT_DELAY;  // Repeat delay in seconds
 	uint8_t               CW_ROGER_DAH_DITS;    // proper roger dah length in dits
 	uint8_t               CW_HANG_10MS;         // break-in hang time in 10 ms units
+	uint8_t               CW_FARNSWORTH_WPM;    // copy practice effective speed, 0 = keyer spacing
+	bool                  CW_FARNSWORTH_AUTO;   // copy practice narrows and widens the spacing on its own
 #endif
 
 } EEPROM_Config_t;
