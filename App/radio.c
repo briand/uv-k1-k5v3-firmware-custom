@@ -1514,7 +1514,7 @@ void RADIO_CW_BeginResume(void)
 
 	// Set local AF sidetone freq in Hz
 	BK4819_SetScrambleFrequencyControlWord(gEeprom.CW_TONE_FREQUENCY * 10);
-	BK4819_WriteRegister(BK4819_REG_70, BK4819_REG_70_TONE1_VALUE(CW_SidetoneLevelToGain(gEeprom.CW_SIDETONE_LEVEL)));
+	CW_ApplySidetoneGain();
 	
 	// Setup the Tx/Rx blocks for CW transmission
 	BK4819_EnableTXLink();

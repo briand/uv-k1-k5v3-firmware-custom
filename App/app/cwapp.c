@@ -48,6 +48,26 @@
 #include "app/flashlight.h"
 #endif
 
+// Local-only sidetone (no RF): ALAM and the sidetone's DAC gain keep the audio path
+// through the gaps, and RX gets it back once the key has been up for the hang time,
+// like break-in's suspend. Giving it back after every element swung the DAC gain
+// between the sidetone's and RX's on each edge, which popped and let RX in between
+// elements.
+static bool     s_local_sidetone_held;  // ALAM and the sidetone gain own the audio path
+static bool     s_local_keyed;          // tone on
+static uint32_t s_local_key_up_ms;      // when the tone last went off
+
+static void LocalSidetoneRelease(void)
+{
+	s_local_sidetone_held = false;
+	RADIO_SetModulation(gRxVfo->Modulation);  // also puts RX's DAC gain (0xF) back
+}
+
+bool CW_LocalSidetoneHeld(void)
+{
+	return s_local_sidetone_held;
+}
+
 // ---------------------------------------------------------------------------
 // CW_EndTxNow  –  end CW transmission immediately and return to monitor
 // ---------------------------------------------------------------------------
@@ -56,7 +76,8 @@ void CW_EndTxNow(void)
     // Clear CW state when ending transmission entirely
     gCW_State = CW_INACTIVE;
 
-	// Call the common end-of-transmission (sends tail, resets TX regs)
+	// Call the common end-of-transmission (sends tail, resets TX regs). Its
+	// RADIO_SetupRegisters also puts RX's DAC gain back over the sidetone's.
 	APP_EndTransmission();
 
 	// Go straight to FOREGROUND
@@ -89,6 +110,10 @@ void CW_AppUpdate(void)
 		if (gCW_State != CW_INACTIVE)
 		{
 			CW_EndTxNow();
+		}
+		if (s_local_sidetone_held)
+		{
+			LocalSidetoneRelease();
 		}
         return;  // not in CW mode, nothing else to do
 	}
@@ -147,28 +172,35 @@ void CW_AppUpdate(void)
 					SYSTEM_DelayMs(10);
 				}
 				BACKLIGHT_TurnOn();
+				// gain before ALAM, so the tone path never opens at RX's DAC gain
+				CW_ApplySidetoneGain();
 				BK4819_SetAF(BK4819_AF_ALAM);
-				BK4819_WriteRegister(BK4819_REG_70, BK4819_REG_70_TONE1_VALUE(CW_SidetoneLevelToGain(gEeprom.CW_SIDETONE_LEVEL)));
 				BK4819_SetScrambleFrequencyControlWord(gEeprom.CW_TONE_FREQUENCY * 10);
 				#ifdef ENABLE_FLASHLIGHT
 				if (gCW_FlashlightSending) {
 					GPIO_SetOutputPin(GPIO_PIN_FLASHLIGHT);
 				}
 				#endif
+				s_local_sidetone_held = true;
+				s_local_keyed = true;
 				gCW_TxDisplayHoldoff_10ms = 200;
 			break;
 
+			case CW_ACTION_NONE:
+				// same as the RF path's suspend on NONE, e.g. a paddle stopping playback mid-element
+				if (!s_local_keyed)
+					break;
+				// fall through
 			case CW_ACTION_CARRIER_OFF:
+				// ALAM and the sidetone gain stay until the hang time passes (CPO keeps them)
 				BK4819_SetScrambleFrequencyControlWord(0);
 				#ifdef ENABLE_FLASHLIGHT
 				if (gCW_FlashlightSending) {
 					GPIO_ResetOutputPin(GPIO_PIN_FLASHLIGHT);
 				}
 				#endif
-				#ifdef ENABLE_CODE_PRACTICE
-				if (!gCW_CpoActive)  // just stay in ALAM for CPO
-				#endif
-					RADIO_SetModulation(gRxVfo->Modulation);
+				s_local_keyed = false;
+				s_local_key_up_ms = millis();
 				gCW_TxDisplayHoldoff_10ms = 200;
 			break;
 
@@ -249,6 +281,21 @@ void CW_AppUpdate(void)
 	if (guard == CW_GUARD_TRIPPED && gCW_State != CW_INACTIVE) {
 		gPttIsPressed = false;
 		CW_EndTxNow();
+	}
+
+	// ---- local sidetone hang timeout → back to RX ----
+	if (s_local_sidetone_held)
+	{
+		if (gCW_State != CW_INACTIVE
+#ifdef ENABLE_CODE_PRACTICE
+			|| gCW_CpoActive
+#endif
+			) {
+			s_local_sidetone_held = false;  // TX or CPO owns the audio path now
+		}
+		else if (!s_local_keyed && millis_since(s_local_key_up_ms) >= gEeprom.CW_HANG_10MS * 10u) {
+			LocalSidetoneRelease();
+		}
 	}
 
 	// ---- suspend timeout → end TX ----

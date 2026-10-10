@@ -834,6 +834,11 @@ MIC_GAIN_LIST = ["+1.5dB", "+4.0dB", "+8.0dB", "+12.0dB", "+16.0dB", "+20.0dB", 
 
 # CW settings base address in fusion firmware (PY25Q16 direct address)
 _NR7Y_CW_SETTINGS_ADDR = 0x00A140
+# Sidetone volume is stored in bits 4-7 of CW byte 0 as a code, not the level.
+# Codes 1-6 were levels 1-6 of the old 6-level curve and now stand for the new
+# levels with the same loudness; the firmware's settings.c has the same table.
+_NR7Y_CW_SIDETONE_CODE_TO_LEVEL = [0, 6, 11, 12, 13, 14, 15,
+                                   1, 2, 3, 4, 5, 7, 8, 9, 10]
 
 # CW macro EEPROM addresses (cwmacro.h: reuses DTMF contacts region 0x1C00-0x1CFF)
 _NR7Y_CW_MACRO_ADDRS = [0x1C00, 0x1C30, 0x1C60, 0x1C90]
@@ -4134,8 +4139,8 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
         except Exception as e:
             LOG.error("CW freq setting: %s", e)
 
-        # Sidetone Volume (0=OFF, 1-6)
-        vol_opts = ["OFF"] + [str(i) for i in range(1, 7)]
+        # Sidetone Volume (0=OFF, 1-15)
+        vol_opts = ["OFF"] + [str(i) for i in range(1, 16)]
         try:
             vi = self._get_cw_sidetone_level()
             cw.append(RadioSetting("cw_sidetone_level", "Sidetone Volume",
@@ -4297,7 +4302,7 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
                 freq_opts = ["%d Hz" % (450 + i * 50) for i in range(11)]
                 self._set_cw_frequency_idx(freq_opts.index(str(element.value)))
             elif name == "cw_sidetone_level":
-                vol_opts = ["OFF"] + [str(i) for i in range(1, 7)]
+                vol_opts = ["OFF"] + [str(i) for i in range(1, 16)]
                 self._set_cw_sidetone_level(vol_opts.index(str(element.value)))
             elif name == "cw_keyer_mode":
                 self._set_cw_keyer_mode(_NR7Y_CW_KEYER_MODES.index(str(element.value)))
@@ -4346,24 +4351,30 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
         freq_val = 45 + (b & 0x0F) * 5   # Hz/10
         return max(0, min(10, (freq_val * 10 - 450) // 50))
 
-    def _set_cw_frequency_idx(self, idx):
+    def _cw_byte0(self):
+        """CW byte 0, with a blank (0xFF) byte read as 600 Hz at level 7."""
         b = self._mmap_byte(_NR7Y_CW_SETTINGS_ADDR)
+        return 0xC3 if b == 0xFF else b
+
+    def _set_cw_frequency_idx(self, idx):
+        b = self._cw_byte0()
         freq_hz = 450 + int(idx) * 50
         encoded = (freq_hz // 10 - 45) // 5
         self._mmap_set(_NR7Y_CW_SETTINGS_ADDR, (b & 0xF0) | (encoded & 0x0F))
 
-    # -- Sidetone level (bits 4-6 of CW byte 0) --
+    # -- Sidetone level (bits 4-7 of CW byte 0) --
 
     def _get_cw_sidetone_level(self):
-        """Return sidetone volume index 0-6 (0=OFF)."""
+        """Return sidetone volume index 0-15 (0=OFF)."""
         b = self._mmap_byte(_NR7Y_CW_SETTINGS_ADDR)
         if b == 0xFF:
-            return 4   # Default level 4
-        return (b >> 4) & 0x07
+            return 7   # Default level 7
+        return _NR7Y_CW_SIDETONE_CODE_TO_LEVEL[(b >> 4) & 0x0F]
 
     def _set_cw_sidetone_level(self, level):
-        b = self._mmap_byte(_NR7Y_CW_SETTINGS_ADDR)
-        self._mmap_set(_NR7Y_CW_SETTINGS_ADDR, (b & 0x0F) | ((int(level) & 0x07) << 4))
+        b = self._cw_byte0()
+        code = _NR7Y_CW_SIDETONE_CODE_TO_LEVEL.index(int(level))
+        self._mmap_set(_NR7Y_CW_SETTINGS_ADDR, (b & 0x0F) | (code << 4))
 
     # -- Keyer mode (full byte at CW byte 4) --
 

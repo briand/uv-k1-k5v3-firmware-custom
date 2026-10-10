@@ -94,6 +94,10 @@ typedef enum CW_IambicMode_t CW_IambicMode_t;
 #define CW_ROGER_DAH_DITS_MAX     20
 #define CW_ROGER_DAH_DITS_DEFAULT 9
 
+// Sidetone level (CWvol menu): 0 = off; see CW_ApplySidetoneGain for the gain curve
+#define CW_SIDETONE_LEVEL_MAX     15
+#define CW_SIDETONE_LEVEL_DEFAULT 7
+
 // Break-in hang time in 10 ms units (CWhang menu): how long TX stays up after the last element
 #define CW_HANG_10MS_MIN          1
 #define CW_HANG_10MS_MAX          200
@@ -418,7 +422,7 @@ typedef struct {
 #endif
 #ifdef ENABLE_CW_MODULATOR
 	uint8_t			  	  CW_TONE_FREQUENCY; 	// Actual frequency in 10s of Hz (e.g. 60 for 600 Hz), stored in eeprom as 50 Hz steps from 450 (0=450, 1=500, ..., 15=1200), default 600
-	uint8_t               CW_SIDETONE_LEVEL;	// CW sidetone level: raw menu index 0=off, 1-6 = volume level (see CW_SidetoneLevelToGain for the actual BK4819 gain curve)
+	uint8_t               CW_SIDETONE_LEVEL;	// CW sidetone level: raw menu index 0=off, 1-15 = volume level (see CW_ApplySidetoneGain for the actual BK4819 gain curve)
 	CW_IambicMode_t       CW_KEYER_MODE;		// Iambic A, Iambic B, Ultimatic, or Bug/SAB (keyer disabled when CW_KEY_INPUT == HANDKEY)
 	uint8_t               CW_KEY_WPM;			// actual WPM
 	uint8_t               CW_KEY_INPUT;			// Bitmapped button/port input selections for CW keyer

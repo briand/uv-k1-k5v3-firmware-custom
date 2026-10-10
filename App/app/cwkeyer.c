@@ -32,6 +32,8 @@
 #include "py32f071_ll_gpio.h"
 #include "py32f071_ll_rcc.h"
 #include "py32f071_ll_usart.h"
+#include "driver/bk4819.h"
+#include "driver/bk4819-regs.h"
 #include "driver/gpio.h"
 #include "driver/systick.h"
 #include "driver/millis.h"
@@ -196,30 +198,41 @@ void CW_KeyerReconfigure(bool enable)
     s_cfg_dirty = true; // Defer init until idle or gap
 }
 
-// Sidetone tuning-gain curve: level 0 is off (handled by BK4819_REG_70_TONE1_VALUE).
-// Levels 1-6 are spread linearly from CW_SIDETONE_MIN_GAIN to CW_SIDETONE_MAX_GAIN so
-// the lowest non-off level doesn't have to start all the way down at zero gain.
-// Retune by editing these two constants and rebuilding; the table below is
-// evaluated at compile time so no multiply/divide happens on the CW critical path.
-#define CW_SIDETONE_LEVELS    6    // number of non-off menu levels (1-6)
-#define CW_SIDETONE_MIN_GAIN  1    // gain at level 1
-#define CW_SIDETONE_MAX_GAIN  127  // gain at level 6 (BK4819 7-bit tuning-gain field max)
+// Sidetone gain curve: level 0 is off (handled by BK4819_REG_70_TONE1_VALUE).
+// The Tone1 tuning gain alone bottoms out at 1, which is still loud with the volume
+// knob turned up for a weak station, so each level also sets the AF DAC gain
+// (REG_48, ~2 dB/step) while the sidetone plays. The DAC values are absolute: while
+// listening, RX audio's DAC gain is 0xF (RADIO_SetModulation), which is what the old
+// 6-level sidetone played at, so level 15 is the old top level and the scale doesn't
+// depend on the DAC calibration. Relative to level 15:
+//   1-7:   DAC 0, tuning gain halves per step     -72 to -36 dB, 6 dB/step
+//   8-10:  full tuning gain, DAC 0/3/6            -30, -24, -18 dB
+//   11-15: full tuning gain, DAC 8/11/13/14/15    -14, -8, -4, -2, 0 dB
+// Levels 6 and 11-15 are the old levels 1-6 (see s_cw_sidetone_code_to_level).
+// RX audio gets its own DAC gain back after the hang time (RADIO_SetModulation, RADIO_SetupRegisters).
+// Retune by editing the table and rebuilding.
+typedef struct {
+    uint8_t tone_gain;  // BK4819 Tone1 tuning gain, 0-127
+    uint8_t dac_gain;   // AF DAC gain, 0-15
+} CW_SidetoneStep_t;
 
-#define CW_SIDETONE_GAIN_AT(level) \
-    (CW_SIDETONE_MIN_GAIN + ((CW_SIDETONE_MAX_GAIN - CW_SIDETONE_MIN_GAIN) * ((level) - 1)) / (CW_SIDETONE_LEVELS - 1))
-
-static const uint8_t s_sidetone_gain[CW_SIDETONE_LEVELS + 1] = {
-    0, // level 0 = off
-    CW_SIDETONE_GAIN_AT(1), CW_SIDETONE_GAIN_AT(2), CW_SIDETONE_GAIN_AT(3),
-    CW_SIDETONE_GAIN_AT(4), CW_SIDETONE_GAIN_AT(5), CW_SIDETONE_GAIN_AT(6),
+static const CW_SidetoneStep_t s_sidetone[CW_SIDETONE_LEVEL_MAX + 1] = {
+    {   0,  0 },  // level 0 = off
+    {   1,  0 }, {   2,  0 }, {   4,  0 }, {   8,  0 }, {  16,  0 }, {  32,  0 }, {  64,  0 },
+    { 127,  0 }, { 127,  3 }, { 127,  6 },
+    { 127,  8 }, { 127, 11 }, { 127, 13 }, { 127, 14 }, { 127, 15 },
 };
 
-uint8_t CW_SidetoneLevelToGain(uint8_t level)
+void CW_ApplySidetoneGain(void)
 {
-    if (level > CW_SIDETONE_LEVELS) {
-        level = CW_SIDETONE_LEVELS;
+    uint8_t level = gEeprom.CW_SIDETONE_LEVEL;
+    if (level > CW_SIDETONE_LEVEL_MAX) {
+        level = CW_SIDETONE_LEVEL_MAX;
     }
-    return s_sidetone_gain[level];
+    const CW_SidetoneStep_t *step = &s_sidetone[level];
+
+    BK4819_WriteRegister(BK4819_REG_70, BK4819_REG_70_TONE1_VALUE(step->tone_gain));
+    BK4819_SetAfDacGain(step->dac_gain);
 }
 
 void CW_UpdateWPM()

@@ -73,6 +73,25 @@ static void WriteCWKeyLayout(uint8_t cwBlock[8])
     cwBlock[6] = CW_KEY_LAYOUT_MARKER;
     PY25Q16_WriteBuffer(0x00A140, cwBlock, 8, false);
 }
+
+// CWvol is stored in bits 4-7 of CW byte 0 as a code, not as the menu level. Codes 1-6
+// held levels 1-6 of the old 6-level curve, so they stand for the new levels with the
+// same loudness (see CW_ApplySidetoneGain) and an upgraded radio keeps its sidetone.
+// The other codes hold the levels the old curve didn't have.
+// The CHIRP driver carries the same table.
+static const uint8_t s_cw_sidetone_code_to_level[16] = {
+    0, 6, 11, 12, 13, 14, 15,       // 0 = off, 1-6 = old levels 1-6
+    1, 2, 3, 4, 5, 7, 8, 9, 10,     // new levels
+};
+
+static uint8_t CWSidetoneLevelToCode(uint8_t level)
+{
+    for (uint8_t code = 0; code < 16; code++) {
+        if (s_cw_sidetone_code_to_level[code] == level)
+            return code;
+    }
+    return 0;  // not reached: the menu keeps the level in 0-15
+}
 #endif
 
 void SETTINGS_InitEEPROM(void)
@@ -422,7 +441,7 @@ gEeprom.FreqChannel[1]   = IS_FREQ_CHANNEL(Data16[5]) ? Data16[5] : (FREQ_CHANNE
 	// 0F20..0F27
 	PY25Q16_ReadBuffer(0x00A140, Data, 8);
 	gEeprom.CW_TONE_FREQUENCY = Data[0] == 0xff ? 60 : 45 + (Data[0] & 0xf) * 5;  // Same as gMenuSelection: 50 Hz steps from 450, default 600
-	gEeprom.CW_SIDETONE_LEVEL = Data[0] == 0xff ? 4 : ((Data[0] >> 4) & 0x07);  // raw menu level 0-6 (0=off), default 4; see CW_SidetoneLevelToGain for the applied gain curve
+	gEeprom.CW_SIDETONE_LEVEL = Data[0] == 0xff ? CW_SIDETONE_LEVEL_DEFAULT : s_cw_sidetone_code_to_level[Data[0] >> 4];  // menu level 0-15 (0=off), stored as a code in bits 4-7; see CW_ApplySidetoneGain for the applied gain curve
 	gEeprom.CW_KEY_WPM        = ((Data[1] & 0x7f) <= 45 && (Data[1] & 0x7f) >= 10) ? Data[1] & 0x7f : 18;  // bits 0-6, valid range 10-45, default 18 WPM
 	// Data[4]: keyer mode byte. 0xFF = not yet written (old layout packed mode into bit 7
 	// of Data[1]). Carry-over: read legacy bit if Data[1] is valid, then always
@@ -1157,7 +1176,7 @@ void SETTINGS_SaveSettings(void)
     memset(SecBuf, 0xff, 8);
     State = SecBuf;
 
-	State[0] = (gEeprom.CW_TONE_FREQUENCY - 45) / 5 | ((gEeprom.CW_SIDETONE_LEVEL & 0x07) << 4);
+	State[0] = (gEeprom.CW_TONE_FREQUENCY - 45) / 5 | (CWSidetoneLevelToCode(gEeprom.CW_SIDETONE_LEVEL) << 4);
 	State[1] = gEeprom.CW_KEY_WPM & 0x7F;  // WPM in bits 0-6; keyer mode moved to State[4]
 	State[2] = (gEeprom.CW_KEY_INPUT_MENU & 0x1F) | ((gEeprom.CW_BREAKIN_ENABLE & 0x01) << 6);  // key input in bits 0-4, breakin bit 6
 	// State[3]: store menu value (delay/2) in bits 0-6, clear high bit to mark valid

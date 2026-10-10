@@ -19,6 +19,8 @@
 #ifndef APP_CWAPP_H
 #define APP_CWAPP_H
 
+#include <stdbool.h>
+
 // Called from main loop after APP_Update().
 // Handles CW keyer actions: carrier on/off/hold, suspend/resume, local sidetone.
 void CW_AppUpdate(void);
@@ -27,6 +29,10 @@ void CW_AppUpdate(void);
 // Unlike the normal PTT release path, this does NOT honor RTTE
 // (Repeater Tail Tone Elimination is invalid for CW).
 void CW_EndTxNow(void);
+
+// True while the local-only sidetone (no RF) holds the audio path, from the first
+// element until the hang time passes with the key up.
+bool CW_LocalSidetoneHeld(void);
 
 // Called from the 10ms timeslice to perform CW-related periodic updates
 // (macro recording state, playback indicator deadline, TX display holdoff).

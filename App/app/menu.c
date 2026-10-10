@@ -408,7 +408,7 @@ int MENU_GetLimits(uint8_t menu_id, int32_t *pMin, int32_t *pMax)
 
 		case MENU_CW_SIDETONE_LEVEL:
 			*pMin = 0;
-			*pMax = 6;  // 0=off, 1-6 are volume levels
+			*pMax = CW_SIDETONE_LEVEL_MAX;  // 0=off, 1-15 are volume levels
 			break;
 
 		case MENU_CW_KEYER_MODE:
