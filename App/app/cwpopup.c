@@ -24,12 +24,13 @@
 #include "settings.h"
 #include "ui/ui.h"
 
-#define CW_POPUP_SHOW_500MS  4    // 2 s after the last key press
-#define CW_WPM_MIN           10   // same range as the CWwpm menu
-#define CW_WPM_MAX           45
+#define CW_POPUP_SHOW_10MS     200  // 2 s after the last key press
+#define CW_POPUP_CONFIRM_10MS  500  // 5 s to confirm a key input with MENU before it's dropped
+#define CW_WPM_MIN             10   // same range as the CWwpm menu
+#define CW_WPM_MAX             45
 
 static CW_PopupKind_t s_kind;
-static uint8_t        s_500ms;
+static uint16_t       s_10ms;           // idle time left, counted on the 10 ms tick so it's exact
 static uint8_t        s_key_input;      // input index shown while the key input popup is up
 static bool           s_speed_changed;  // saved once on close instead of on every step
 
@@ -56,14 +57,14 @@ static void ApplyKeyInput(void)
 	CW_Popup_Show(CW_POPUP_KEY_STUCK);
 }
 
-// confirm keeps what the popup was adjusting: speed is already live, a pending key
-// input gets applied. Without it a pending key input is dropped.
+// A new speed is already live, so it's kept (and saved) however the popup closes. A
+// pending key input is applied only on confirm, which is MENU; everything else drops it.
 static void Close(bool confirm)
 {
 	const CW_PopupKind_t kind = s_kind;
 
 	s_kind = CW_POPUP_NONE;
-	s_500ms = 0;
+	s_10ms = 0;
 	gUpdateDisplay = true;
 
 	if (kind == CW_POPUP_SPEED && s_speed_changed) {
@@ -75,14 +76,15 @@ static void Close(bool confirm)
 		ApplyKeyInput();  // may reopen as CW_POPUP_KEY_STUCK
 }
 
+// Also restarts the idle time of the popup already showing
 void CW_Popup_Show(CW_PopupKind_t kind)
 {
-	// switching to a different popup counts as moving on from the old one
+	// switching to a different popup drops a pending key input
 	if (s_kind != CW_POPUP_NONE && s_kind != kind)
-		Close(true);
+		Close(false);
 
 	s_kind = kind;
-	s_500ms = CW_POPUP_SHOW_500MS;
+	s_10ms = (kind == CW_POPUP_KEY_INPUT) ? CW_POPUP_CONFIRM_10MS : CW_POPUP_SHOW_10MS;
 	gUpdateDisplay = true;
 }
 
@@ -105,11 +107,25 @@ uint8_t CW_Popup_KeyInput(void)
 void CW_Popup_Speed(void)
 {
 	if (s_kind == CW_POPUP_SPEED)
-		Close(true);
+		Close(false);
 	else if (gScreenToDisplay == DISPLAY_MAIN)
 		CW_Popup_Show(CW_POPUP_SPEED);
 	else
 		gBeepToPlay = BEEP_500HZ_60MS_DOUBLE_BEEP_OPTIONAL;  // up/down only reach the main screen
+}
+
+static void StepSpeed(int8_t direction)
+{
+	const int wpm = gEeprom.CW_KEY_WPM + direction;
+
+	if (wpm < CW_WPM_MIN || wpm > CW_WPM_MAX) {
+		gBeepToPlay = BEEP_500HZ_60MS_DOUBLE_BEEP_OPTIONAL;
+		return;
+	}
+
+	gEeprom.CW_KEY_WPM = wpm;
+	CW_UpdateWPM();
+	s_speed_changed = true;
 }
 
 // Move the pending key input one place through the CWkey menu's list, wrapping
@@ -146,66 +162,60 @@ void CW_Popup_StepKeyInput(void)
 
 bool CW_Popup_ProcessKey(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 {
-	// PTT keeps keying, side keys keep their actions (including stepping or closing this popup)
+	// PTT keeps keying; side keys go to their actions, see CW_Popup_OnAction
 	if (s_kind == CW_POPUP_NONE || Key == KEY_PTT || Key == KEY_SIDE1 || Key == KEY_SIDE2)
 		return false;
 
-	if (Key == KEY_EXIT) {
-		// close on release so the release doesn't reach the main screen; EXIT keeps the
-		// speed but drops a pending key input
+	if (Key == KEY_MENU || Key == KEY_EXIT) {
+		// close on release so the release doesn't reach the main screen. Releasing a long
+		// press does nothing, so an M long action that opened the popup leaves it up.
 		if (!bKeyPressed && !bKeyHeld)
-			Close(s_kind != CW_POPUP_KEY_INPUT);
+			Close(Key == KEY_MENU);
 		return true;
 	}
 
-	if (s_kind == CW_POPUP_KEY_INPUT && (Key == KEY_UP || Key == KEY_DOWN)) {
+	if ((s_kind == CW_POPUP_SPEED || s_kind == CW_POPUP_KEY_INPUT) && (Key == KEY_UP || Key == KEY_DOWN)) {
 		if (bKeyPressed) {  // first press and every auto-repeat while held
-			StepKeyInput(KeyDirection(Key));
-			s_500ms = CW_POPUP_SHOW_500MS;
-			gUpdateDisplay = true;
+			if (s_kind == CW_POPUP_SPEED)
+				StepSpeed(KeyDirection(Key));
+			else
+				StepKeyInput(KeyDirection(Key));
+			CW_Popup_Show(s_kind);
 		}
 		return true;
 	}
 
-	if (s_kind == CW_POPUP_SPEED && (Key == KEY_UP || Key == KEY_DOWN)) {
-		if (bKeyPressed) {  // first press and every auto-repeat while held
-			const int wpm = gEeprom.CW_KEY_WPM + KeyDirection(Key);
-			if (wpm < CW_WPM_MIN || wpm > CW_WPM_MAX) {
-				gBeepToPlay = BEEP_500HZ_60MS_DOUBLE_BEEP_OPTIONAL;
-			} else {
-				gEeprom.CW_KEY_WPM = wpm;
-				CW_UpdateWPM();
-				s_speed_changed = true;
-			}
-
-			s_500ms = CW_POPUP_SHOW_500MS;
-			gUpdateDisplay = true;
-		}
-		return true;
-	}
-
-	// any other key keeps the new speed, closes the popup and then does its usual job
-	if (s_kind == CW_POPUP_SPEED && bKeyPressed && !bKeyHeld)
-		Close(true);
+	// any other key closes the popup, dropping a pending key input, then does its usual job
+	if (bKeyPressed && !bKeyHeld)
+		Close(false);
 
 	return false;
 }
 
-void CW_Popup_OnKeying(void)
+void CW_Popup_OnAction(uint8_t action)
 {
-	// keying keeps a new speed; a pending key input is dropped, since keying means
-	// the current input is the one in use (and a pressed key would fail its check)
-	if (s_kind != CW_POPUP_NONE)
-		Close(s_kind != CW_POPUP_KEY_INPUT);
+	// the popup's own actions step, switch or close it themselves
+	if (s_kind != CW_POPUP_NONE &&
+	    action != ACTION_OPT_CW_KEYER_MODE &&
+	    action != ACTION_OPT_CW_SPEED &&
+	    action != ACTION_OPT_CW_KEY_INPUT)
+		Close(false);
 }
 
-void CW_Popup_Tick500ms(void)
+void CW_Popup_OnKeying(void)
+{
+	// keying keeps a new speed and drops a pending key input, since keying means the
+	// current input is the one in use (and a pressed key would fail its check)
+	if (s_kind != CW_POPUP_NONE)
+		Close(false);
+}
+
+void CW_Popup_Tick10ms(void)
 {
 	if (s_kind == CW_POPUP_NONE)
 		return;
 
-	if (gCurrentFunction == FUNCTION_TRANSMIT)
-		CW_Popup_OnKeying();  // PTT in any mode
-	else if (--s_500ms == 0)
-		Close(true);
+	// PTT in any mode closes it like keying does
+	if (gCurrentFunction == FUNCTION_TRANSMIT || --s_10ms == 0)
+		Close(false);
 }

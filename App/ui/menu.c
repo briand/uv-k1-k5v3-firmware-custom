@@ -552,9 +552,6 @@ const t_sidefunction gSubMenu_SIDEFUNCTIONS[] =
     {"VFO A\nVFO B",    ACTION_OPT_A_B},
     {"VFO\nMEM",        ACTION_OPT_VFO_MR},
     {"MODE",            ACTION_OPT_SWITCH_DEMODUL},
-#ifdef ENABLE_CW_MODULATOR
-    {"FILTER\nWIDTH",   ACTION_OPT_CW_FILTER},
-#endif
 #ifdef ENABLE_BLMIN_TMP_OFF
     {"BLMIN\nTMP OFF",  ACTION_OPT_BLMIN_TMP_OFF},      //BackLight Minimum Temporary OFF
 #endif

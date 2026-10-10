@@ -327,4 +327,9 @@ void CW_TimeSlice10ms(void)
 		if (--gCW_TxDisplayHoldoff_10ms == 0)
 			gUpdateDisplay = true;  // Trigger screen refresh to switch away from CW display
 	}
+
+	// idle timeouts, here rather than on the 500 ms tick so a key press just before
+	// that tick doesn't cut them short
+	CW_Popup_Tick10ms();
+	CW_RIT_Tick10ms();
 }

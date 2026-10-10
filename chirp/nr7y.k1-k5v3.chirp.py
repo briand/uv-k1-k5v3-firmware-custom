@@ -904,10 +904,10 @@ _NR7Y_CW_HANG_10MS_DEFAULT = 30
 # displayed choices -- but the RESCUE_OPS block shifts everything after it, so the
 # index mapping has to be assembled per build instead of hardcoded.  With
 # RESCUE_OPS off the CW actions sit at 21-28, CODE PRACTICE at 29, FOX HUNT at 30,
-# then CW KEYER MODE, PROPER ROGER, CW SPEED, FILTER WIDTH, CW KEY INPUT and CW
-# BREAK-IN at 31-36; with it on everything from the CW actions moves up by 2.
-# Those last six came after FOX HUNT shipped, so the firmware appends them to keep
-# binds already stored on their old numbers.
+# then CW KEYER MODE, PROPER ROGER, CW SPEED, CW KEY INPUT and CW BREAK-IN at
+# 31-35; with it on everything from the CW actions moves up by 2.  Those last five
+# came after FOX HUNT shipped, so the firmware appends them to keep binds already
+# stored on their old numbers.
 _NR7Y_ACTIONS_COMMON = [
     "NONE",            # 0:  ACTION_OPT_NONE
     "FLASHLIGHT",      # 1:  ACTION_OPT_FLASHLIGHT
@@ -964,7 +964,6 @@ _NR7Y_ACTIONS_TAIL_CW = [
     "CW KEYER MODE",
     "PROPER ROGER",
     "CW SPEED",
-    "FILTER WIDTH",
     "CW KEY INPUT",
     "CW BREAK-IN",
 ]

@@ -15,7 +15,8 @@
  */
 
 // CW quick-settings popup on the main screen. It shows the setting a key action just
-// changed, and for speed and key input it stays interactive while it is up.
+// changed, and for speed and key input it stays interactive while it is up. Any key
+// other than MENU, EXIT and up/down closes it and then does its usual job.
 
 #ifndef APP_CWPOPUP_H
 #define APP_CWPOPUP_H
@@ -28,8 +29,8 @@
 typedef enum {
 	CW_POPUP_NONE = 0,
 	CW_POPUP_KEYER_MODE,
-	CW_POPUP_SPEED,        // up/down change WPM live; keying, EXIT or 2 s idle keep it
-	CW_POPUP_KEY_INPUT,    // up/down or the action step a pending input, applied when the popup times out
+	CW_POPUP_SPEED,        // up/down change WPM live; the new speed stays however the popup closes
+	CW_POPUP_KEY_INPUT,    // up/down or the action step a pending input; only MENU applies it, 5 s idle drops it
 	CW_POPUP_KEY_STUCK,    // the pending input failed the stuck-key check
 	CW_POPUP_TX_TIMEOUT,   // a stuck key tripped the transmit timeout
 } CW_PopupKind_t;
@@ -44,7 +45,8 @@ void CW_Popup_Speed(void);         // open speed adjust, or close it when alread
 void CW_Popup_StepKeyInput(void);  // first press shows the current input, later presses step it
 
 bool CW_Popup_ProcessKey(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld);  // true when the key was used
+void CW_Popup_OnAction(uint8_t action);  // a side key action is about to run
 void CW_Popup_OnKeying(void);      // the keyer or playback just keyed an element
-void CW_Popup_Tick500ms(void);
+void CW_Popup_Tick10ms(void);
 
 #endif

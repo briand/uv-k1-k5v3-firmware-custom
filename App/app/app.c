@@ -86,8 +86,6 @@
 #include "ui/ui.h"
 #ifdef ENABLE_CW_MODULATOR
 #include "app/cwkeyer.h"
-#include "app/cwpopup.h"
-#include "app/cwrit.h"
 #endif
 #ifdef ENABLE_CODE_PRACTICE
 #include "app/cpo.h"
@@ -2124,9 +2122,6 @@ void APP_TimeSlice500ms(void)
 			CW_StartMacroPlayback(gCW_PlaybackMacroIndex, true);
 		}
 	}
-
-	CW_Popup_Tick500ms();
-	CW_RIT_Tick500ms();
 #endif
 
     if (gReducedService)

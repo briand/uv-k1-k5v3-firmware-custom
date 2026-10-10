@@ -952,12 +952,12 @@ static void DrawCWPopupKeyInput(uint8_t index)
 		UI_PrintStringSmallNormal(last + 1, 9, 118, 4);
 }
 
-// 7 px wide, 4 px tall arrowhead with its tip at (x, y)
-static void DrawCWPopupArrow(uint8_t x, uint8_t y, bool up)
+// Arrowhead 4 px deep and 7 px across with its tip at (x, y), pointing along (dx, dy)
+static void DrawCWPopupArrow(uint8_t x, uint8_t y, int8_t dx, int8_t dy)
 {
-	for (int8_t row = 0; row < 4; row++)
-		for (int8_t dx = -row; dx <= row; dx++)
-			UI_DrawPixelBuffer(gFrameBuffer, x + dx, up ? y + row : y - row, true);
+	for (int8_t depth = 0; depth < 4; depth++)
+		for (int8_t side = -depth; side <= depth; side++)
+			UI_DrawPixelBuffer(gFrameBuffer, x - depth * dx + side * dy, y - depth * dy + side * dx, true);
 }
 
 // Boxed popup over the middle of the main screen for the CW setting a key action just changed.
@@ -1009,15 +1009,35 @@ static void DrawCWPopup(void)
 	else
 		DrawCWPopupKeyInput(CW_Popup_KeyInput());
 
-	// Each arrow sits on the side of the key that does it: up is a step up (faster, or the
-	// next key input), and the left key (KEY_UP) steps up with UP/DOWN navigation and down
-	// with the UV-K1's LEFT/RIGHT navigation. Key input names keep their wide first row
-	// clear by putting the arrows beside the second, which is at most 8 characters.
+	// Each arrow sits on the side of the key that does it and is drawn the way SetNav
+	// names the keys. With UP/DOWN the left key (KEY_UP) steps up (faster, or the next key
+	// input); with the UV-K1's LEFT/RIGHT it steps down. Key input names keep their wide
+	// first row clear by putting the arrows beside the second, at most 8 characters.
 	if (kind == CW_POPUP_SPEED || kind == CW_POPUP_KEY_INPUT) {
-		const uint8_t top    = (kind == CW_POPUP_SPEED) ? 28 : 34;
-		const bool    leftUp = gEeprom.SET_NAV;
-		DrawCWPopupArrow(17,  leftUp ? top : top + 3, leftUp);
-		DrawCWPopupArrow(110, leftUp ? top + 3 : top, !leftUp);
+		const bool speed = (kind == CW_POPUP_SPEED);
+		if (gEeprom.SET_NAV) {
+			const uint8_t top = speed ? 28 : 34;
+			DrawCWPopupArrow(17,  top,     0, -1);
+			DrawCWPopupArrow(110, top + 3, 0, 1);
+		}
+		else {
+			const uint8_t mid = speed ? 31 : 35;
+			DrawCWPopupArrow(15,  mid, -1, 0);
+			DrawCWPopupArrow(112, mid, 1, 0);
+		}
+	}
+
+	// A key input change only happens on MENU, so the title carries the confirm mark at
+	// the left end, over MENU, and cancel at the right, over EXIT. With UP/DOWN navigation
+	// (the UV-K5) the arrows don't spell out the key row, so an M names the key.
+	if (kind == CW_POPUP_KEY_INPUT) {
+		uint8_t confirmX = 11;
+		if (gEeprom.SET_NAV) {
+			UI_PrintStringSmallNormal("M", 11, 0, 2);  // drawn at x 12-17
+			confirmX = 20;
+		}
+		memcpy(gFrameBuffer[2] + confirmX, BITMAP_Confirm, sizeof(BITMAP_Confirm));
+		memcpy(gFrameBuffer[2] + 110, BITMAP_Cancel, sizeof(BITMAP_Cancel));
 	}
 }
 

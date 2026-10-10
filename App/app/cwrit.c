@@ -30,12 +30,12 @@
 #include "external/printf/printf.h"
 
 #define CW_RIT_LIMIT        999  // +/-9.99 kHz in 10 Hz units
-#define CW_RIT_IDLE_500MS   10   // 5 s without a key closes adjust mode
+#define CW_RIT_IDLE_10MS    500  // 5 s without a key closes adjust mode
 
-static int16_t s_offset;         // 10 Hz units, shared by RIT and XIT
-static bool    s_rit_on;
-static bool    s_xit_on;
-static uint8_t s_adjust_500ms;   // non-zero while adjust mode is open; counts down to close it
+static int16_t  s_offset;        // 10 Hz units, shared by RIT and XIT
+static bool     s_rit_on;
+static bool     s_xit_on;
+static uint16_t s_adjust_10ms;   // non-zero while adjust mode is open; counts down to close it
 
 uint32_t CW_RIT_RxFrequency(const VFO_Info_t *pVfo, uint32_t frequency)
 {
@@ -110,12 +110,12 @@ static void MoveToDial(void)
 
 bool CW_RIT_IsAdjusting(void)
 {
-	return s_adjust_500ms > 0;
+	return s_adjust_10ms > 0;
 }
 
 static void ExitAdjust(void)
 {
-	s_adjust_500ms = 0;
+	s_adjust_10ms = 0;
 	gUpdateDisplay = true;
 }
 
@@ -132,7 +132,7 @@ void CW_RIT_EnterAdjust(void)
 		Retune();
 	}
 
-	s_adjust_500ms = CW_RIT_IDLE_500MS;
+	s_adjust_10ms = CW_RIT_IDLE_10MS;
 	gUpdateDisplay = true;
 }
 
@@ -143,15 +143,15 @@ void CW_RIT_OnKeying(void)
 		ExitAdjust();
 }
 
-void CW_RIT_Tick500ms(void)
+void CW_RIT_Tick10ms(void)
 {
-	if (s_adjust_500ms == 0)
+	if (s_adjust_10ms == 0)
 		return;
 
-	if (gTxVfo->Modulation != MODULATION_CW || gScreenToDisplay != DISPLAY_MAIN || --s_adjust_500ms == 0)
+	if (gTxVfo->Modulation != MODULATION_CW || gScreenToDisplay != DISPLAY_MAIN || --s_adjust_10ms == 0)
 		ExitAdjust();
-	else
-		gUpdateDisplay = true;  // keep the adjust modal's signal readout live
+	else if (s_adjust_10ms % 50 == 0)
+		gUpdateDisplay = true;  // keep the adjust modal's signal readout live, every 500 ms
 }
 
 bool CW_RIT_ProcessKey(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
@@ -162,7 +162,7 @@ bool CW_RIT_ProcessKey(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 
 	const bool pressed = bKeyPressed && !bKeyHeld;
 
-	s_adjust_500ms = CW_RIT_IDLE_500MS;
+	s_adjust_10ms = CW_RIT_IDLE_10MS;
 	gUpdateDisplay = true;
 
 	switch (Key) {

@@ -46,6 +46,8 @@ extern const uint8_t BITMAP_VFO_Empty[7];
 extern const uint8_t BITMAP_VFO_Lock[7];
 extern const uint8_t BITMAP_PowerUser[3];
 extern const uint8_t BITMAP_Play[8];  /* small right-facing triangle (8x8) */
+extern const uint8_t BITMAP_Confirm[7];  /* check mark (7x7) */
+extern const uint8_t BITMAP_Cancel[7];   /* cross (7x7) */
 extern const uint8_t BITMAP_compand[6];
 
 extern const uint8_t BITMAP_NOAA[12];

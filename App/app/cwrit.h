@@ -37,7 +37,7 @@ void CW_RIT_EnterAdjust(void);
 bool CW_RIT_IsAdjusting(void);
 bool CW_RIT_ProcessKey(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld);  // true when the key was used
 void CW_RIT_OnKeying(void);
-void CW_RIT_Tick500ms(void);
+void CW_RIT_Tick10ms(void);
 
 // Current offset (10 Hz units) and which switches apply it
 int16_t CW_RIT_Offset(void);

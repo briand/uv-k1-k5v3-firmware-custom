@@ -154,7 +154,6 @@ void (*const action_opt_table[])(void) = {
 	[ACTION_OPT_CW_KEYER_MODE] = &ACTION_CWKeyerMode,
 	[ACTION_OPT_CW_PROPER_ROGER] = &ACTION_CWProperRoger,
 	[ACTION_OPT_CW_SPEED] = &CW_Popup_Speed,
-	[ACTION_OPT_CW_FILTER] = &ACTION_SwitchFilter,  // same 6k <-> 2k toggle as F + long 4
 	[ACTION_OPT_CW_KEY_INPUT] = &CW_Popup_StepKeyInput,
 	[ACTION_OPT_CW_BREAK_IN] = &ACTION_CWBreakIn,
 #endif
@@ -583,6 +582,10 @@ void ACTION_Handle(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
     }
 
     // held or released after short press
+#ifdef ENABLE_CW_MODULATOR
+    CW_Popup_OnAction(func);
+#endif
+
 #ifdef ENABLE_FEAT_F4HWN_ACTION_PICKER
     ACTION_Execute(func);
 #else
@@ -911,7 +914,12 @@ void ACTION_Wn(void)
 
     pVfo->CHANNEL_BANDWIDTH = !pVfo->CHANNEL_BANDWIDTH;
 
-    if (pVfo->Modulation == MODULATION_AM)
+    // AM, USB and CW read the bit as their own filter pair, see RADIO_ResolveFilter()
+    if (pVfo->Modulation == MODULATION_AM || pVfo->Modulation == MODULATION_USB
+#ifdef ENABLE_CW_MODULATOR
+        || pVfo->Modulation == MODULATION_CW
+#endif
+    )
     {
         BK4819_SetFilterBandwidth(RADIO_ResolveFilter(pVfo), true);
         return;
