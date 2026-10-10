@@ -80,7 +80,10 @@ void UI_DisplayCPO(void)
 		if (name) {
 			DrawQthName(name);
 		}
-		if (gCW_CpoCallResult == CPO_CALL_RESULT_HIT) {
+		char notice[CPO_CALL_NOTICE_SIZE];
+		if (CPO_Call_GetNotice(notice)) {
+			UI_PrintStringSmallNormal(notice, 0, 127, 5);
+		} else if (gCW_CpoCallResult == CPO_CALL_RESULT_HIT) {
 			UI_PrintStringSmallNormal("OK", 0, 127, 5);
 		} else if (gCW_CpoCallResult == CPO_CALL_RESULT_MISS) {
 			UI_PrintStringSmallNormal("MISS", 0, 127, 5);
@@ -88,8 +91,19 @@ void UI_DisplayCPO(void)
 		sprintf_(String, "%u/%u", gCW_CpoCallHits, gCW_CpoCallMisses);
 		UI_PrintStringSmallNormal(String, 44, 104, 6);
 	}
-	sprintf_(String, "%u WPM", gEeprom.CW_KEY_WPM);
+	// Farnsworth spacing shows as character speed then effective speed, "25(12)", in
+	// the space "25 WPM" takes. A slash would read like the score beside it.
+	const bool copy = CPO_Call_IsCopyMode();
+	const uint8_t eff_wpm = copy ? CPO_Call_EffectiveWPM() : 0;
+	if (eff_wpm) {
+		sprintf_(String, "%u(%u)", gEeprom.CW_KEY_WPM, eff_wpm);
+	} else {
+		sprintf_(String, "%u WPM", gEeprom.CW_KEY_WPM);
+	}
 	UI_PrintStringSmallNormal(String, 2, 0, 6);
+	if (copy && gEeprom.CW_FARNSWORTH_AUTO) {
+		UI_PrintStringSmallNormal("A", 114, 0, 6);
+	}
     if (gCW_CpoBacklightOn) {
 		UI_PrintStringSmallNormal("*", 107, 0, 6);
 	}

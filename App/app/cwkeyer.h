@@ -65,7 +65,9 @@ bool CW_PlaybackIsProperRoger(void);
 
 // Play arbitrary text (macro character set, ' ' = word gap). With show false the
 // characters stay off the TX display line, e.g. a callsign the operator must copy.
-void CW_StartTextPlayback(const char *text, bool show);
+// eff_wpm below the keyer speed stretches the gaps between characters and words
+// (Farnsworth) so the text averages eff_wpm; 0 keeps the keyer's own spacing.
+void CW_StartTextPlayback(const char *text, bool show, uint8_t eff_wpm);
 
 // True when the paddle/bug keyer has no character or word in progress, i.e. the
 // operator has paused for at least a word gap

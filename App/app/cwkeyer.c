@@ -110,6 +110,9 @@ static uint8_t s_play_elem_index = 0; // current element index within char
 static bool s_play_long_dah = false; // proper roger: hold each dah for gEeprom.CW_ROGER_DAH_DITS
 static uint16_t s_play_setup_ms = 0; // TX/sidetone setup the current element lost at its start
 static bool s_play_hidden = false; // keep played characters off the TX display line
+static uint8_t s_play_eff_wpm = 0; // Farnsworth effective speed of the playback, 0 = keyer spacing
+static uint16_t s_play_char_gap_count = 0; // playback's char gap: s_char_gap_count, or stretched to s_play_eff_wpm
+static uint16_t s_play_word_gap_count = 0; // playback's word gap, likewise
 
 // Playback FSM states
 typedef enum {
@@ -235,6 +238,22 @@ void CW_ApplySidetoneGain(void)
     BK4819_SetAfDacGain(step->dac_gain);
 }
 
+// Farnsworth spacing (ARRL, KE3Z): characters keep the keyer's timing and only the
+// char and word gaps stretch, so the text averages s_play_eff_wpm. PARIS is 31 dits
+// of elements and element gaps plus 19 of char and word gaps (four 3s and a 7);
+// at the effective speed those gaps get whatever is left of its 60/eff seconds.
+static void CW_UpdatePlaybackGaps(void)
+{
+    if (s_play_eff_wpm == 0 || s_play_eff_wpm >= gEeprom.CW_KEY_WPM) {
+        s_play_char_gap_count = s_char_gap_count;
+        s_play_word_gap_count = s_word_gap_count;
+        return;
+    }
+    const uint32_t gaps_ticks = TICKS_PER_MINUTE / s_play_eff_wpm - 31U * s_dit_count;
+    s_play_char_gap_count = 3U * gaps_ticks / 19U;
+    s_play_word_gap_count = 7U * gaps_ticks / 19U;
+}
+
 void CW_UpdateWPM()
 {
     const uint32_t wpm = gEeprom.CW_KEY_WPM;
@@ -246,6 +265,7 @@ void CW_UpdateWPM()
     s_ext_gap_count = 3U * dit_ticks / 2U; // after 1.5 dits, hold char gap if key pressed
     s_char_gap_count = 3U * dit_ticks; // inter-char gap = 3 dits
     s_word_gap_count = 7U * dit_ticks; // inter-word gap = 7 dits
+    CW_UpdatePlaybackGaps();
 
 #if CW_KEYER_DEBUG
     char buf[80];
@@ -306,8 +326,9 @@ static void CW_KeyerInit()
 
 // --- Macro playback API implementation ---
 
-// Prime the playback FSM to send whatever is in s_playback_buf from the start
-static void CW_BeginPlayback(bool repeat)
+// Prime the playback FSM to send whatever is in s_playback_buf from the start.
+// eff_wpm is the Farnsworth effective speed, 0 for the keyer's own spacing.
+static void CW_BeginPlayback(bool repeat, uint8_t eff_wpm)
 {
     s_playback_buf_len = (uint16_t)strlen(s_playback_buf);
     s_playback_pos = 0;
@@ -322,8 +343,11 @@ static void CW_BeginPlayback(bool repeat)
     // Prime the playback FSM to start immediately
     s_play_space_pending = false;
     s_play_hidden = false;
+    s_play_eff_wpm = eff_wpm;
+    CW_UpdatePlaybackGaps();
     s_pb_state = PB_STATE_INTER_CHAR_GAP;
-    s_elem_start_count = millis();
+    // Lead in with the keyer's own char gap: only the gaps between characters stretch
+    s_elem_start_count = millis() - (s_play_char_gap_count - s_char_gap_count);
     gCW_PlaybackActive = (s_playback_buf_len > 0);
 }
 
@@ -338,7 +362,7 @@ void CW_StartMacroPlayback(uint8_t macroIndex, bool repeat)
     gCW_PlaybackMacroIndex = macroIndex;
     s_play_long_dah = false;
     CW_ClearTxDisplay();
-    CW_BeginPlayback(repeat);
+    CW_BeginPlayback(repeat, 0);
 
 #if CW_KEYER_DEBUG
     if (gCW_PlaybackActive) {
@@ -356,7 +380,7 @@ void CW_StartProperRoger(void)
 
     strcpy(s_playback_buf, "R");
     s_play_long_dah = true;
-    CW_BeginPlayback(false);
+    CW_BeginPlayback(false, 0);
 
     // Skip the char-gap lead-in so the first dit keys on the next poll. Reaching
     // the side key already takes longer than a char gap after any keyed element.
@@ -371,14 +395,14 @@ bool CW_PlaybackIsProperRoger(void)
     return gCW_PlaybackActive && s_play_long_dah;
 }
 
-void CW_StartTextPlayback(const char *text, bool show)
+void CW_StartTextPlayback(const char *text, bool show, uint8_t eff_wpm)
 {
     if (gCW_Recording || gCW_PlaybackActive) return;
 
     strncpy(s_playback_buf, text, sizeof(s_playback_buf) - 1);
     s_playback_buf[sizeof(s_playback_buf) - 1] = '\0';
     s_play_long_dah = false;
-    CW_BeginPlayback(false);
+    CW_BeginPlayback(false, eff_wpm);
     s_play_hidden = !show;
 }
 
@@ -464,7 +488,7 @@ CW_Action_t CW_PlaybackHandleState(void)
 
     case PB_STATE_INTER_CHAR_GAP: {
         const uint32_t elapsed = millis_since(s_elem_start_count);
-        if (elapsed < s_char_gap_count) {
+        if (elapsed < s_play_char_gap_count) {
             return CW_ACTION_NONE;
         }
         // Move to next character (if any)
@@ -518,10 +542,10 @@ CW_Action_t CW_PlaybackHandleState(void)
 
     case PB_STATE_INTER_WORD_GAP: {
         const uint32_t elapsed = millis_since(s_elem_start_count);
-        if (elapsed >= s_word_gap_count) {
+        if (elapsed >= s_play_word_gap_count) {
             // Word gap done - advance to char-gap state with the same origin
-            // preserved. elapsed (>=7) already exceeds s_char_gap_count (3), so
-            // the next char is read immediately with no extra wait.
+            // preserved. elapsed (>=7) already exceeds s_play_char_gap_count (3),
+            // so the next char is read immediately with no extra wait.
             s_pb_state = PB_STATE_INTER_CHAR_GAP;
         }
         return CW_ACTION_NONE;

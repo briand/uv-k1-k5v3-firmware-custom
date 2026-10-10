@@ -24,7 +24,9 @@
 #include "app/cwmacro.h"
 #include "driver/bk4819.h"
 #include "driver/millis.h"
+#include "external/printf/printf.h"
 #include "misc.h"
+#include "settings.h"
 #ifdef ENABLE_FLASHLIGHT
 #include "driver/gpio.h"
 #include "py32f071_ll_gpio.h"
@@ -40,6 +42,10 @@
 #define CPO_CALL_MAX_TRIES 3
 // Keeps "999/999" inside the space the score gets on the WPM line
 #define CPO_CALL_SCORE_MAX 999
+// How long the line naming a spacing change stays up
+#define CPO_CALL_NOTICE_10MS 150
+// Auto spacing: calls in a row copied on the first listen before the gaps narrow a step
+#define CPO_CALL_AUTO_STREAK 5
 
 // What the drill does next, once the operator stops keying and playback ends
 typedef enum {
@@ -48,6 +54,12 @@ typedef enum {
 	CPO_STEP_NEXT,       // new callsign (played in copy mode)
 	CPO_STEP_ACK,        // copy mode: "dit dit", then NEXT
 } CPO_CallStep_t;
+
+// What the notice line names
+typedef enum {
+	CPO_NOTICE_SPACING = 0,   // the effective speed, or that the spacing is off
+	CPO_NOTICE_AUTO,          // auto spacing on or off
+} CPO_CallNotice_t;
 
 CPO_CallMode_t gCW_CpoCallMode = CPO_CALL_MODE_OFF;
 char gCW_CpoCall[CPO_CALL_MAX_LEN + 1];
@@ -63,6 +75,10 @@ static const char *s_name = NULL;  // copy QTH: what the code stands for
 static CPO_CallStep_t s_step = CPO_STEP_NONE;
 static uint16_t s_wait_10ms = 0;   // counts down only while the operator is idle
 static bool s_paused = false;      // operator has paused since s_step was set
+static bool s_clean = false;       // copy mode: no miss, ? or replay on this call yet
+static uint8_t s_streak = 0;       // copy mode: calls in a row copied clean
+static CPO_CallNotice_t s_notice = CPO_NOTICE_SPACING;
+static uint8_t s_notice_10ms = 0;  // counts down while the notice line is up
 static uint32_t s_rng_state = 0;
 
 // Common DX prefixes, two characters each (space-padded for one-letter prefixes)
@@ -83,7 +99,7 @@ static char RandLetter(uint8_t count)
 	return 'A' + (char)(Rand() % count);
 }
 
-static bool IsCopyMode(void)
+bool CPO_Call_IsCopyMode(void)
 {
 	return gCW_CpoCallMode == CPO_CALL_MODE_COPY || gCW_CpoCallMode == CPO_CALL_MODE_COPY_QTH;
 }
@@ -159,6 +175,50 @@ static void StopPlayback(void)
 #endif
 }
 
+static void ShowNotice(CPO_CallNotice_t notice)
+{
+	s_notice = notice;
+	s_notice_10ms = CPO_CALL_NOTICE_10MS;
+	gUpdateDisplay = true;
+}
+
+// The effective speed in use, counting off as the keyer speed
+static uint8_t SpacingWPM(void)
+{
+	const uint8_t eff_wpm = CPO_Call_EffectiveWPM();
+	return eff_wpm ? eff_wpm : gEeprom.CW_KEY_WPM;
+}
+
+// One step of effective speed. Reaching the keyer speed is stored as off, so
+// raising the keyer speed later doesn't bring the spacing back.
+static void StepSpacing(bool narrower)
+{
+	uint8_t eff_wpm = SpacingWPM();
+
+	if (narrower) {
+		eff_wpm++;
+	} else if (eff_wpm > CW_FARNSWORTH_WPM_MIN) {
+		eff_wpm--;
+	}
+	gEeprom.CW_FARNSWORTH_WPM = (eff_wpm >= gEeprom.CW_KEY_WPM) ? 0 : eff_wpm;
+	s_streak = 0;
+	ShowNotice(CPO_NOTICE_SPACING);
+}
+
+// Copy mode, a call copied: a run of them copied on the first listen narrows the
+// gaps a step under auto spacing
+static void CountCopy(void)
+{
+	if (!s_clean) {
+		s_streak = 0;
+	} else if (++s_streak >= CPO_CALL_AUTO_STREAK) {
+		s_streak = 0;
+		if (gEeprom.CW_FARNSWORTH_AUTO && CPO_Call_EffectiveWPM() != 0) {
+			StepSpacing(true);
+		}
+	}
+}
+
 static void Schedule(CPO_CallStep_t step, uint16_t wait_10ms)
 {
 	s_step = step;
@@ -176,12 +236,13 @@ static void Begin(CPO_CallStep_t step, bool play)
 		s_tries = 0;
 		s_known = 0;
 		s_revealed = false;
+		s_clean = true;
 	}
 	gCW_CpoCallResult = CPO_CALL_RESULT_NONE;
 	s_pos = 0;
 	CW_ClearTxDisplay();
-	if (play && IsCopyMode()) {
-		CW_StartTextPlayback(gCW_CpoCall, false);
+	if (play && CPO_Call_IsCopyMode()) {
+		CW_StartTextPlayback(gCW_CpoCall, false, CPO_Call_EffectiveWPM());
 	}
 	gUpdateDisplay = true;
 }
@@ -192,8 +253,10 @@ void CPO_Call_SetMode(CPO_CallMode_t mode)
 	gCW_CpoCallMode = mode;
 	gCW_CpoCallHits = 0;
 	gCW_CpoCallMisses = 0;
+	s_streak = 0;
+	s_notice_10ms = 0;
 	Begin(CPO_STEP_NEXT, false);
-	if (IsCopyMode()) {
+	if (CPO_Call_IsCopyMode()) {
 		Schedule(CPO_STEP_RETRY, 0);   // first play, held until the keyer is idle
 	}
 }
@@ -212,7 +275,31 @@ void CPO_Call_Restart(void)
 		return;
 	}
 	StopPlayback();
+	s_clean = false;
 	Schedule(CPO_STEP_RETRY, 0);
+}
+
+uint8_t CPO_Call_EffectiveWPM(void)
+{
+	const uint8_t eff_wpm = gEeprom.CW_FARNSWORTH_WPM;
+	return (eff_wpm != 0 && eff_wpm < gEeprom.CW_KEY_WPM) ? eff_wpm : 0;
+}
+
+void CPO_Call_StepSpacing(bool narrower)
+{
+	if (CPO_Call_IsCopyMode()) {
+		StepSpacing(narrower);
+	}
+}
+
+void CPO_Call_ToggleAutoSpacing(void)
+{
+	if (!CPO_Call_IsCopyMode()) {
+		return;
+	}
+	gEeprom.CW_FARNSWORTH_AUTO = !gEeprom.CW_FARNSWORTH_AUTO;
+	s_streak = 0;
+	ShowNotice(CPO_NOTICE_AUTO);
 }
 
 void CPO_Call_OnChar(char ch)
@@ -231,12 +318,13 @@ void CPO_Call_OnChar(char ch)
 		CW_AddToTxDisplay(ch, false);   // the encoder put it on the old line
 	}
 
-	if (ch == '?' && IsCopyMode()) {
+	if (ch == '?' && CPO_Call_IsCopyMode()) {
 		// Asking for a repeat, as on the air: no penalty. Everything keyed before
 		// the ? has already matched, so it goes on the notes (which only grow).
 		if (s_pos > s_known) {
 			s_known = s_pos;
 		}
+		s_clean = false;
 		Schedule(CPO_STEP_RETRY, 0);
 		gUpdateDisplay = true;
 		return;
@@ -247,9 +335,14 @@ void CPO_Call_OnChar(char ch)
 			gCW_CpoCallMisses++;
 		}
 		gCW_CpoCallResult = CPO_CALL_RESULT_MISS;
-		if (IsCopyMode() && ++s_tries >= CPO_CALL_MAX_TRIES) {
+		s_clean = false;
+		if (CPO_Call_IsCopyMode() && ++s_tries >= CPO_CALL_MAX_TRIES) {
 			s_revealed = true;
 			Schedule(CPO_STEP_NEXT, CPO_CALL_REVEAL_10MS);
+			s_streak = 0;
+			if (gEeprom.CW_FARNSWORTH_AUTO) {
+				StepSpacing(false);
+			}
 		} else {
 			Schedule(CPO_STEP_RETRY, CPO_CALL_RESULT_10MS);
 		}
@@ -258,9 +351,10 @@ void CPO_Call_OnChar(char ch)
 			gCW_CpoCallHits++;
 		}
 		gCW_CpoCallResult = CPO_CALL_RESULT_HIT;
-		if (IsCopyMode()) {
+		if (CPO_Call_IsCopyMode()) {
 			s_revealed = true;
 			Schedule(CPO_STEP_ACK, CPO_CALL_ACK_10MS);
+			CountCopy();
 		} else {
 			Schedule(CPO_STEP_NEXT, CPO_CALL_RESULT_10MS);
 		}
@@ -270,6 +364,10 @@ void CPO_Call_OnChar(char ch)
 
 void CPO_Call_Tick10ms(void)
 {
+	if (s_notice_10ms > 0 && --s_notice_10ms == 0) {
+		gUpdateDisplay = true;
+	}
+
 	// Steps wait for the operator to stop keying and for playback to finish, so
 	// the drill never plays over them or scores the tail of a missed word
 	if (s_step == CPO_STEP_NONE || gCW_PlaybackActive || !CW_KeyerIsIdle()) {
@@ -281,7 +379,7 @@ void CPO_Call_Tick10ms(void)
 		return;
 	}
 	if (s_step == CPO_STEP_ACK) {
-		CW_StartTextPlayback("EE", false);
+		CW_StartTextPlayback("EE", false, 0);
 		Schedule(CPO_STEP_NEXT, CPO_CALL_RESULT_10MS);
 		return;
 	}
@@ -303,4 +401,19 @@ void CPO_Call_GetCallLine(char out[CPO_CALL_LINE_SIZE])
 const char *CPO_Call_GetName(void)
 {
 	return s_revealed ? s_name : NULL;
+}
+
+bool CPO_Call_GetNotice(char out[CPO_CALL_NOTICE_SIZE])
+{
+	if (s_notice_10ms == 0) {
+		return false;
+	}
+	if (s_notice == CPO_NOTICE_AUTO) {
+		strcpy(out, gEeprom.CW_FARNSWORTH_AUTO ? "Auto spacing on" : "Auto spacing off");
+	} else if (CPO_Call_EffectiveWPM() != 0) {
+		sprintf_(out, "Spacing %u WPM", CPO_Call_EffectiveWPM());
+	} else {
+		strcpy(out, "Farnsworth off");
+	}
+	return true;
 }

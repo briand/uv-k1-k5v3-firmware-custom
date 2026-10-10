@@ -24,6 +24,11 @@
 //         (app/cpoqth.c) in place of callsigns; what the code stands for is
 //         named once it is shown
 // Every character is scored as it is decoded.
+//
+// The copy modes can play with Farnsworth spacing: characters at the keyer speed,
+// with the gaps between them stretched to a slower effective speed (8 widens, 2
+// narrows). Auto spacing (0) narrows the gaps a step after a run of calls copied on
+// the first listen and widens them a step when a call has to be revealed.
 
 #ifndef APP_CPOCALL_H
 #define APP_CPOCALL_H
@@ -33,6 +38,7 @@
 
 #define CPO_CALL_MAX_LEN 6
 #define CPO_CALL_LINE_SIZE (CPO_CALL_MAX_LEN + 2)   // notes plus '?' plus NUL
+#define CPO_CALL_NOTICE_SIZE 17                     // "Auto spacing off" plus NUL
 
 typedef enum {
 	CPO_CALL_MODE_OFF = 0,
@@ -55,6 +61,25 @@ void CPO_Call_NextMode(void);
 
 // 5 key: clear the line and restart the current callsign unscored (replayed in copy)
 void CPO_Call_Restart(void);
+
+// True in the modes that play the callsign for the operator to copy
+bool CPO_Call_IsCopyMode(void);
+
+// Effective speed copy playback runs at (Farnsworth), or 0 for the keyer's own
+// spacing. A stored speed at or above the keyer speed is off until the keyer
+// speed passes it again.
+uint8_t CPO_Call_EffectiveWPM(void);
+
+// 2 and 8 keys, copy modes only: effective speed one step up (narrower gaps) or
+// down (wider). Stepping up to the keyer speed turns the spacing off.
+void CPO_Call_StepSpacing(bool narrower);
+
+// 0 key, copy modes only: auto spacing on/off
+void CPO_Call_ToggleAutoSpacing(void);
+
+// The line shown for a moment after the spacing changes, e.g. "Spacing 12 WPM";
+// false while there is none
+bool CPO_Call_GetNotice(char out[CPO_CALL_NOTICE_SIZE]);
 
 // Every character the CW encoder decodes, or CW_CHAR_UNKNOWN for keying that
 // decodes to nothing (always a miss); a no-op while the drill is off
