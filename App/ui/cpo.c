@@ -132,7 +132,7 @@ void UI_DisplayCPO(void)
 	static const char *const titles[CPO_CALL_MODE_COUNT] = {
 		"Code Practice", "Send Callsigns", "Copy Callsigns",
 #ifdef ENABLE_FEAT_NR7Y_CPO_QSO
-		"QSO",
+		"QSO %s",   // its difficulty
 #endif
 	};
 
@@ -144,15 +144,11 @@ void UI_DisplayCPO(void)
 	}
 	bool line5_taken;
 #ifdef ENABLE_FEAT_NR7Y_CPO_QSO
-	if (gCW_CpoCallMode == CPO_CALL_MODE_QSO) {
-		char title[CPO_QSO_LINE_SIZE];
-		sprintf_(title, "QSO %s", CPO_Qso_DifficultyName());
-		UI_PrintStringSmallNormal(title, 0, 127, 0);
-		line5_taken = DisplayQso(String, tx_len);
-	} else {
-		UI_PrintStringSmallNormal(titles[gCW_CpoCallMode], 0, 127, 0);
-		line5_taken = DisplayDrill(String, tx_len);
-	}
+	char title[CPO_QSO_LINE_SIZE];
+	sprintf_(title, titles[gCW_CpoCallMode], CPO_Qso_DifficultyName());
+	UI_PrintStringSmallNormal(title, 0, 127, 0);
+	line5_taken = (gCW_CpoCallMode == CPO_CALL_MODE_QSO) ? DisplayQso(String, tx_len)
+		: DisplayDrill(String, tx_len);
 #else
 	UI_PrintStringSmallNormal(titles[gCW_CpoCallMode], 0, 127, 0);
 	line5_taken = DisplayDrill(String, tx_len);

@@ -51,14 +51,22 @@ bool gCW_CpoActive = false;
 bool gCW_CpoBacklightOn = false;
 static bool s_needs_redraw = false;
 // Settings practice can change, as they were on entry: CPO_Exit saves only if one moved
-static uint8_t s_entry_wpm;
-static uint8_t s_entry_farnsworth_wpm;
-static bool s_entry_farnsworth_auto;
-static bool s_entry_noise;
-static uint8_t s_entry_noise_level;
-static uint8_t s_entry_difficulty;
-static uint8_t s_entry_pile;
+static uint32_t s_entry_settings;   // the saved settings practice can change, at entry
+#ifdef ENABLE_FLASHLIGHT
 static bool s_flashlight_sending = false;
+#endif
+
+// The saved settings practice can change, packed into one value to compare
+static uint32_t PracticeSettings(void)
+{
+	return gEeprom.CW_KEY_WPM                      // 6 bits
+		| (uint32_t)gEeprom.CW_FARNSWORTH_WPM << 6     // 6
+		| (uint32_t)gEeprom.CW_FARNSWORTH_AUTO << 12   // 1
+		| (uint32_t)gEeprom.CW_PRACTICE_NOISE << 13    // 1
+		| (uint32_t)gEeprom.CW_PRACTICE_NOISE_LEVEL << 14   // 4
+		| (uint32_t)gEeprom.CW_QSO_DIFFICULTY << 18    // 2
+		| (uint32_t)gEeprom.CW_QSO_PILE << 20;         // 3
+}
 #ifdef ENABLE_CW_MODULATOR
 static ModulationMode_t s_saved_modulation = MODULATION_CW;
 #endif
@@ -296,14 +304,10 @@ void CPO_Enter(void)
 	s_needs_redraw = true;
 	gRequestDisplayScreen = DISPLAY_CPO;
 	gUpdateDisplay = true;
-	s_entry_wpm = gEeprom.CW_KEY_WPM;
-	s_entry_farnsworth_wpm = gEeprom.CW_FARNSWORTH_WPM;
-	s_entry_farnsworth_auto = gEeprom.CW_FARNSWORTH_AUTO;
-	s_entry_noise = gEeprom.CW_PRACTICE_NOISE;
-	s_entry_noise_level = gEeprom.CW_PRACTICE_NOISE_LEVEL;
-	s_entry_difficulty = gEeprom.CW_QSO_DIFFICULTY;
-	s_entry_pile = gEeprom.CW_QSO_PILE;
-    gCW_FlashlightSending = s_flashlight_sending;
+	s_entry_settings = PracticeSettings();
+#ifdef ENABLE_FLASHLIGHT
+	gCW_FlashlightSending = s_flashlight_sending;
+#endif
 
 	// Park the radio for the session rather than asking for a VFO reconfigure --
 	// a reconfigure ends in RADIO_SetupRegisters/ACTION_Monitor, which would put
@@ -384,13 +388,7 @@ void CPO_Exit(void)
 	// This avoids a brief window where generic PTT can race before CW keyer resumes ownership.
 	gFlagReconfigureVfos = true;
 	CW_KeyerResetRuntime();
-	if (gEeprom.CW_KEY_WPM != s_entry_wpm
-		|| gEeprom.CW_FARNSWORTH_WPM != s_entry_farnsworth_wpm
-		|| gEeprom.CW_FARNSWORTH_AUTO != s_entry_farnsworth_auto
-		|| gEeprom.CW_PRACTICE_NOISE != s_entry_noise
-		|| gEeprom.CW_PRACTICE_NOISE_LEVEL != s_entry_noise_level
-		|| gEeprom.CW_QSO_DIFFICULTY != s_entry_difficulty
-		|| gEeprom.CW_QSO_PILE != s_entry_pile) {
+	if (PracticeSettings() != s_entry_settings) {
 		gRequestSaveSettings = true;
 	}
 }

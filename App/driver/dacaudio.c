@@ -17,7 +17,6 @@
 // MCU DAC audio driver
 
 #include "driver/dacaudio.h"
-#include "driver/millis.h"
 #include "driver/systick.h"
 #include "py32f071_ll_bus.h"
 #include "py32f071_ll_dac.h"
@@ -38,11 +37,7 @@ static uint16_t s_buf[DACAUDIO_HALF_LEN * 2];
 static DACAUDIO_Fill_t s_fill;
 static bool s_running = false;
 static bool s_inited = false;
-static uint32_t s_rate_hz = 32000;
 static volatile uint32_t s_next_time = 0;     // sample time of the next fill's first sample
-static volatile uint32_t s_busy_cycles = 0;   // in fills since the last TakeLoad
-static volatile uint32_t s_peak_cycles = 0;   // longest single fill since then
-static uint32_t s_load_since_ms = 0;
 
 static void Init(void)
 {
@@ -97,15 +92,11 @@ void DACAUDIO_Start(DACAUDIO_Fill_t fill, uint32_t rate_hz)
 		s_inited = true;
 	}
 	LL_TIM_SetAutoReload(TIMx, SystemCoreClock / 4 / rate_hz - 1);
-	s_rate_hz = rate_hz;
 
 	s_fill = fill;
 	fill(s_buf, 0);
 	fill(s_buf + DACAUDIO_HALF_LEN, DACAUDIO_HALF_LEN);
 	s_next_time = 2 * DACAUDIO_HALF_LEN;
-	s_busy_cycles = 0;
-	s_peak_cycles = 0;
-	s_load_since_ms = millis();
 
 	// The output turns on at the first sample rather than wherever it last stopped
 	LL_DAC_ConvertData12RightAligned(DAC1, DAC_CHANNEL, s_buf[0]);
@@ -166,40 +157,11 @@ void DACAUDIO_Unlock(void)
 	NVIC_EnableIRQ(DMA1_Channel2_3_IRQn);
 }
 
-void DACAUDIO_TakeLoad(uint16_t *avg_permille, uint16_t *peak_permille)
+// The next half's samples, and their time
+static void NextFill(uint16_t *half)
 {
-	const uint32_t now = millis();
-	const uint32_t ms = now - s_load_since_ms;
-
-	NVIC_DisableIRQ(DMA1_Channel2_3_IRQn);
-	const uint32_t busy = s_busy_cycles;
-	const uint32_t peak = s_peak_cycles;
-	s_busy_cycles = 0;
-	s_peak_cycles = 0;
-	NVIC_EnableIRQ(DMA1_Channel2_3_IRQn);
-	s_load_since_ms = now;
-
-	// a thousandth of the cycles in the window, and of a half buffer's play time
-	const uint32_t window = ms * (SystemCoreClock / 1000000);
-	const uint32_t half = SystemCoreClock / s_rate_hz * DACAUDIO_HALF_LEN;
-	*avg_permille = window ? busy / window : 0;
-	*peak_permille = peak * 1000u / half;
-}
-
-// SysTick counts core clocks down from LOAD over its 10 ms period, so the cycles a
-// fill takes are the drop in VAL, or the drop past a reload
-static void TimedFill(uint16_t *half)
-{
-	const uint32_t t0 = SysTick->VAL;
 	s_fill(half, s_next_time);
 	s_next_time += DACAUDIO_HALF_LEN;
-	const uint32_t t1 = SysTick->VAL;
-	const uint32_t cycles = (t0 >= t1) ? t0 - t1 : t0 + SysTick->LOAD + 1 - t1;
-
-	s_busy_cycles += cycles;
-	if (cycles > s_peak_cycles) {
-		s_peak_cycles = cycles;
-	}
 }
 
 // Half transfer: the first half has gone out and can be refilled; transfer
@@ -208,10 +170,10 @@ void DMA1_Channel2_3_IRQHandler(void)
 {
 	if (LL_DMA_IsActiveFlag_HT3(DMA1)) {
 		LL_DMA_ClearFlag_HT3(DMA1);
-		TimedFill(s_buf);
+		NextFill(s_buf);
 	}
 	if (LL_DMA_IsActiveFlag_TC3(DMA1)) {
 		LL_DMA_ClearFlag_TC3(DMA1);
-		TimedFill(s_buf + DACAUDIO_HALF_LEN);
+		NextFill(s_buf + DACAUDIO_HALF_LEN);
 	}
 }
