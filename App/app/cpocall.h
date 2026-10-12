@@ -41,6 +41,10 @@ typedef enum {
 	CPO_CALL_MODE_OFF = 0,
 	CPO_CALL_MODE_SEND,
 	CPO_CALL_MODE_COPY,
+#ifdef ENABLE_FEAT_NR7Y_CPO_QSO
+	CPO_CALL_MODE_QSO,      // the QSO drill (cpoqso.c), which F reaches after copy
+#endif
+	CPO_CALL_MODE_COUNT,
 } CPO_CallMode_t;
 
 typedef enum {
@@ -52,8 +56,16 @@ typedef enum {
 // Switch mode; resets the score and starts on a new callsign
 void CPO_Call_SetMode(CPO_CallMode_t mode);
 
-// F key: off -> send -> copy -> off
+// F key: off -> send -> copy (-> QSO) -> off
 void CPO_Call_NextMode(void);
+
+// A random callsign like the drill's: US, or DX from a list of common prefixes.
+// Returns the DX prefix's index in that list, or -1 for a US call, whose call area
+// is its digit.
+int8_t CPO_Call_Generate(char out[CPO_CALL_MAX_LEN + 1]);
+
+// The drill's random numbers (xorshift32), reseeded with each new callsign
+uint32_t CPO_Call_Rand(void);
 
 // 5 key: clear the line and restart the current callsign unscored (replayed in copy)
 void CPO_Call_Restart(void);

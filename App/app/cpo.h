@@ -28,19 +28,29 @@ void CPO_Exit(void);
 void CPO_Tick(void);
 void CPO_ProcessKeys(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld);
 
+#define CPO_HINT_LINE_SIZE 19   // a full small-font line plus NUL
+#define CPO_CARD_LINES     6
+
+// Every character the CW encoder decodes, and whether a word gap came before it:
+// to the QSO drill when it runs, else the callsign drill
+void CPO_OnChar(char ch, bool word_gap);
+
+// The hint line, which takes turns with the band noise level, its keys, and MENU
+void CPO_GetHintLine(char out[CPO_HINT_LINE_SIZE]);
+
+// The controls card MENU puts up, which any key takes down, and its lines for the
+// drill in use
+bool CPO_CardShowing(void);
+uint8_t CPO_GetCard(const char *lines[CPO_CARD_LINES]);
+
 #ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
-#define CPO_NOISE_LINE_SIZE 19   // a full small-font line plus NUL
+// Practice tones play on the DAC: under band noise, where the receiver plays on AF,
+// and in the QSO drill, whose station plays there
+bool CPO_SynthOn(void);
 
-// Practice with band noise: the receiver plays on AF, and the sidetone and the
-// drill's station play on the DAC over it
-bool CPO_NoiseOn(void);
-
-// The sidetone under band noise, keyed from the local sidetone path; cue is the
-// error dit, at its own pitch
+// The sidetone on the DAC, keyed from the local sidetone path; cue is the error
+// dit, at its own pitch
 void CPO_NoiseSidetone(bool down, bool cue);
-
-// The band noise line: its level and keys, or how to turn it on
-void CPO_GetNoiseLine(char out[CPO_NOISE_LINE_SIZE]);
 #endif
 
 extern bool gCW_CpoActive;
