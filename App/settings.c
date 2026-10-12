@@ -74,9 +74,10 @@ static const CW_SettingLimits_t s_cw_settings_limits[CW_SETTINGS_SIZE] = {
     { 0, 1, 0 },                                                         // CW_FARNSWORTH_AUTO
     { 0, 1, 0 },                                                         // CW_PRACTICE_NOISE
     { 0, CW_PRACTICE_NOISE_LEVEL_MAX, CW_PRACTICE_NOISE_LEVEL_DEFAULT }, // CW_PRACTICE_NOISE_LEVEL
+    { 0, CW_QSO_DIFFICULTIES - 1, CW_QSO_EASY },                         // CW_QSO_DIFFICULTY
 };
 
-_Static_assert(offsetof(EEPROM_Config_t, CW_PRACTICE_NOISE_LEVEL) - offsetof(EEPROM_Config_t, CW_SETTINGS)
+_Static_assert(offsetof(EEPROM_Config_t, CW_QSO_DIFFICULTY) - offsetof(EEPROM_Config_t, CW_SETTINGS)
                == CW_SETTINGS_SIZE - 1, "CW settings fields don't match CW_SETTINGS_SIZE");
 #endif
 

@@ -26,10 +26,17 @@
 // style: RST and its state, twice each for bad conditions, your 5NN and BK back, and
 // a short TU or 73 to sign. CQ POTA, SOTA, WWFF, TEST or FD gets a quick single call,
 // and QRZ between QSOs calls the next station like a CQ.
+// Each station comes on with a personality the difficulty (4) shapes: its speed, how
+// strong it is and whether it fades, how far off zero beat, its fist (paddle, bug,
+// straight key or cootie) and chirp, whether it's QSK and stops when you break in, and
+// whether it ragchews (as it does when you mention RIG, ANT or WX). QRS and QRQ change
+// its speed. After the dit dit an impatient station may call without your CQ.
 // It learns your call from the DE in each CQ, so a CQ with another call hands the
 // radio to the next operator. Prosigns count the same keyed run together or as
-// letters. Whatever you send while it is sending, it never hears. The score shows
-// when the QSO ends.
+// letters, words run together without a word gap still count (UR599, 73EE,
+// NAMEDREW), and a callsign keyed with a gap in it (K7X YZ) is joined back up. Whatever you send while it is sending, it never hears. The bottom line
+// counts QSOs logged (the station signed) and failed (it left, gave up waiting for
+// your report, or you left it with 5 or a new CQ), from when the drill was entered.
 
 #ifndef APP_CPOQSO_H
 #define APP_CPOQSO_H
@@ -46,21 +53,26 @@ void CPO_Qso_Exit(void);
 // 5 key: abandon the QSO and wait for a CQ
 void CPO_Qso_Restart(void);
 
+// 4 key: the next difficulty, which the next station to come on gets
+void CPO_Qso_NextDifficulty(void);
+const char *CPO_Qso_DifficultyName(void);
+
 // Every character the CW encoder decodes, and whether a word gap came before it
 void CPO_Qso_OnChar(char ch, bool word_gap);
 
 // 10ms tick from CPO_Tick
 void CPO_Qso_Tick10ms(void);
 
-// Lines 1 and 2 of the screen during a QSO: what to do now, and who you're working
-void CPO_Qso_GetStatus(char hint[CPO_QSO_LINE_SIZE], char info[CPO_QSO_LINE_SIZE]);
+// How to start, until the drill has learned your call from a CQ; false after that,
+// when the QSO goes by ear
+bool CPO_Qso_GetHint(char out[CPO_QSO_LINE_SIZE]);
 
-// Lines 1-5 once a QSO has ended, until the next one starts; false while there is
-// no score to show
-bool CPO_Qso_GetScore(char lines[5][CPO_QSO_LINE_SIZE]);
 
 // A line shown for a moment on something worth knowing, e.g. "Doubled"; false while
 // there is none
 bool CPO_Qso_GetNotice(char out[CPO_QSO_LINE_SIZE]);
+
+extern uint16_t gCW_CpoQsoLogged;
+extern uint16_t gCW_CpoQsoFailed;
 
 #endif

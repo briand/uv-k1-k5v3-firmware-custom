@@ -39,7 +39,8 @@ void CPO_OnChar(char ch, bool word_gap);
 void CPO_GetHintLine(char out[CPO_HINT_LINE_SIZE]);
 
 // The controls card MENU puts up, which any key takes down, and its lines for the
-// drill in use
+// drill in use. In them < and > stand for the left and right speed keys, which the
+// card draws as arrows the way SetNav names them.
 bool CPO_CardShowing(void);
 uint8_t CPO_GetCard(const char *lines[CPO_CARD_LINES]);
 
@@ -48,9 +49,14 @@ uint8_t CPO_GetCard(const char *lines[CPO_CARD_LINES]);
 // and in the QSO drill, whose station plays there
 bool CPO_SynthOn(void);
 
-// The sidetone on the DAC, keyed from the local sidetone path; cue is the error
-// dit, at its own pitch
-void CPO_NoiseSidetone(bool down, bool cue);
+// A station at full strength: as loud as the sidetone at its level
+uint16_t CPO_StationGain(void);
+
+// The sidetone on the DAC, keyed from the local sidetone path; cue is the error dit,
+// at its own pitch. Your sending breaks in like a transceiver: the stations and the
+// band noise drop out while you key and come back after the CW hang time. The cue is
+// local and breaks nothing in.
+void CPO_Sidetone(bool down, bool cue);
 #endif
 
 extern bool gCW_CpoActive;

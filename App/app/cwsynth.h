@@ -34,6 +34,15 @@
 // radio's audio stage stays clear of the nonlinearity near it
 #define CWSYNTH_GAIN_MAX  2900
 
+// How a sending voice times its elements
+typedef enum {
+	CWSYNTH_FIST_PADDLE = 0,   // a keyer's exact timing
+	CWSYNTH_FIST_BUG,          // short even dits, long hand-made dahs
+	CWSYNTH_FIST_STRAIGHT,     // everything wanders, letters spaced out
+	CWSYNTH_FIST_COOTIE,       // alternating contacts, one side heavier
+	CWSYNTH_FISTS,
+} CWSYNTH_Fist_t;
+
 // Ramps the output up from 0 and starts the DAC; a no-op while running
 void CWSYNTH_Start(void);
 
@@ -52,9 +61,23 @@ bool CWSYNTH_IsRunning(void);
 // Pitch and full level of a voice, out of 4096; takes effect at once
 void CWSYNTH_SetVoice(uint8_t voice, uint16_t pitch_hz, uint16_t gain);
 
+// How a voice sends text: its fist, and how far its pitch chirps at each element's
+// start before settling over 8 ms (0 for none). Voices start with a paddle, no chirp.
+void CWSYNTH_SetFist(uint8_t voice, CWSYNTH_Fist_t fist, uint8_t chirp_hz);
+
 // Keys a voice from the main loop. Every key change plays a fixed 5 ms later, to
-// the sample, so keying keeps its timing whenever the DAC's fill runs.
-void CWSYNTH_Key(uint8_t voice, bool down);
+// the sample, so keying keeps its timing whenever the DAC's fill runs. transmit marks
+// the operator's sending on the sidetone voice, which the receiver breaks in around;
+// a local cue such as the error dit leaves it false.
+void CWSYNTH_Key(uint8_t voice, bool down, bool transmit);
+
+// Break-in: every voice but the sidetone, the operator's receiver, fades out from a
+// transmitting key-down until hang_ms after the key-up, as a transceiver's receiver
+// does. A short hang hears the band between elements (QSK); a long one, between overs.
+void CWSYNTH_SetHang(uint16_t hang_ms);
+
+// True from a transmitting key-down until its hang time has run out
+bool CWSYNTH_Transmitting(void);
 
 // Sends text on a voice at wpm, with the gaps between characters and words stretched
 // to eff_wpm (Farnsworth; 0, or at or above wpm, for none). Takes the characters the

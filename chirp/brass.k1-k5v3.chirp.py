@@ -1001,10 +1001,11 @@ _NR7Y_CW_HANG_10MS_MIN = 1
 _NR7Y_CW_HANG_10MS_MAX = 200
 _NR7Y_CW_HANG_10MS_DEFAULT = 30
 
-# Code practice band noise level, shown 1-16; mirrors CW_PRACTICE_NOISE_LEVEL_*
-# in App/settings.h
+# Code practice band noise level (shown 1-16) and QSO drill difficulty; mirror
+# CW_PRACTICE_NOISE_LEVEL_* and CW_QSO_* in App/settings.h
 _NR7Y_CW_NOISE_LEVEL_MAX = 15
 _NR7Y_CW_NOISE_LEVEL_DEFAULT = 15
+_NR7Y_CW_QSO_DIFFICULTIES = ["Easy", "Medium", "Hard"]
 
 # CW settings, one byte each from _NR7Y_CW_SETTINGS_ADDR: name -> (offset, min,
 # max, default), the same as s_cw_settings_limits in App/settings.c. A byte out
@@ -1025,8 +1026,9 @@ _NR7Y_CW_FIELDS = {
     "farnsworth_auto": (10, 0, 1, 0),
     "noise":           (11, 0, 1, 0),
     "noise_level":     (12, 0, _NR7Y_CW_NOISE_LEVEL_MAX, _NR7Y_CW_NOISE_LEVEL_DEFAULT),
+    "qso_difficulty":  (13, 0, len(_NR7Y_CW_QSO_DIFFICULTIES) - 1, 0),
 }
-_NR7Y_CW_SETTINGS_SIZE = 13
+_NR7Y_CW_SETTINGS_SIZE = 14
 
 
 def _nr7y_unpack_v1_cw_settings(old):
@@ -4423,6 +4425,19 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
         except Exception as e:
             LOG.error("CW practice noise level: %s", e)
 
+        try:
+            rs_qd = RadioSetting("cw_qso_difficulty", "QSO Drill Difficulty",
+                                 RadioSettingValueList(
+                                     _NR7Y_CW_QSO_DIFFICULTIES,
+                                     _NR7Y_CW_QSO_DIFFICULTIES[self._cw_get("qso_difficulty")]))
+            rs_qd.set_doc("How the QSO drill's stations come on: Easy is strong, at "
+                          "your speed, on a paddle; Medium and Hard bring other "
+                          "speeds, weak and fading signals, bugs and straight keys, "
+                          "chirp, and impatient tail-enders (key 4 in the drill)")
+            cw.append(rs_qd)
+        except Exception as e:
+            LOG.error("CW QSO difficulty: %s", e)
+
         # CW Macros (4 messages)
         macros = RadioSettingGroup("cw_macros", "CW Macros")
         for i in range(1, 5):
@@ -4535,6 +4550,9 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
                 self._cw_set("noise", ["OFF", "ON"].index(str(element.value)))
             elif name == "cw_practice_noise_level":
                 self._cw_set("noise_level", int(element.value) - 1)
+            elif name == "cw_qso_difficulty":
+                self._cw_set("qso_difficulty",
+                             _NR7Y_CW_QSO_DIFFICULTIES.index(str(element.value)))
             elif name.startswith("cw_msg"):
                 # "cw_msg1" → idx 1 … "cw_msg4" → idx 4
                 self._set_cw_msg(int(name[6:]), str(element.value))

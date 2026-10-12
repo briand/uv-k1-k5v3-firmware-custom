@@ -198,7 +198,7 @@ static void StopPlayback(void)
 	CW_StopPlayback();
 	BK4819_SetScrambleFrequencyControlWord(0);
 #ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
-	CPO_NoiseSidetone(false, false);   // the same for a sidetone on the DAC
+	CPO_Sidetone(false, false);   // the same for a sidetone on the DAC
 #endif
 #ifdef ENABLE_FLASHLIGHT
 	GPIO_ResetOutputPin(GPIO_PIN_FLASHLIGHT);
