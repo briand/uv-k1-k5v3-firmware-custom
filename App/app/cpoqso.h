@@ -14,29 +14,43 @@
  *     limitations under the License.
  */
 
-// QSO drill for code practice. Call CQ with your callsign after DE, and a station
-// answers with its call on the synthesizer's station voice. Come back to it with its
-// call and your report; it sends its report, QTH and name; confirm them and sign
-// with 73, and it signs too and sends dit dit for yours. Along the way it:
-//   - corrects its call when you send it one or two characters off
-//   - repeats its call for a bare ?, QRZ? or AGN while you answer it
-//   - repeats a field for NAME?, QTH? or RST?, and the lot for AGN or ? after
-//   - calls again when you don't answer, and leaves after three tries
+// QSO drill for code practice. Call CQ with your callsign after DE, and stations
+// answer with their calls, each on its own synthesizer voice. A first CQ brings one,
+// sometimes two; working them at a good rate brings more, up to the pile-up size (1
+// and 7), while slow QSOs and silence let the pile shrink. Whether anyone answers
+// at all is down to the band's activity: CQs and QSOs build it, silence thins it,
+// and a CQ may go unanswered. Come back to one
+// with its call and your report; it sends its report, QTH and name; confirm them and
+// sign with 73, and it signs too and sends dit dit for yours. Along the way:
+//   - part of a call (K7?, XYZ?, 7XY), or one a character or two off, brings the
+//     callers it could be back with theirs, often a touch slower or spaced wider
+//     from then on, while the rest stand by
+//   - a bare ?, QRZ? or AGN brings them all back
+//   - the station repeats a field for NAME?, QTH? or RST?, and the lot for AGN or ?
+//   - unanswered, the pile calls again until each runs out of patience and leaves:
+//     unanswered calls use it up, as does a long wait through your QSO with another,
+//     while being asked for its call or standing by doesn't; the rest call once your
+//     QSO is over
+//   - a lid calls over whoever you come back to, and a caller sending as you key
+//     misses your over
 // Answer it without your name or QTH and it keeps to the exchange, contest and POTA
 // style: RST and its state, twice each for bad conditions, your 5NN and BK back, and
 // a short TU or 73 to sign. CQ POTA, SOTA, WWFF, TEST or FD gets a quick single call,
 // and QRZ between QSOs calls the next station like a CQ.
-// Each station comes on with a personality the difficulty (4) shapes: its speed, how
-// strong it is and whether it fades, how far off zero beat, its fist (paddle, bug,
-// straight key or cootie) and chirp, whether it's QSK and stops when you break in, and
-// whether it ragchews (as it does when you mention RIG, ANT or WX). QRS and QRQ change
-// its speed. After the dit dit an impatient station may call without your CQ.
+// Each station comes on with a personality the difficulty (4) shapes: its speed and
+// character spacing, how strong it is and whether it fades, how far off zero beat,
+// its fist (a keyer, plain, weighted heavy or light, or with letters spaced by hand;
+// a bug, straight key or cootie) and chirp, whether it's QSK and stops when you break in, and
+// whether it ragchews (as it does when you mention RIG, ANT or WX), and in a pile how
+// close to zero beat on the others, how patient, and whether it's a lid. QRS and QRQ
+// change their speed. After the dit dit an impatient newcomer may join the pile.
 // It learns your call from the DE in each CQ, so a CQ with another call hands the
 // radio to the next operator. Prosigns count the same keyed run together or as
 // letters, words run together without a word gap still count (UR599, 73EE,
 // NAMEDREW), and a callsign keyed with a gap in it (K7X YZ) is joined back up. Whatever you send while it is sending, it never hears. The bottom line
-// counts QSOs logged (the station signed) and failed (it left, gave up waiting for
-// your report, or you left it with 5 or a new CQ), from when the drill was entered.
+// counts QSOs logged (the station signed) and failed (the station you came back to gave
+// up waiting for your report, or you left it with 5 or a new CQ), from when the drill
+// was entered. Callers you never came back to don't count.
 
 #ifndef APP_CPOQSO_H
 #define APP_CPOQSO_H
@@ -55,6 +69,10 @@ void CPO_Qso_Restart(void);
 
 // 4 key: the next difficulty, which the next station to come on gets
 void CPO_Qso_NextDifficulty(void);
+
+// 1 and 7 keys: the most stations calling at once, up or down; an error dit past 1 or
+// CW_QSO_PILE_MAX
+void CPO_Qso_StepPile(bool up);
 const char *CPO_Qso_DifficultyName(void);
 
 // Every character the CW encoder decodes, and whether a word gap came before it

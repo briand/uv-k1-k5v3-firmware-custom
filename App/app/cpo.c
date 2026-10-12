@@ -57,6 +57,7 @@ static bool s_entry_farnsworth_auto;
 static bool s_entry_noise;
 static uint8_t s_entry_noise_level;
 static uint8_t s_entry_difficulty;
+static uint8_t s_entry_pile;
 static bool s_flashlight_sending = false;
 #ifdef ENABLE_CW_MODULATOR
 static ModulationMode_t s_saved_modulation = MODULATION_CW;
@@ -230,9 +231,9 @@ uint8_t CPO_GetCard(const char *lines[CPO_CARD_LINES])
 		lines[n++] = "5 replay the call";
 	} else if (QsoDrill()) {
 		// 4 is the difficulty here, not the flashlight
-		lines[n++] = "5 abandon the QSO";
+		lines[n++] = "1/7 pile-up size";
 		lines[n++] = "4 difficulty";
-		lines[n++] = "* backlight";
+		lines[n++] = "5 abandon  * light";
 	} else if (gCW_CpoCallMode == CPO_CALL_MODE_SEND) {
 		lines[n++] = "5 restart the call";
 	} else {
@@ -301,6 +302,7 @@ void CPO_Enter(void)
 	s_entry_noise = gEeprom.CW_PRACTICE_NOISE;
 	s_entry_noise_level = gEeprom.CW_PRACTICE_NOISE_LEVEL;
 	s_entry_difficulty = gEeprom.CW_QSO_DIFFICULTY;
+	s_entry_pile = gEeprom.CW_QSO_PILE;
     gCW_FlashlightSending = s_flashlight_sending;
 
 	// Park the radio for the session rather than asking for a VFO reconfigure --
@@ -387,7 +389,8 @@ void CPO_Exit(void)
 		|| gEeprom.CW_FARNSWORTH_AUTO != s_entry_farnsworth_auto
 		|| gEeprom.CW_PRACTICE_NOISE != s_entry_noise
 		|| gEeprom.CW_PRACTICE_NOISE_LEVEL != s_entry_noise_level
-		|| gEeprom.CW_QSO_DIFFICULTY != s_entry_difficulty) {
+		|| gEeprom.CW_QSO_DIFFICULTY != s_entry_difficulty
+		|| gEeprom.CW_QSO_PILE != s_entry_pile) {
 		gRequestSaveSettings = true;
 	}
 }
@@ -504,6 +507,15 @@ void CPO_ProcessKeys(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 		gUpdateDisplay = true;
 #endif
 		break;
+	case KEY_1:
+	case KEY_7:
+#ifdef ENABLE_FEAT_NR7Y_CPO_QSO
+		if (QsoDrill()) {
+			CPO_Qso_StepPile(Key == KEY_1);
+		}
+#endif
+		break;
+
 	case KEY_5:
 #ifdef ENABLE_FEAT_NR7Y_CPO_QSO
 		if (QsoDrill()) {

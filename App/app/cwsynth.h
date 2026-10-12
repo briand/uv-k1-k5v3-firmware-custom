@@ -37,6 +37,9 @@
 // How a sending voice times its elements
 typedef enum {
 	CWSYNTH_FIST_PADDLE = 0,   // a keyer's exact timing
+	CWSYNTH_FIST_WEIGHTED,     // a keyer weighted heavy: long elements, tight gaps
+	CWSYNTH_FIST_LIGHT,        // a keyer weighted light: short, choppy elements
+	CWSYNTH_FIST_RAGGED,       // a keyer's elements, letters spaced by hand
 	CWSYNTH_FIST_BUG,          // short even dits, long hand-made dahs
 	CWSYNTH_FIST_STRAIGHT,     // everything wanders, letters spaced out
 	CWSYNTH_FIST_COOTIE,       // alternating contacts, one side heavier

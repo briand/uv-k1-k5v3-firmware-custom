@@ -52,9 +52,11 @@ static int16_t s_sine_ram[64];
 
 // How each fist times dits, dahs, the gaps between elements and the gaps between
 // characters and words: a per cent of the ideal length, and how far it wanders either
-// way. A bug's dits come off the vibroplex short and even while its dahs are made by
-// hand and long; a straight key wanders everywhere and leaves room between letters;
-// a cootie's contacts alternate, one side a little heavier (in Shape).
+// way. A keyer's weighting trades element for gap, heavy or light; a paddle sent with
+// a keyer's elements can still space its letters by hand. A bug's dits come off the
+// vibroplex short and even while its dahs are made by hand and long; a straight key
+// wanders everywhere and leaves room between letters; a cootie's contacts alternate,
+// one side a little heavier (in Shape).
 typedef struct {
 	uint8_t base;
 	uint8_t wander;
@@ -62,6 +64,9 @@ typedef struct {
 
 static const CWSYNTH_Shape_t FIST_SHAPE[CWSYNTH_FISTS][4] = {
 	{ { 100,  0 }, { 100,  0 }, { 100,  0 }, { 100,  0 } },   // paddle
+	{ { 115,  0 }, { 105,  0 }, {  85,  0 }, { 100,  0 } },   // weighted heavy
+	{ {  88,  0 }, {  96,  0 }, { 112,  0 }, { 100,  0 } },   // weighted light
+	{ { 100,  0 }, { 100,  0 }, { 100,  0 }, { 115, 35 } },   // ragged letter spacing
 	{ {  90,  2 }, { 125, 12 }, { 105,  5 }, { 100, 15 } },   // bug
 	{ { 105, 15 }, { 113, 12 }, { 100, 20 }, { 120, 20 } },   // straight key
 	{ { 100,  8 }, {  97,  8 }, {  85, 10 }, { 100, 15 } },   // cootie

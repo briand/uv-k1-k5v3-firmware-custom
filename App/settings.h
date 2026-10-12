@@ -119,7 +119,7 @@ typedef enum CW_IambicMode_t CW_IambicMode_t;
 #define CW_KEY_WPM_DEFAULT        18
 
 // Number of CW settings bytes (EEPROM_Config_t CW_SETTINGS)
-#define CW_SETTINGS_SIZE          14
+#define CW_SETTINGS_SIZE          15
 
 // Copy practice effective speed (Farnsworth): the slowest the gaps between
 // characters can stretch to. It always stays below the keyer speed.
@@ -137,6 +137,10 @@ enum {
 	CW_QSO_HARD,
 	CW_QSO_DIFFICULTIES,
 };
+
+// QSO drill pile-up: the most stations that call you at once, one per synthesizer voice
+#define CW_QSO_PILE_MAX     4
+#define CW_QSO_PILE_DEFAULT 3
 
 #endif
 
@@ -465,6 +469,7 @@ typedef struct {
 			uint8_t CW_PRACTICE_NOISE;        // code practice plays live receive audio under the sidetone
 			uint8_t CW_PRACTICE_NOISE_LEVEL;  // its AF DAC gain, 0-15
 			uint8_t CW_QSO_DIFFICULTY;        // QSO drill, CW_QSO_EASY to CW_QSO_HARD
+			uint8_t CW_QSO_PILE;              // QSO drill, most callers at once, 1 to CW_QSO_PILE_MAX
 		};
 		uint8_t CW_SETTINGS[CW_SETTINGS_SIZE];
 	};
@@ -554,7 +559,7 @@ void SETTINGS_UpdateChannel(uint16_t channel, const VFO_Info_t *pVFO, bool keep)
 //   +4  EEPROM schema (EEPROM_SCHEMA_*)
 //   +5  reserved (3)
 //   +8  CW settings, CW_SETTINGS_SIZE bytes (v1.x packed them into 8 at 0xA140)
-//   +22 reserved for new gEeprom values (42)
+//   +23 reserved for new gEeprom values (41)
 #define CW_BLOCK_ADDR          0x00A200
 #define CW_BLOCK_SIZE          0x40
 #define CW_BLOCK_HDR_SIZE      8
