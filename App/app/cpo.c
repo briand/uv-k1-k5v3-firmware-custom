@@ -18,6 +18,9 @@
 
 #include "app/cpo.h"
 #include "app/cpocall.h"
+#ifdef ENABLE_FEAT_NR7Y_DAC_SPIKE
+#include "app/cpodac.h"
+#endif
 #include "audio.h"
 #include "driver/backlight.h"
 #include "driver/bk4819.h"
@@ -119,6 +122,9 @@ void CPO_Exit(void)
 	GPIO_ResetOutputPin(GPIO_PIN_FLASHLIGHT);
 #endif
 	CPO_Call_SetMode(CPO_CALL_MODE_OFF);
+#ifdef ENABLE_FEAT_NR7Y_DAC_SPIKE
+	CPO_Dac_Stop();
+#endif
 	gCW_CpoActive = false;
 	gRequestDisplayScreen = DISPLAY_MAIN;
 	gUpdateDisplay = true;
@@ -156,6 +162,9 @@ void CPO_Tick(void)
 	}
 
 	CPO_Call_Tick10ms();
+#ifdef ENABLE_FEAT_NR7Y_DAC_SPIKE
+	CPO_Dac_Tick10ms();
+#endif
 
 	if (s_needs_redraw | gCW_TX_DisplayUpdated) {
 		s_needs_redraw = false;
@@ -229,6 +238,25 @@ void CPO_ProcessKeys(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 	case KEY_0:
 		CPO_Call_ToggleAutoSpacing();
 		break;
+
+#ifdef ENABLE_FEAT_NR7Y_DAC_SPIKE
+	case KEY_9:
+		CPO_Dac_NextMode();
+		break;
+
+	case KEY_3:
+	case KEY_6:
+		CPO_Dac_StepLevel(Key == KEY_3);
+		break;
+
+	case KEY_1:
+		CPO_Dac_NextMixer();
+		break;
+
+	case KEY_7:
+		CPO_Dac_NextVoices();
+		break;
+#endif
 
 	default:
 		break;
