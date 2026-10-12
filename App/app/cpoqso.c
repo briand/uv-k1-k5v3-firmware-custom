@@ -65,12 +65,18 @@ typedef struct {
 	const char *other;       // the first callsign that isn't yours
 	const char *op;          // your name, after NAME or OP
 	const char *greet;       // GM, GA, GE or GD
+	const char *end;         // K, KN or BK at the end, to answer in kind
 	uint8_t best;            // edit distance from its call to your nearest callsign, 0xFF for none
-	bool cq;
+	bool cq;                 // CQ, or QRZ between QSOs
+	bool special;            // a CQ for POTA, SOTA, WWFF, a contest or field day
 	bool ask;                // a request to repeat: ?, AGN or PSE RPT
 	bool ask_name, ask_qth, ask_rst;
 	bool rst;                // you sent a report
+	bool rst_599;            // ...a contest one, 599 or 5NN
+	bool cut;                // ...in cut numbers
+	bool qth;                // you sent QTH
 	bool sign;               // 73 or SK
+	bool tu;
 	bool ditdit;             // it ends in EE or E E
 	bool name_ok, qth_ok;    // its name or a word of its QTH came back
 } CPO_QsoOver_t;
@@ -107,10 +113,15 @@ static uint16_t s_reply_10ms;
 static uint16_t s_wait_10ms;       // silence in a waiting state
 static uint8_t s_calls;            // calls it has made since you last answered
 static bool s_prompted;            // it has already asked once while waiting on your report
+static bool s_quick;               // a POTA, SOTA, contest or field day CQ: it answers fast
+static bool s_brief;               // you answered without name or QTH: it keeps to RST and state
+static bool s_cut;                 // it sends its report in cut numbers
+static char s_end[3];              // how you ended your over: K, KN, BK or nothing
 
 static char s_over[OVER_SIZE];
 static uint8_t s_over_len = 0;
 static bool s_over_heard = false;  // the over has been acted on; more keying adds to it
+static bool s_word_done = false;   // a prosign ended the word: the next character starts one
 static uint32_t s_last_char_ms;
 static const char *s_tok[TOKENS_MAX];
 static uint8_t s_tok_count;
@@ -133,6 +144,8 @@ typedef struct {
 	uint8_t tries;      // overs it took you to get its call right
 	uint8_t asked;      // repeats you asked for
 	bool worked;        // you got its call right
+	bool brief;         // RST and state only, no name or QTH
+	bool rst;           // you sent a report
 	bool name, qth;     // you sent them back
 	bool sign;          // you sent 73 or SK
 	bool ditdit;
@@ -239,7 +252,7 @@ static void SayRst(void)
 	char rst[4];
 
 	strcpy(rst, s_rst);
-	if (Rnd(3) == 0) {
+	if (s_cut) {
 		// cut numbers: 9 as N
 		for (char *c = rst; *c; c++) {
 			if (*c == '9') {
@@ -247,8 +260,28 @@ static void SayRst(void)
 			}
 		}
 	}
-	SayOneOf("UR RST|UR|RST");
+	if (!s_brief) {
+		SayOneOf("UR RST|UR|RST");
+	}
 	SayTwice(rst);
+}
+
+// The two-letter state or province ending its QTH, if it has one
+static bool State(char out[3])
+{
+	const char *gap = strrchr(s_qth, ' ');
+
+	if (!gap || strlen(gap + 1) != 2) {
+		return false;
+	}
+	strcpy(out, gap + 1);
+	return true;
+}
+
+// BK and KN go out as prosigns, run together, as most send them
+static void SayEnd(const char *end)
+{
+	Say(Is(end, "BK") ? "\x02" : Is(end, "KN") ? "(" : end);
 }
 
 static void SayName(void)
@@ -271,14 +304,20 @@ static void SayOver(void)
 	Say(s_my);
 	Say("DE");
 	Say(s_call);
-	SayOneOf("KN|KN|K|BK");
+	if (s_end[0]) {
+		SayEnd(s_end);
+	} else {
+		SayOneOf("(|(|K|\x02");
+	}
 }
 
 static void Reply(CPO_QsoState_t after)
 {
 	s_after = after;
 	s_reply_due = true;
-	s_reply_10ms = REPLY_MIN_10MS + Rnd(REPLY_SPAN_10MS);
+	// quicker on a POTA, SOTA or contest frequency
+	s_reply_10ms = s_quick ? REPLY_MIN_10MS / 2 + Rnd(REPLY_SPAN_10MS / 2)
+		: REPLY_MIN_10MS + Rnd(REPLY_SPAN_10MS);
 }
 
 // ---- your over ----
@@ -289,6 +328,7 @@ static void ClearOver(void)
 	s_over[0] = '\0';
 	s_over_heard = false;
 	s_rehear = false;
+	s_word_done = false;
 }
 
 static void AddToOver(char ch)
@@ -427,14 +467,23 @@ static void Parse(CPO_QsoOver_t *o)
 		const char *next = (i + 1 < s_tok_count) ? s_tok[i + 1] : "";
 		const size_t n = strlen(t);
 
-		if (Is(t, "CQ")) {
+		if (Is(t, "CQ") || (Is(t, "QRZ") && (s_state == QSO_IDLE || s_state == QSO_DONE))) {
 			o->cq = true;
+		} else if (Is(t, "POTA") || Is(t, "SOTA") || Is(t, "WWFF") || Is(t, "TEST")
+			|| Is(t, "CONTEST") || Is(t, "FD")) {
+			o->special = true;
+		} else if (Is(t, "QTH")) {
+			o->qth = true;
+		} else if (Is(t, "TU")) {
+			o->tu = true;
 		} else if (Is(t, "DE")) {
 			if (IsCall(next)) {
 				o->de = next;
 			}
 		} else if (IsRst(t)) {
 			o->rst = true;
+			o->rst_599 |= Is(t, "599") || Is(t, "5NN");
+			o->cut |= strchr(t, 'N') != NULL;
 		} else if (IsCall(t) && !Is(t, s_my)) {
 			const uint8_t d = Distance(t, s_call);
 			if (d < o->best) {
@@ -452,7 +501,8 @@ static void Parse(CPO_QsoOver_t *o)
 			}
 		} else if (Is(t, "GM") || Is(t, "GA") || Is(t, "GE") || Is(t, "GD")) {
 			o->greet = t;
-		} else if (Is(t, "AGN") || (Is(t, "RPT") && (Is(prev, "PSE") || Is(prev, "PLS")))) {
+		} else if (Is(t, "AGN") || (Is(t, "RPT") && (Is(prev, "PSE") || Is(prev, "PLS")))
+			|| (Is(t, "QRZ") && s_state == QSO_ANSWER)) {
 			// RPT on its own is a report, as in TNX FER RPT
 			o->ask = true;
 		}
@@ -469,8 +519,8 @@ static void Parse(CPO_QsoOver_t *o)
 				o->ask_rst = true;
 			}
 		}
-		// 73 and SK, also run on to a word without a word gap
-		if ((strstr(t, "73") && !IsRst(t) && !IsCall(t)) || strchr(t, '\x01') || Is(t, "SK")) {
+		// 73, also run on to a word without a word gap, and SK
+		if ((strstr(t, "73") && !IsRst(t) && !IsCall(t)) || Is(t, "SK")) {
 			o->sign = true;
 		}
 		if (s_name[0] && Is(t, s_name)) {
@@ -483,6 +533,9 @@ static void Parse(CPO_QsoOver_t *o)
 
 	if (s_tok_count) {
 		const char *last = s_tok[s_tok_count - 1];
+		if (Is(last, "K") || Is(last, "KN") || Is(last, "BK")) {
+			o->end = last;
+		}
 		o->ditdit = Is(last, "EE")
 			|| (Is(last, "E") && s_tok_count > 1 && Is(s_tok[s_tok_count - 2], "E"));
 	}
@@ -539,15 +592,19 @@ static void HearCq(const CPO_QsoOver_t *o)
 	s_score.start_ms = millis();
 	s_op[0] = '\0';
 	s_greet[0] = '\0';
+	s_end[0] = '\0';
 	s_calls = 1;
 	s_prompted = false;
+	s_brief = false;
+	s_quick = o->special;
 
-	// It answers your CQ with its call, once or twice
+	// It answers your CQ with its call: once on a POTA, SOTA or contest frequency,
+	// once or twice otherwise
 	SayStart();
-	if (Rnd(3) == 0) {
+	if (!s_quick && Rnd(3) == 0) {
 		Say("DE");
 	}
-	SayCall(1 + Rnd(2));
+	SayCall(s_quick ? 1 : 1 + Rnd(2));
 	Reply(QSO_ANSWER);
 	s_state = QSO_ANSWER;
 }
@@ -565,6 +622,35 @@ static void HearAnswer(const CPO_QsoOver_t *o)
 		}
 		if (o->greet) {
 			strcpy(s_greet, o->greet);
+		}
+		strcpy(s_end, o->end ? o->end : "");
+		// Without your name or QTH it keeps to the exchange, contest and POTA style:
+		// a contest report for a contest report, and its cut numbers if you used them
+		s_brief = !o->op && !o->qth;
+		s_cut = o->cut || (!s_brief && Rnd(3) == 0);
+		if (s_brief && o->rst_599) {
+			strcpy(s_rst, "599");
+		}
+		s_score.brief = s_brief;
+		s_score.rst = o->rst;
+		if (s_brief) {
+			// e.g. BK R R TU 5NN 5NN ID ID BK, its state twice for bad conditions
+			char state[3];
+			if (Is(s_end, "BK")) {
+				SayEnd(s_end);
+			}
+			if (o->rst) {
+				SayOneOf("R R|R|");
+			}
+			Say(s_greet);
+			Say("TU");
+			SayRst();
+			if (State(state)) {
+				SayTwice(state);
+			}
+			SayEnd(s_end);
+			Reply(QSO_CONFIRM);
+			return;
 		}
 		Say(s_my);
 		Say("DE");
@@ -623,16 +709,33 @@ static void HearConfirm(const CPO_QsoOver_t *o)
 			SayName();
 		}
 		if (all || o->ask_qth) {
-			SayQth(true);
+			char state[3];
+			if (s_brief && State(state)) {
+				SayTwice(state);
+			} else {
+				SayQth(true);
+			}
 		}
-		SayOneOf("KN|K|BK");
+		if (s_brief || s_end[0]) {
+			SayEnd(s_end);
+		} else {
+			SayOneOf("(|K|\x02");
+		}
 		Reply(QSO_CONFIRM);
+		return;
+	}
+
+	s_score.ditdit = o->ditdit;
+	if (s_brief) {
+		// A short sign: TU or 73 and dit dit, or just yours back
+		s_score.sign = o->sign || o->tu;
+		SayOneOf(o->ditdit ? "EE|E E|73 EE|TU EE" : "73 EE|TU 73 EE|TU EE|73 TU EE|E E");
+		Reply(o->ditdit ? QSO_DONE : QSO_DITDIT);
 		return;
 	}
 
 	// It signs, rogering your 73, and ends with dit dit
 	s_score.sign = o->sign;
-	s_score.ditdit = o->ditdit;
 	SayOneOf(o->sign ? "R R|R|R R TU" : "R");
 	SayOneOf("TNX FER QSO|TNX FER FB QSO|TU FER QSO|FB");
 	if (s_op[0]) {
@@ -679,8 +782,7 @@ static uint32_t OverGapMs(void)
 	const char *last = gap ? gap + 1 : s_over;
 	const size_t n = strlen(last);
 	const bool end = Is(last, "K") || Is(last, "KN") || Is(last, "BK") || Is(last, "AR")
-		|| Is(last, "SK") || (n && strchr("(+\x01\x02?", last[n - 1]))
-		|| s_state == QSO_DITDIT;
+		|| Is(last, "SK") || (n && last[n - 1] == '?') || s_state == QSO_DITDIT;
 	const uint32_t dits = end ? 10 * dit_ms : 30 * dit_ms;
 	const uint32_t floor = end ? 700 : 2000;
 
@@ -709,6 +811,25 @@ void CPO_Qso_Restart(void)
 	CPO_Qso_Exit();
 }
 
+// A prosign keyed run together reads as its letters, so BK, KN, UR or SK count the
+// same however they were keyed; -.--. and .-.-. are KN and AR here, not ( and +
+static const char *ProsignWord(char ch)
+{
+	switch (ch) {
+	case CW_PROSIGN_SK:  return "SK";
+	case CW_PROSIGN_BK:  return "BK";
+	case CW_PROSIGN_KA:  return "KA";
+	case CW_PROSIGN_SN:  return "SN";
+	case CW_PROSIGN_UR:  return "UR";
+	case CW_PROSIGN_SOS: return "SOS";
+	case '(':            return "KN";
+	case '+':            return "AR";
+	case '=':            return "BT";
+	case '&':            return "AS";
+	default:             return NULL;
+	}
+}
+
 void CPO_Qso_OnChar(char ch, bool word_gap)
 {
 	if (s_speaking) {
@@ -725,10 +846,20 @@ void CPO_Qso_OnChar(char ch, bool word_gap)
 	}
 	s_over_heard = false;
 	s_reply_due = false;
-	if (word_gap && s_over_len) {
+
+	// and a word of its own, even with no word gap around it
+	const char *prosign = ProsignWord(ch);
+	if ((word_gap || s_word_done || prosign) && s_over_len) {
 		AddToOver(' ');
 	}
-	AddToOver(ch);
+	if (prosign) {
+		while (*prosign) {
+			AddToOver(*prosign++);
+		}
+	} else {
+		AddToOver(ch);
+	}
+	s_word_done = prosign != NULL;
 	s_last_char_ms = millis();
 }
 
@@ -830,7 +961,7 @@ void CPO_Qso_GetStatus(char hint[CPO_QSO_LINE_SIZE], char info[CPO_QSO_LINE_SIZE
 	} else if (s_state == QSO_ANSWER) {
 		strcpy(hint, "Answer the call");
 	} else if (s_state == QSO_CONFIRM) {
-		strcpy(hint, "Confirm and 73");
+		strcpy(hint, s_brief ? "TU 73" : "Confirm and 73");
 	} else if (s_state == QSO_DITDIT) {
 		strcpy(hint, "dit dit");
 	} else {
@@ -850,7 +981,12 @@ bool CPO_Qso_GetScore(char lines[5][CPO_QSO_LINE_SIZE])
 	}
 	const uint32_t secs = (s_score.end_ms - s_score.start_ms) / 1000u;
 
-	sprintf_(lines[0], "%s %s", s_call, s_name);
+	// A brief QSO never had its name
+	if (s_score.brief) {
+		strcpy(lines[0], s_call);
+	} else {
+		sprintf_(lines[0], "%s %s", s_call, s_name);
+	}
 	strcpy(lines[1], s_qth);
 	if (!s_score.worked) {
 		strcpy(lines[2], "Call not worked");
@@ -859,8 +995,12 @@ bool CPO_Qso_GetScore(char lines[5][CPO_QSO_LINE_SIZE])
 	} else {
 		sprintf_(lines[2], "Call %u tries", s_score.tries);
 	}
-	sprintf_(lines[3], "Name %c QTH %c 73 %c", s_score.name ? 'Y' : '-',
-		s_score.qth ? 'Y' : '-', s_score.sign ? 'Y' : '-');
+	if (s_score.brief) {
+		sprintf_(lines[3], "Brief RST %c 73 %c", s_score.rst ? 'Y' : '-', s_score.sign ? 'Y' : '-');
+	} else {
+		sprintf_(lines[3], "Name %c QTH %c 73 %c", s_score.name ? 'Y' : '-',
+			s_score.qth ? 'Y' : '-', s_score.sign ? 'Y' : '-');
+	}
 	if (s_score.finished) {
 		sprintf_(lines[4], "Rpt %u EE %c %u:%02u", s_score.asked, s_score.ditdit ? 'Y' : '-',
 			secs / 60u, secs % 60u);

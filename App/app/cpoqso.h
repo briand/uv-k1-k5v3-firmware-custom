@@ -22,9 +22,14 @@
 //   - repeats its call for a bare ?, QRZ? or AGN while you answer it
 //   - repeats a field for NAME?, QTH? or RST?, and the lot for AGN or ? after
 //   - calls again when you don't answer, and leaves after three tries
+// Answer it without your name or QTH and it keeps to the exchange, contest and POTA
+// style: RST and its state, twice each for bad conditions, your 5NN and BK back, and
+// a short TU or 73 to sign. CQ POTA, SOTA, WWFF, TEST or FD gets a quick single call,
+// and QRZ between QSOs calls the next station like a CQ.
 // It learns your call from the DE in each CQ, so a CQ with another call hands the
-// radio to the next operator. Whatever you send while it is sending, it never hears.
-// The score shows when the QSO ends.
+// radio to the next operator. Prosigns count the same keyed run together or as
+// letters. Whatever you send while it is sending, it never hears. The score shows
+// when the QSO ends.
 
 #ifndef APP_CPOQSO_H
 #define APP_CPOQSO_H
