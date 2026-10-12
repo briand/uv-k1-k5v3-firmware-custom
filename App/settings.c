@@ -437,8 +437,12 @@ gEeprom.FreqChannel[1]   = IS_FREQ_CHANNEL(Data16[5]) ? Data16[5] : (FREQ_CHANNE
 	gEeprom.CW_FARNSWORTH_AUTO	  = (Data[2] < 0x80) && (Data[2] & 0x20);  // bit 5: copy practice auto spacing, default off
 	// Data[3]: high bit = invalid, bits 0-6 = repeat delay (seconds)
 	gEeprom.CW_MESSAGE_REPEAT_DELAY = (Data[3] < 0x80) ? (Data[3] & 0x7F) : 4;  // default 4s
-	// Data[5]: proper roger dah length in dits. 0xFF (unused since v1.0.0) or out of range = default
-	gEeprom.CW_ROGER_DAH_DITS = (Data[5] >= CW_ROGER_DAH_DITS_MIN && Data[5] <= CW_ROGER_DAH_DITS_MAX) ? Data[5] : CW_ROGER_DAH_DITS_DEFAULT;
+	// Data[5]: proper roger dah length in dits in bits 0-4. 0xFF (unused since v1.0.0) or out
+	// of range = default. Bits 5-6: the QSO drill's pile-up size, less 1, XOR the default's,
+	// so the zeros earlier firmware left there read as the default; bit 7 set (unset) too.
+	const uint8_t roger = Data[5] & 0x1F;
+	gEeprom.CW_ROGER_DAH_DITS = (Data[5] < 0x80 && roger >= CW_ROGER_DAH_DITS_MIN && roger <= CW_ROGER_DAH_DITS_MAX) ? roger : CW_ROGER_DAH_DITS_DEFAULT;
+	gEeprom.CW_QSO_PILE = (Data[5] < 0x80 ? ((Data[5] >> 5) ^ (CW_QSO_PILE_DEFAULT - 1)) & 0x03 : CW_QSO_PILE_DEFAULT - 1) + 1;
 	// Data[7]: break-in hang time in 10 ms units. 0xFF (unused since v1.0.0) or out of range = 300 ms.
 	// Byte 6 is skipped on purpose: pre-1.0 betas kept an ADC low byte there that reads as a valid time.
 	gEeprom.CW_HANG_10MS = (Data[7] >= CW_HANG_10MS_MIN && Data[7] <= CW_HANG_10MS_MAX) ? Data[7] : CW_HANG_10MS_DEFAULT;
@@ -1162,7 +1166,8 @@ void SETTINGS_SaveSettings(void)
 	// State[3]: store menu value (delay/2) in bits 0-6, clear high bit to mark valid
 	State[3] = (gEeprom.CW_MESSAGE_REPEAT_DELAY) & 0x7F;
 	State[4] = (uint8_t)gEeprom.CW_KEYER_MODE | (gEeprom.CW_FARNSWORTH_WPM << 2);  // keyer mode (0=A, 1=B, 2=Ultimatic, 3=Bug) in bits 0-1, effective speed in bits 2-7
-	State[5] = gEeprom.CW_ROGER_DAH_DITS;  // proper roger dah length in dits
+	State[5] = gEeprom.CW_ROGER_DAH_DITS  // proper roger dah length in dits, bits 0-4; QSO pile-up bits 5-6
+		| (((gEeprom.CW_QSO_PILE - 1) ^ (CW_QSO_PILE_DEFAULT - 1)) & 0x03) << 5;
 	State[6] = (gEeprom.CW_PRACTICE_NOISE_LEVEL & 0x0F) | (gEeprom.CW_PRACTICE_NOISE << 4)
 		| ((gEeprom.CW_QSO_DIFFICULTY & 0x03) << 5);  // practice noise level bits 0-3, on bit 4, QSO difficulty bits 5-6, bit 7 clear
 	State[7] = gEeprom.CW_HANG_10MS;  // break-in hang time in 10 ms units

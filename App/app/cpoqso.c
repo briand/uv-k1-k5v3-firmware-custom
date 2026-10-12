@@ -35,6 +35,9 @@
 #define CALL_SIZE   11   // room for a portable call such as VE3/W1ABC
 #define NAME_SIZE   9
 #define QTH_SIZE    16
+#define PILE_MAX    CW_QSO_PILE_MAX   // a synthesizer voice each, after the sidetone
+#define PILE_ALL    ((1u << PILE_MAX) - 1)
+#define CALLING_SIZE (2 * CALL_SIZE + 3)   // DE and a call twice
 
 // In 10 ms ticks
 #define REPLY_MIN_10MS    20     // the station's reaction time, from 0.2 s...
@@ -43,9 +46,30 @@
 #define CONFIRM_WAIT_10MS 700    // silence after its report before it asks
 #define DITDIT_WAIT_10MS  300    // how long it listens for your dit dit
 #define NOTICE_10MS       150
-#define CALLS_MAX         3      // calls with no answer before it leaves
-#define TAIL_MIN_10MS     40     // a tail-ender calls 0.4 s after the dit dit...
+#define TAIL_MIN_10MS     40     // the pile calls 0.4 s after the dit dit...
 #define TAIL_SPAN_10MS    80     // ...to 1.2 s, half that on a POTA or contest frequency
+#define STAGGER_MIN_10MS  20     // in a pile, each caller starts 0.2 s after the one before...
+#define STAGGER_SPAN_10MS 40     // ...to 0.6 s, half that on a POTA or contest frequency
+#define CAREFUL_PCT       60     // a caller asked for its call again makes it easier to copy
+#define LATE_PCT          20     // a caller after the first may hold back to call in the clear...
+#define LATE_MIN_10MS     150    // ...1.5 s later...
+#define LATE_SPAN_10MS    100    // ...to 2.5 s
+#define SPREAD_10HZ       30     // callers spread up to 300 Hz either side of zero beat
+#define DRAIN_10MS        2000   // each 20 s waiting through your QSO with another costs a caller patience
+#define QUIET_10MS        200    // each 2 s of silence, the band's activity drops a point
+
+// The band's activity, 0-100: how many hear your CQ and call
+#define ACTIVITY_START    60
+#define ACTIVITY_CQ       15
+#define ACTIVITY_QSO      10
+
+// Your QSO rate as the band hears it, 0-255. A logged QSO adds RATE_QSO and a failed
+// one takes half that; it fades a point a second for each RATE_QSO it holds. A pile
+// earns one caller, and one more for each RATE_QSO: quick QSOs build it up, and
+// slow ones and silence let it fade.
+#define RATE_QSO          64
+#define RATE_MAX          255
+#define BONUS_PCT         35     // a chance of one caller more than earned
 
 typedef enum {
 	QSO_IDLE = 0,   // waiting for a CQ
@@ -63,6 +87,7 @@ typedef enum {
 	NOTICE_DIFFICULTY,
 	NOTICE_LOGGED,
 	NOTICE_NOT_LOGGED,
+	NOTICE_PILE,
 } CPO_QsoNotice_t;
 
 // What an over said, as far as the station cares
@@ -72,7 +97,8 @@ typedef struct {
 	const char *op;          // your name, after NAME or OP
 	const char *greet;       // GM, GA, GE or GD
 	const char *end;         // K, KN or BK at the end, to answer in kind
-	uint8_t best;            // edit distance from its call to your nearest callsign, 0xFF for none
+	uint8_t best[PILE_MAX];  // each caller: edit distance from its call to your nearest callsign, 0xFF for none
+	uint8_t partial;         // the callers whose call holds part of one you sent: K7?, XYZ?, 7XY
 	bool cq;                 // CQ, or QRZ between QSOs
 	bool special;            // a CQ for POTA, SOTA, WWFF, a contest or field day
 	bool ask;                // a request to repeat: ?, AGN or PSE RPT
@@ -117,22 +143,48 @@ static const char *const DIFFICULTY_NAMES[CW_QSO_DIFFICULTIES] = {"Easy", "Mediu
 
 // What each difficulty puts on the air. Each station rolls its own within these.
 typedef struct {
-	uint8_t wpm_spread;      // WPM either side of yours
+	uint8_t wpm_down;        // WPM under yours at the slowest...
+	uint8_t wpm_up;          // ...and over at the fastest
+	uint8_t spacing_pct;     // chance it spaces its characters out (Farnsworth)
 	uint8_t level_db;        // dB under full level at the strongest...
 	uint8_t level_span_db;   // ...and how much weaker it can be
 	uint8_t qsb_pct;         // chance it fades
 	uint8_t qsb_db;          // as deep as this at most
 	uint8_t pitch_spread;    // 10s of Hz either side of zero beat
-	uint8_t hand_pct;        // chance of a bug, straight key or cootie over a paddle
+	uint8_t hand_pct;        // chance of a bug, straight key or cootie over a keyer
 	uint8_t chirp_pct;
-	uint8_t tail_pct;        // chance another calls straight after the dit dit
+	uint8_t tail_pct;        // chance a newcomer calls straight after the dit dit
+	uint8_t sep_10hz;        // callers at least this far apart in pitch, 10s of Hz; 0 brings zero-beaters
+	uint8_t lid_pct;         // chance a caller calls over whoever you come back to
+	uint8_t patience;        // unanswered calls a caller makes before it leaves, at least; up to 3 more
 } CPO_QsoDifficulty_t;
 
 static const CPO_QsoDifficulty_t DIFFICULTY[CW_QSO_DIFFICULTIES] = {
-	{ 0,  0,  0,  0,  0,  0,  0,  0, 20 },   // easy: strong, your speed, a paddle
-	{ 3,  0, 15, 40, 10,  6, 40, 10, 35 },   // medium
-	{ 8, 10, 14, 70, 20, 15, 70, 20, 50 },   // hard: down near the noise
+	{ 4,  1, 30,  0,  6, 15,  6,  3, 10,  0, 20, 12,  0, 5 },   // easy: strong, about your speed or slower, clean keyers
+	{ 6,  5, 20,  0, 18, 40, 12,  6, 40, 10, 35,  6, 10, 4 },   // medium
+	{ 8, 10, 15,  4, 24, 70, 20, 15, 70, 25, 50,  0, 25, 3 },   // hard: some loud, many down near the noise
 };
+
+// A station on frequency: calling you, waiting its turn, or the one you're working.
+// Its personality is rolled when it comes on.
+typedef struct {
+	char call[CALL_SIZE];
+	char calling[CALLING_SIZE];   // what it sends calling you, unchanged until sent
+	int8_t dx;               // its DX prefix, for its QTH; -1 for a US call
+	uint8_t wpm;
+	uint8_t eff;             // the speed its characters are spaced for, 0 for its own (Farnsworth)
+	int16_t pitch;           // Hz off your sidetone
+	uint8_t level_db;        // under full level
+	uint8_t qsb_db;          // how deep it fades, 0 for not at all
+	uint16_t qsb_10ms;       // and how slowly
+	uint16_t qsb_at;
+	uint16_t call_10ms;      // until it calls, 0 for no call coming
+	uint8_t patience;        // unanswered calls, or 20 s waits through another's QSO, before it leaves
+	bool on;
+	bool qsk;                // it stops when you break in, and hears you
+	bool talker;             // it ragchews whatever you send
+	bool lid;                // it calls over whoever you come back to
+} CPO_QsoStation_t;
 
 static CPO_QsoState_t s_state = QSO_IDLE;
 static CPO_QsoState_t s_after;     // the state once the station has done sending
@@ -140,23 +192,24 @@ static bool s_reply_due = false;   // what it says next is ready, and waits out 
 static bool s_speaking = false;
 static uint16_t s_reply_10ms;
 static uint16_t s_wait_10ms;       // silence in a waiting state
-static uint8_t s_calls;            // calls it has made since you last answered
 static bool s_prompted;            // it has already asked once while waiting on your report
 static bool s_quick;               // a POTA, SOTA, contest or field day CQ: it answers fast
 static bool s_brief;               // you answered without name or QTH: it keeps to RST and state
 static bool s_cut;                 // it sends its report in cut numbers
 static char s_end[3];              // how you ended your over: K, KN, BK or nothing
 
-// The station's personality, rolled when it comes on
-static uint8_t s_wpm;
-static int16_t s_pitch;            // Hz off your sidetone
-static uint8_t s_level_db;         // under full level
-static uint8_t s_qsb_db;           // how deep it fades, 0 for not at all
-static uint16_t s_qsb_10ms;        // and how slowly
-static uint16_t s_qsb_at;
-static bool s_qsk;                 // it stops when you break in, and hears you
-static bool s_talker;              // it ragchews whatever you send
-static uint16_t s_tail_10ms;       // until a tail-ender calls, 0 for none coming
+static CPO_QsoStation_t s_pile[PILE_MAX];   // on station i + 1's synthesizer voice
+static CPO_QsoStation_t *s_st;     // the station you're working, NULL until you come back to one
+static uint16_t s_tail_10ms;       // after a QSO, the silence before the pile calls
+static uint16_t s_drain_10ms;
+static uint8_t s_missed;           // the callers that were sending over your over
+static uint8_t s_activity;
+static uint8_t s_quiet_10ms;
+static uint8_t s_rate;
+static uint8_t s_rate_10ms;
+
+#define VOICE(st) (CWSYNTH_STATION + (uint8_t)((st) - s_pile))
+#define BIT(st)   (1u << ((st) - s_pile))
 
 static char s_over[OVER_SIZE];
 static uint8_t s_over_len = 0;
@@ -170,16 +223,15 @@ static char s_say[SAY_SIZE];
 static uint8_t s_say_len;
 
 static char s_my[CALL_SIZE];       // yours, from your last CQ
-static char s_call[CALL_SIZE];     // the station's
-static char s_name[NAME_SIZE];
+static char s_name[NAME_SIZE];     // the worked station's
 static char s_qth[QTH_SIZE];
 static char s_rst[4];              // its report to you
 static char s_op[NAME_SIZE];       // your name, if you sent it
 static char s_greet[3];
 
 static CPO_QsoNotice_t s_notice;
-static char s_logged[CALL_SIZE];   // the call a "Logged" notice names, kept: a tail-ender
-                                   // coming on changes s_call while the notice is still up
+static char s_logged[CALL_SIZE];   // the call a "Logged" notice names, kept: the station
+                                   // has gone, and its slot may take a newcomer
 static uint8_t s_notice_10ms = 0;
 
 
@@ -269,13 +321,6 @@ static void SayOneOf(const char *list)
 	Say(words);
 }
 
-static void SayCall(uint8_t times)
-{
-	while (times--) {
-		Say(s_call);
-	}
-}
-
 static void SayRst(void)
 {
 	char rst[4];
@@ -346,7 +391,7 @@ static void SayOver(void)
 {
 	Say(s_my);
 	Say("DE");
-	Say(s_call);
+	Say(s_st->call);
 	if (s_end[0]) {
 		SayEnd(s_end);
 	} else {
@@ -354,13 +399,17 @@ static void SayOver(void)
 	}
 }
 
+// A station's reaction time: quicker on a POTA, SOTA or contest frequency
+static uint8_t Reaction(void)
+{
+	return s_quick ? REPLY_MIN_10MS / 2 + Rnd(REPLY_SPAN_10MS / 2) : REPLY_MIN_10MS + Rnd(REPLY_SPAN_10MS);
+}
+
 static void Reply(CPO_QsoState_t after)
 {
 	s_after = after;
 	s_reply_due = true;
-	// quicker on a POTA, SOTA or contest frequency
-	s_reply_10ms = s_quick ? REPLY_MIN_10MS / 2 + Rnd(REPLY_SPAN_10MS / 2)
-		: REPLY_MIN_10MS + Rnd(REPLY_SPAN_10MS);
+	s_reply_10ms = Reaction();
 }
 
 // ---- your over ----
@@ -371,6 +420,7 @@ static void ClearOver(void)
 	s_over[0] = '\0';
 	s_over_heard = false;
 	s_word_done = false;
+	s_missed = 0;
 }
 
 static void AddToOver(char ch)
@@ -565,7 +615,7 @@ static void Parse(CPO_QsoOver_t *o)
 	static char de_call[CALL_SIZE];   // your call after DE, joined back if keyed with a gap
 
 	memset(o, 0, sizeof(*o));
-	o->best = 0xFF;
+	memset(o->best, 0xFF, sizeof(o->best));
 
 	for (uint8_t i = 0; i < s_tok_count; i++) {
 		const char *t = s_tok[i];
@@ -610,14 +660,27 @@ static void Parse(CPO_QsoOver_t *o)
 		} else if (call && !Is(t, s_my) && !o->other) {
 			o->other = t;
 		}
-		// its call, as keyed or with a gap or two in it
+		// a caller's call, as keyed or with a gap or two in it...
 		for (uint8_t words = 1; words <= 3; words++) {
 			char joined[CALL_SIZE];
 			const char *c = (words == 1) ? (call && !HasRst(t) ? t : NULL) : Join(i, words, joined);
-			if (c && !Is(c, s_my)) {
-				const uint8_t d = Distance(c, s_call);
-				if (d < o->best) {
-					o->best = d;
+			for (uint8_t k = 0; c && k < PILE_MAX; k++) {
+				const uint8_t d = (s_pile[k].on && !Is(c, s_my)) ? Distance(c, s_pile[k].call) : 0xFF;
+				if (d < o->best[k]) {
+					o->best[k] = d;
+				}
+			}
+		}
+		// ...or part of one: with a ?, as K7? or XYZ?, or with a digit, as 7XY
+		const size_t part_len = n - (t[n - 1] == '?');
+		if (part_len >= 2 && part_len < CALL_SIZE && (part_len < n || strpbrk(t, "0123456789"))
+			&& !HasRst(t)) {
+			char part[CALL_SIZE];
+			memcpy(part, t, part_len);
+			part[part_len] = '\0';
+			for (uint8_t k = 0; k < PILE_MAX; k++) {
+				if (s_pile[k].on && strstr(s_pile[k].call, part) && !Is(s_pile[k].call, part)) {
+					o->partial |= 1u << k;
 				}
 			}
 		}
@@ -669,6 +732,11 @@ static void Parse(CPO_QsoOver_t *o)
 
 // ---- the QSO ----
 
+static const CPO_QsoDifficulty_t *Difficulty(void)
+{
+	return &DIFFICULTY[gEeprom.CW_QSO_DIFFICULTY % CW_QSO_DIFFICULTIES];
+}
+
 static void Tally(uint16_t *count)
 {
 	if (*count < 999) {
@@ -677,114 +745,299 @@ static void Tally(uint16_t *count)
 	gUpdateDisplay = true;
 }
 
-// The QSO is over: logged when the station signed, failed otherwise, with notice
-// saying which (or that the station left)
+static void Busier(uint8_t points)
+{
+	s_activity = (s_activity + points < 100) ? s_activity + points : 100;
+}
+
+static uint8_t PileCount(void)
+{
+	uint8_t n = 0;
+	for (uint8_t i = 0; i < PILE_MAX; i++) {
+		n += s_pile[i].on;
+	}
+	return n;
+}
+
+static void Leave(CPO_QsoStation_t *st)
+{
+	st->on = false;
+	st->call_10ms = 0;
+	CWSYNTH_Cancel(VOICE(st));
+}
+
+// A round of waiting on you: false once a caller has run out of patience, and left
+static bool Wait(CPO_QsoStation_t *st)
+{
+	if (st->patience == 0) {
+		Leave(st);
+		return false;
+	}
+	st->patience--;
+	return true;
+}
+
+static bool CallTaken(const CPO_QsoStation_t *st)
+{
+	if (Is(st->call, s_my)) {
+		return true;
+	}
+	for (const CPO_QsoStation_t *o = s_pile; o < s_pile + PILE_MAX; o++) {
+		if (o != st && o->on && Is(o->call, st->call)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+// How far a pitch is from the nearest other station on frequency
+static int16_t Gap(const CPO_QsoStation_t *st, int16_t pitch)
+{
+	int16_t gap = 0x7FFF;
+	for (const CPO_QsoStation_t *o = s_pile; o < s_pile + PILE_MAX; o++) {
+		const int16_t d = (o->pitch > pitch) ? o->pitch - pitch : pitch - o->pitch;
+		if (o != st && o->on && d < gap) {
+			gap = d;
+		}
+	}
+	return gap;
+}
+
+// Wider spaces between its characters: a few WPM under its speed, or under what it
+// spaced them for already
+static void Spaced(CPO_QsoStation_t *st)
+{
+	const int16_t eff = (st->eff ? st->eff : st->wpm) - 3 - (int16_t)Rnd(3);
+	st->eff = (eff > 5) ? eff : 5;
+}
+
+// A station comes on frequency to call you, if the pile has room for it, with its own
+// call and a personality within what the difficulty allows
+static void Arrive(void)
+{
+	const CPO_QsoDifficulty_t *d = Difficulty();
+	CPO_QsoStation_t *st = s_pile;
+	uint8_t tries = 4;
+
+	if (PileCount() >= gEeprom.CW_QSO_PILE) {
+		return;
+	}
+	while (st->on) {
+		st++;
+	}
+	do {
+		st->dx = CPO_Call_Generate(st->call);
+	} while (CallTaken(st) && --tries);
+
+	int16_t wpm = gEeprom.CW_KEY_WPM + (int16_t)Rnd(d->wpm_down + d->wpm_up + 1u) - d->wpm_down;
+	st->wpm = (wpm < 10) ? 10 : (wpm > 45) ? 45 : (uint8_t)wpm;
+	st->eff = 0;
+	if (Rnd(100) < d->spacing_pct) {
+		Spaced(st);
+	}
+	// Off zero beat, and in a pile far enough from the others to pick out, unless the
+	// difficulty brings zero-beaters: the first pitch clear enough from a random
+	// start across the spread, else the clearest
+	int16_t pitch = ((int16_t)Rnd(2u * d->pitch_spread + 1u) - d->pitch_spread) * 10;
+	int16_t gap = Gap(st, pitch);
+	const uint8_t from = Rnd(2u * SPREAD_10HZ + 1u);
+	for (uint8_t i = 0; i <= 2 * SPREAD_10HZ && gap < d->sep_10hz * 10; i++) {
+		const int16_t other = ((int16_t)((from + i) % (2 * SPREAD_10HZ + 1)) - SPREAD_10HZ) * 10;
+		if (Gap(st, other) > gap) {
+			pitch = other;
+			gap = Gap(st, other);
+		}
+	}
+	st->pitch = pitch;
+	st->level_db = d->level_db + Rnd(d->level_span_db + 1u);
+	st->qsb_db = (Rnd(100) < d->qsb_pct) ? 4 + Rnd(d->qsb_db - 3u) : 0;
+	st->qsb_10ms = 300 + Rnd(900);   // fading over 3 to 12 s
+	st->qsb_at = Rnd(st->qsb_10ms);
+	// a keyer, plain half the time, else weighted or (above Easy) ragged; or a hand key
+	CWSYNTH_SetFist(VOICE(st),
+		(Rnd(100) < d->hand_pct) ? (CWSYNTH_Fist_t)(CWSYNTH_FIST_BUG + Rnd(3))
+		: Rnd(2) ? CWSYNTH_FIST_PADDLE
+		: (CWSYNTH_Fist_t)(CWSYNTH_FIST_WEIGHTED + Rnd(gEeprom.CW_QSO_DIFFICULTY == CW_QSO_EASY ? 2 : 3)),
+		(Rnd(100) < d->chirp_pct) ? 20 + Rnd(40) : 0);
+	st->qsk = Rnd(10) < 3;
+	st->talker = Rnd(100) < 15;
+	st->lid = Rnd(100) < d->lid_pct;
+	st->patience = d->patience + Rnd(4);
+	st->call_10ms = 0;
+	st->on = true;
+}
+
+// Newcomers join until the pile holds what your rate has earned: one, sometimes two,
+// from a standing start, up to the pile-up size as you work them quickly
+static void Fill(void)
+{
+	uint8_t want = 1 + s_rate / RATE_QSO + (Rnd(100) < BONUS_PCT);
+
+	if (want > gEeprom.CW_QSO_PILE) {
+		want = gEeprom.CW_QSO_PILE;
+	}
+	while (PileCount() < want) {
+		Arrive();
+	}
+}
+
+// A caller calls you with its call, times over (0: once or twice, as it likes), in
+// at_10ms. One still calling goes on.
+static void Call(CPO_QsoStation_t *st, uint8_t times, uint16_t at_10ms)
+{
+	if (CWSYNTH_IsSending(VOICE(st))) {
+		return;
+	}
+	st->calling[0] = '\0';
+	if (!s_quick && Rnd(3) == 0) {
+		strcpy(st->calling, "DE ");
+	}
+	if (!times) {
+		times = 1 + Rnd(2);
+	}
+	while (times--) {
+		strcat(st->calling, st->call);
+		if (times) {
+			strcat(st->calling, " ");
+		}
+	}
+	st->call_10ms = 1 + at_10ms;
+}
+
+// How long after one caller the next comes in
+static uint16_t Stagger(void)
+{
+	const uint16_t gap = STAGGER_MIN_10MS + Rnd(STAGGER_SPAN_10MS);
+	return s_quick ? gap / 2 : gap;
+}
+
+// The callers in mask call, and the lids whoever you came back to; the rest stand by.
+// They come in, in no set order, one after another a moment apart from the first's
+// reaction time, and now and then one holds back to call in the clear once the rest
+// are done. A call that may go unanswered costs a caller some patience, and one out of
+// it leaves instead; standing by costs nothing. Asked for its call again (careful), a
+// caller is hopeful, and often makes it easier to copy from then on: a touch slower,
+// or its characters spaced wider.
+static void Round(uint8_t mask, uint8_t times, bool careful)
+{
+	const uint8_t from = Rnd(PILE_MAX);
+	uint16_t at = Reaction();
+	uint8_t late = 0;
+	bool first = true;
+	CPO_QsoStation_t *st;
+
+	for (uint8_t i = 0; i < PILE_MAX; i++) {
+		st = &s_pile[(from + i) % PILE_MAX];
+		const bool asked = careful && (mask & BIT(st));
+		if (st->on && st != s_st && ((mask & BIT(st)) || st->lid) && (asked || Wait(st))) {
+			if (asked && Rnd(100) < CAREFUL_PCT) {
+				if (Rnd(2)) {
+					st->wpm = (st->wpm > 12) ? st->wpm - 2 - Rnd(2) : 10;
+				} else {
+					Spaced(st);
+				}
+			}
+			if (!first && Rnd(100) < LATE_PCT) {
+				late |= BIT(st);
+			} else {
+				Call(st, times, at);
+				at += Stagger();
+				first = false;
+			}
+		}
+	}
+	at += LATE_MIN_10MS + Rnd(LATE_SPAN_10MS);
+	for (st = s_pile; st < s_pile + PILE_MAX; st++) {
+		if (late & BIT(st)) {
+			Call(st, times, at);
+			at += Stagger();
+		}
+	}
+}
+
+// The QSO is over: logged when the station signed, failed otherwise, with a notice
+// saying which. The station goes, and the pile calls once you've been quiet a moment.
+// A logged QSO builds your rate, and those who heard it join the pile up to what the
+// rate has earned; with none left waiting, an impatient one may call anyway, more
+// often (and sooner) on a POTA or contest frequency and the higher your rate.
 static void Done(bool logged, CPO_QsoNotice_t notice)
 {
-	CWSYNTH_Cancel(CWSYNTH_STATION);
 	s_speaking = false;
 	s_reply_due = false;
 	s_state = QSO_DONE;
 	Tally(logged ? &gCW_CpoQsoLogged : &gCW_CpoQsoFailed);
-	strcpy(s_logged, s_call);
+	strcpy(s_logged, s_st->call);
+	Leave(s_st);
+	s_st = NULL;
 	Notice(notice);
 
-	// An impatient station may call straight after the dit dit, without your CQ: more
-	// often on a POTA or contest frequency, and sooner
-	const CPO_QsoDifficulty_t *d = &DIFFICULTY[gEeprom.CW_QSO_DIFFICULTY % CW_QSO_DIFFICULTIES];
-	s_tail_10ms = 0;
-	if (logged && Rnd(100) < (uint32_t)d->tail_pct * (s_quick ? 2 : 1)) {
-		s_tail_10ms = s_quick ? TAIL_MIN_10MS / 2 + Rnd(TAIL_SPAN_10MS / 2)
-			: TAIL_MIN_10MS + Rnd(TAIL_SPAN_10MS);
+	if (logged) {
+		Busier(ACTIVITY_QSO);
+		s_rate = (s_rate + RATE_QSO < RATE_MAX) ? s_rate + RATE_QSO : RATE_MAX;
+		if (PileCount() || Rnd(100) < Difficulty()->tail_pct * (s_quick ? 2u : 1u) + s_rate / 4u) {
+			Fill();
+		}
+	} else {
+		s_rate -= (s_rate < RATE_QSO / 2) ? s_rate : RATE_QSO / 2;
 	}
-	gUpdateDisplay = true;
+	s_tail_10ms = s_quick ? TAIL_MIN_10MS / 2 + Rnd(TAIL_SPAN_10MS / 2)
+		: TAIL_MIN_10MS + Rnd(TAIL_SPAN_10MS);
+	s_wait_10ms = 0;
 }
 
-static void NewStation(void)
+// You came back to a caller with its call: the QSO is with it now
+static void Pick(CPO_QsoStation_t *st)
 {
-	const int8_t dx = CPO_Call_Generate(s_call);
-
-	if (dx < 0) {
-		const char *digit = s_call;
+	s_st = st;
+	st->call_10ms = 0;
+	if (st->dx < 0) {
+		const char *digit = st->call;
 		while (*digit < '0' || *digit > '9') {
 			digit++;
 		}
 		PickRandom(US_QTH[*digit - '0'], '|', s_qth, sizeof(s_qth));
 	} else {
-		PickItem(DX_QTH, '|', dx, s_qth, sizeof(s_qth));
+		PickItem(DX_QTH, '|', st->dx, s_qth, sizeof(s_qth));
 	}
 	PickRandom(NAMES, ' ', s_name, sizeof(s_name));
 	PickRandom(RSTS, ' ', s_rst, sizeof(s_rst));
-
-	// Its personality, within what the difficulty allows
-	const CPO_QsoDifficulty_t *d = &DIFFICULTY[gEeprom.CW_QSO_DIFFICULTY % CW_QSO_DIFFICULTIES];
-	int16_t wpm = gEeprom.CW_KEY_WPM + (int16_t)Rnd(2u * d->wpm_spread + 1u) - d->wpm_spread;
-	s_wpm = (wpm < 10) ? 10 : (wpm > 45) ? 45 : (uint8_t)wpm;
-	s_pitch = ((int16_t)Rnd(2u * d->pitch_spread + 1u) - d->pitch_spread) * 10;
-	s_level_db = d->level_db + Rnd(d->level_span_db + 1u);
-	s_qsb_db = (Rnd(100) < d->qsb_pct) ? 4 + Rnd(d->qsb_db - 3u) : 0;
-	s_qsb_10ms = 300 + Rnd(900);   // fading over 3 to 12 s
-	s_qsb_at = Rnd(s_qsb_10ms);
-	CWSYNTH_SetFist(CWSYNTH_STATION,
-		(Rnd(100) < d->hand_pct) ? (CWSYNTH_Fist_t)(CWSYNTH_FIST_BUG + Rnd(3)) : CWSYNTH_FIST_PADDLE,
-		(Rnd(100) < d->chirp_pct) ? 20 + Rnd(40) : 0);
-	s_qsk = Rnd(10) < 3;
-	s_talker = Rnd(100) < 15;
-}
-
-// The station's pitch and level, every tick: off zero beat, down from full level by
-// its strength, and fading through its QSB, deepest halfway through each cycle
-static void UpdateVoice(void)
-{
-	uint32_t db = s_level_db;
-
-	if (s_qsb_db) {
-		if (++s_qsb_at >= s_qsb_10ms) {
-			s_qsb_at = 0;
-		}
-		const uint32_t half = s_qsb_10ms / 2;
-		const uint32_t off_mid = (s_qsb_at > half) ? s_qsb_at - half : half - s_qsb_at;
-		db += s_qsb_db - s_qsb_db * off_mid / half;
-	}
-	uint32_t gain = CPO_StationGain();
-	while (db--) {
-		gain = gain * 3652u >> 12;   // 1 dB down
-	}
-	CWSYNTH_SetVoice(CWSYNTH_STATION, gEeprom.CW_TONE_FREQUENCY * 10 + s_pitch, gain);
-}
-
-// A station comes on, answering your CQ or tail-ending, and calls with its call: once
-// on a POTA, SOTA or contest frequency, once or twice otherwise
-static void NewQso(void)
-{
-	NewStation();
 	s_op[0] = '\0';
 	s_greet[0] = '\0';
-	s_end[0] = '\0';
-	s_calls = 1;
 	s_prompted = false;
-	s_brief = false;
-	s_tail_10ms = 0;
+	s_drain_10ms = 0;
+}
 
-	SayStart();
-	if (!s_quick && Rnd(3) == 0) {
-		Say("DE");
+// A station's pitch and level, every tick: off zero beat, down from top by its
+// strength, and fading through its QSB, deepest halfway through each cycle
+static void UpdateVoice(CPO_QsoStation_t *st, uint32_t top)
+{
+	uint32_t db = st->level_db;
+
+	if (st->qsb_db) {
+		if (++st->qsb_at >= st->qsb_10ms) {
+			st->qsb_at = 0;
+		}
+		const uint32_t half = st->qsb_10ms / 2;
+		const uint32_t off_mid = (st->qsb_at > half) ? st->qsb_at - half : half - st->qsb_at;
+		db += st->qsb_db - st->qsb_db * off_mid / half;
 	}
-	SayCall(s_quick ? 1 : 1 + Rnd(2));
-	Reply(QSO_ANSWER);
-	s_state = QSO_ANSWER;
+	while (db--) {
+		top = top * 3652u >> 12;   // 1 dB down
+	}
+	CWSYNTH_SetVoice(VOICE(st), gEeprom.CW_TONE_FREQUENCY * 10 + st->pitch, top);
 }
 
 // Ends a QSO under way: logged if the station had signed, else failed
 static void Abandon(void)
 {
-	if (s_state == QSO_ANSWER || s_state == QSO_CONFIRM) {
-		Done(false, NOTICE_NOT_LOGGED);
-	} else if (s_state == QSO_DITDIT) {
-		Done(true, NOTICE_LOGGED);
+	if (s_st) {
+		const bool signed_off = s_state == QSO_DITDIT;
+		Done(signed_off, signed_off ? NOTICE_LOGGED : NOTICE_NOT_LOGGED);
 	}
 }
 
+// A CQ: the more you call, the more hear you. The callers still on frequency call
+// again, and newcomers join as the band's activity allows; with nobody, CQ again.
 static void HearCq(const CPO_QsoOver_t *o)
 {
 	const char *mine = o->de ? o->de : o->other;
@@ -800,91 +1053,135 @@ static void HearCq(const CPO_QsoOver_t *o)
 		return;
 	}
 
+	// Someone comes to an empty frequency as the band's activity allows (30% even when
+	// it's dead); how many is down to your rate
 	s_quick = o->special;
-	NewQso();
+	Busier(ACTIVITY_CQ);
+	if (PileCount() || Rnd(100) < 30u + s_activity * 7u / 10u) {
+		Fill();
+	}
+	Round(PILE_ALL, s_quick ? 1 : 0, false);
+	s_state = PileCount() ? QSO_ANSWER : QSO_IDLE;
 }
 
+// You came back to the station with its call: its report
 static void HearAnswer(const CPO_QsoOver_t *o)
 {
-	s_calls = 0;
 	SayStart();
-	if (o->best == 0) {
-		// you have its call right: its report
-		if (o->op) {
-			strcpy(s_op, o->op);
-		}
-		if (o->greet) {
-			strcpy(s_greet, o->greet);
-		}
-		strcpy(s_end, o->end ? o->end : "");
-		// Without your name or QTH it keeps to the exchange, contest and POTA style:
-		// a contest report for a contest report, and its cut numbers if you used them
-		s_brief = !o->op && !o->qth;
-		s_cut = o->cut || (!s_brief && Rnd(3) == 0);
-		if (s_brief && o->rst_599) {
-			strcpy(s_rst, "599");
-		}
-		if (s_brief) {
-			// e.g. BK R R TU 5NN 5NN ID ID BK, its state twice for bad conditions
-			char state[3];
-			if (Is(s_end, "BK")) {
-				SayEnd(s_end);
-			}
-			if (o->rst) {
-				SayOneOf("R R|R|");
-			}
-			Say(s_greet);
-			Say("TU");
-			SayRst();
-			if (State(state)) {
-				SayTwice(state);
-			}
+	// you have its call right: its report
+	if (o->op) {
+		strcpy(s_op, o->op);
+	}
+	if (o->greet) {
+		strcpy(s_greet, o->greet);
+	}
+	strcpy(s_end, o->end ? o->end : "");
+	// Without your name or QTH it keeps to the exchange, contest and POTA style:
+	// a contest report for a contest report, and its cut numbers if you used them
+	s_brief = !o->op && !o->qth;
+	s_cut = o->cut || (!s_brief && Rnd(3) == 0);
+	if (s_brief && o->rst_599) {
+		strcpy(s_rst, "599");
+	}
+	if (s_brief) {
+		// e.g. BK R R TU 5NN 5NN ID ID BK, its state twice for bad conditions
+		char state[3];
+		if (Is(s_end, "BK")) {
 			SayEnd(s_end);
-			Reply(QSO_CONFIRM);
-			return;
 		}
-		Say(s_my);
-		Say("DE");
-		Say(s_call);
 		if (o->rst) {
-			Say("R");
+			SayOneOf("R R|R|");
 		}
-		if (s_greet[0]) {
-			Say(s_greet);
-		} else {
-			SayOneOf("GM|GA|GE|");
-		}
-		if (s_op[0]) {
-			Say(s_op);
-		} else {
-			SayOneOf("OM|");
-		}
-		SayOneOf(o->rst ? "TNX FER CALL|TNX FER RPT|TU FER CALL" : "TNX FER CALL|TU FER CALL");
-		SayOneOf("=|");
-		const bool name_first = Rnd(2);
-		if (name_first) {
-			SayName();
-		}
+		Say(s_greet);
+		Say("TU");
 		SayRst();
-		SayQth(Rnd(2));
-		if (!name_first) {
-			SayName();
+		if (State(state)) {
+			SayTwice(state);
 		}
-		if (o->chat || s_talker) {
-			SayChat();
-		}
-		if (s_wpm + 5 < gEeprom.CW_KEY_WPM) {
-			Say("PSE QRS");   // you're too fast for it
-		}
-		SayOneOf("HW?|HW CPY?|=");
-		SayOver();
+		SayEnd(s_end);
 		Reply(QSO_CONFIRM);
 		return;
 	}
-	// Asked for, nothing it could take for its call, or a call one or two off:
-	// its call twice. Something further off: once, as if it heard someone else.
-	SayCall((o->best <= 2 || o->best == 0xFF || o->ask) ? 2 : 1);
-	Reply(QSO_ANSWER);
+	Say(s_my);
+	Say("DE");
+	Say(s_st->call);
+	if (o->rst) {
+		Say("R");
+	}
+	if (s_greet[0]) {
+		Say(s_greet);
+	} else {
+		SayOneOf("GM|GA|GE|");
+	}
+	if (s_op[0]) {
+		Say(s_op);
+	} else {
+		SayOneOf("OM|");
+	}
+	SayOneOf(o->rst ? "TNX FER CALL|TNX FER RPT|TU FER CALL" : "TNX FER CALL|TU FER CALL");
+	SayOneOf("=|");
+	const bool name_first = Rnd(2);
+	if (name_first) {
+		SayName();
+	}
+	SayRst();
+	SayQth(Rnd(2));
+	if (!name_first) {
+		SayName();
+	}
+	if (o->chat || s_st->talker) {
+		SayChat();
+	}
+	if (s_st->wpm + 5 < gEeprom.CW_KEY_WPM) {
+		Say("PSE QRS");   // you're too fast for it
+	}
+	SayOneOf("HW?|HW CPY?|=");
+	SayOver();
+	Reply(QSO_CONFIRM);
+}
+
+// The pile called you. Come back to one with its call and it sends its report while
+// the others stand by. Part of a call (K7?, XYZ?, 7XY), or one a character or two
+// off, and the callers it could be (the closest) send theirs twice. Asked for, or
+// nothing like a call, and they all call again; a call none of them has, once. A
+// caller sending over your over didn't hear it.
+static void HearPile(const CPO_QsoOver_t *o)
+{
+	uint8_t heard = 0, near = 0, closest = 0xFF;
+	CPO_QsoStation_t *st;
+
+	for (st = s_pile; st < s_pile + PILE_MAX; st++) {
+		if (st->on && !(s_missed & BIT(st))) {
+			heard |= BIT(st);
+			if (o->best[st - s_pile] < closest) {
+				closest = o->best[st - s_pile];
+			}
+		}
+	}
+	for (st = s_pile; st < s_pile + PILE_MAX; st++) {
+		if (!(heard & BIT(st))) {
+			continue;
+		}
+		const bool nearest = o->best[st - s_pile] == closest;
+		if (nearest && closest == 0) {
+			Pick(st);
+			Round(0, 1, false);   // the rest stand by, but a lid calls over it
+			HearAnswer(o);
+			return;
+		}
+		if ((nearest && closest <= 2) || (o->partial & BIT(st))) {
+			near |= BIT(st);
+		}
+	}
+	if (!heard) {
+		Notice(NOTICE_DOUBLED);
+		return;
+	}
+	Round(near ? near : heard, near ? 2 : (o->other && !o->ask) ? 1 : 0, near != 0);
+	if (!PileCount()) {
+		Notice(NOTICE_LEFT);
+		s_state = QSO_DONE;
+	}
 }
 
 static void HearConfirm(const CPO_QsoOver_t *o)
@@ -935,7 +1232,7 @@ static void HearConfirm(const CPO_QsoOver_t *o)
 	if (Rnd(2)) {
 		Say(s_my);
 		Say("DE");
-		Say(s_call);
+		Say(s_st->call);
 	}
 	Say("\x01");
 	SayOneOf("EE|E E|TU EE|EE");
@@ -949,14 +1246,16 @@ static void Hear(void)
 	Split();
 	Parse(&o);
 	if (o.qrs || o.qrq) {
-		// it changes speed and says it again
-		s_wpm = o.qrs ? ((s_wpm > 15) ? s_wpm - 5 : 10) : ((s_wpm < 40) ? s_wpm + 5 : 45);
+		// they change speed and say it again
+		for (CPO_QsoStation_t *st = s_pile; st < s_pile + PILE_MAX; st++) {
+			st->wpm = o.qrs ? ((st->wpm > 15) ? st->wpm - 5 : 10) : ((st->wpm < 40) ? st->wpm + 5 : 45);
+		}
 		o.ask = true;
 	}
 	if (o.cq) {
 		HearCq(&o);
 	} else if (s_state == QSO_ANSWER) {
-		HearAnswer(&o);
+		HearPile(&o);
 	} else if (s_state == QSO_CONFIRM) {
 		HearConfirm(&o);
 	} else if (s_state == QSO_DITDIT) {
@@ -983,11 +1282,13 @@ static uint32_t OverGapMs(void)
 
 static void Reset(void)
 {
-	CWSYNTH_Cancel(CWSYNTH_STATION);
+	for (CPO_QsoStation_t *st = s_pile; st < s_pile + PILE_MAX; st++) {
+		Leave(st);
+	}
+	s_st = NULL;
 	s_state = QSO_IDLE;
 	s_reply_due = false;
 	s_speaking = false;
-	s_tail_10ms = 0;
 	ClearOver();
 	CW_ClearTxDisplay();
 	gUpdateDisplay = true;
@@ -998,6 +1299,8 @@ void CPO_Qso_Enter(void)
 	gCW_CpoQsoLogged = 0;
 	gCW_CpoQsoFailed = 0;
 	s_notice_10ms = 0;
+	s_activity = ACTIVITY_START;
+	s_rate = 0;
 	Reset();
 }
 
@@ -1016,6 +1319,18 @@ void CPO_Qso_NextDifficulty(void)
 {
 	gEeprom.CW_QSO_DIFFICULTY = (gEeprom.CW_QSO_DIFFICULTY + 1) % CW_QSO_DIFFICULTIES;
 	Notice(NOTICE_DIFFICULTY);
+}
+
+void CPO_Qso_StepPile(bool up)
+{
+	const uint8_t n = gEeprom.CW_QSO_PILE;
+
+	if (up ? n >= CW_QSO_PILE_MAX : n <= 1) {
+		CW_ErrorBeep();
+		return;
+	}
+	gEeprom.CW_QSO_PILE = up ? n + 1 : n - 1;
+	Notice(NOTICE_PILE);
 }
 
 const char *CPO_Qso_DifficultyName(void)
@@ -1044,14 +1359,26 @@ static const char *ProsignWord(char ch)
 
 void CPO_Qso_OnChar(char ch, bool word_gap)
 {
+	// Callers about to call hold off while you send. One calling as you key stops and
+	// listens if it's QSK; otherwise it misses your over.
+	for (CPO_QsoStation_t *st = s_pile; st < s_pile + PILE_MAX; st++) {
+		st->call_10ms = 0;
+		if (st->on && st != s_st && CWSYNTH_IsSending(VOICE(st))) {
+			if (st->qsk) {
+				CWSYNTH_Cancel(VOICE(st));
+			} else {
+				s_missed |= BIT(st);
+			}
+		}
+	}
 	if (s_speaking) {
-		if (!s_qsk) {
+		if (!s_st->qsk) {
 			// it can't hear you over its own sending
 			Notice(NOTICE_DOUBLED);
 			return;
 		}
 		// A QSK station hears you between its own elements: it stops and listens
-		CWSYNTH_Cancel(CWSYNTH_STATION);
+		CWSYNTH_Cancel(VOICE(s_st));
 		s_speaking = false;
 		s_state = s_after;
 		if (s_state == QSO_DONE) {
@@ -1061,9 +1388,8 @@ void CPO_Qso_OnChar(char ch, bool word_gap)
 	if (ch == CW_CHAR_UNKNOWN) {
 		return;
 	}
-	// Keying keeps a tail-ender off; more after the pause that ended the over holds
-	// the station's reply, and it hears the whole over again
-	s_tail_10ms = 0;
+	// More keying after the pause that ended the over holds the station's reply, and
+	// it hears the whole over again
 	s_over_heard = false;
 	s_reply_due = false;
 
@@ -1085,15 +1411,52 @@ void CPO_Qso_OnChar(char ch, bool word_gap)
 
 void CPO_Qso_Tick10ms(void)
 {
+	const bool idle = CW_KeyerIsIdle();
+	bool busy = false;   // a station sending, or about to call
+
 	if (s_notice_10ms > 0 && --s_notice_10ms == 0) {
 		gUpdateDisplay = true;
 	}
-	if (s_state != QSO_IDLE && s_state != QSO_DONE) {
-		UpdateVoice();
+
+	// Each station's level comes down as the pile grows, so their calls sum clear of
+	// the DAC's limits. A call due goes out once you've stopped sending.
+	const uint32_t top = CPO_StationGain() * 2u / (PileCount() + 1u);
+	for (CPO_QsoStation_t *st = s_pile; st < s_pile + PILE_MAX; st++) {
+		if (!st->on) {
+			continue;
+		}
+		UpdateVoice(st, top);
+		if (st->call_10ms && idle && --st->call_10ms == 0) {
+			CWSYNTH_Send(VOICE(st), st->calling, st->wpm, st->eff);
+		}
+		busy |= st->call_10ms || CWSYNTH_IsSending(VOICE(st));
+	}
+
+	// Your rate fades, the band thins out while you're quiet, and callers waiting
+	// through your QSO with another lose patience
+	if (++s_rate_10ms >= 100) {
+		s_rate_10ms = 0;
+		s_rate -= (s_rate + RATE_QSO - 1) / RATE_QSO;
+	}
+	if (idle && !busy && !s_over_len && !s_reply_due) {
+		if (++s_quiet_10ms >= QUIET_10MS) {
+			s_quiet_10ms = 0;
+			s_activity -= (s_activity > 0);
+		}
+	} else {
+		s_quiet_10ms = 0;
+	}
+	if (s_st && ++s_drain_10ms >= DRAIN_10MS) {
+		s_drain_10ms = 0;
+		for (CPO_QsoStation_t *st = s_pile; st < s_pile + PILE_MAX; st++) {
+			if (st->on && st != s_st) {
+				Wait(st);
+			}
+		}
 	}
 
 	if (s_speaking) {
-		if (CWSYNTH_IsSending(CWSYNTH_STATION)) {
+		if (CWSYNTH_IsSending(VOICE(s_st))) {
 			return;
 		}
 		s_speaking = false;
@@ -1105,8 +1468,6 @@ void CPO_Qso_Tick10ms(void)
 		gUpdateDisplay = true;
 		return;
 	}
-
-	const bool idle = CW_KeyerIsIdle();
 
 	if (s_over_len && !s_over_heard && idle && millis_since(s_last_char_ms) >= OverGapMs()) {
 		s_over_heard = true;
@@ -1129,8 +1490,8 @@ void CPO_Qso_Tick10ms(void)
 		s_reply_due = false;
 		ClearOver();
 		CW_ClearTxDisplay();
-		CWSYNTH_Send(CWSYNTH_STATION, s_say, s_wpm, 0);
-		s_speaking = CWSYNTH_IsSending(CWSYNTH_STATION);
+		CWSYNTH_Send(VOICE(s_st), s_say, s_st->wpm, s_st->eff);
+		s_speaking = CWSYNTH_IsSending(VOICE(s_st));
 		if (!s_speaking) {
 			s_state = s_after;   // no synthesizer: on as if it had sent
 		}
@@ -1138,23 +1499,22 @@ void CPO_Qso_Tick10ms(void)
 		return;
 	}
 
-	// Silence while it waits on you
-	if (!idle || s_over_len) {
+	// Silence while they wait on you. After a QSO the pile calls; unanswered, it calls
+	// again, as long as its patience holds.
+	if (!idle || s_over_len || busy) {
 		s_wait_10ms = 0;
 		return;
 	}
 	s_wait_10ms++;
-	if (s_state == QSO_DONE && s_tail_10ms > 0 && --s_tail_10ms == 0) {
-		NewQso();
-		gUpdateDisplay = true;
-	} else if (s_state == QSO_ANSWER && s_wait_10ms >= ANSWER_WAIT_10MS) {
-		if (++s_calls > CALLS_MAX) {
-			Done(false, NOTICE_LEFT);
-		} else {
-			SayStart();
-			SayCall(1 + Rnd(2));
-			Reply(QSO_ANSWER);
+	if ((s_state == QSO_DONE && PileCount() && s_wait_10ms >= s_tail_10ms)
+		|| (s_state == QSO_ANSWER && s_wait_10ms >= ANSWER_WAIT_10MS)) {
+		const bool after_qso = s_state == QSO_DONE;
+		Round(PILE_ALL, (after_qso && s_quick) ? 1 : 0, false);
+		s_state = PileCount() ? QSO_ANSWER : QSO_DONE;
+		if (!after_qso && s_state == QSO_DONE) {
+			Notice(NOTICE_LEFT);
 		}
+		gUpdateDisplay = true;
 		s_wait_10ms = 0;
 	} else if (s_state == QSO_CONFIRM && s_wait_10ms >= CONFIRM_WAIT_10MS) {
 		if (s_prompted) {
@@ -1205,8 +1565,11 @@ bool CPO_Qso_GetNotice(char out[CPO_QSO_LINE_SIZE])
 	case NOTICE_NOT_LOGGED:
 		strcpy(out, "Not logged");
 		break;
+	case NOTICE_PILE:
+		sprintf_(out, "Up to %u caller%s", gEeprom.CW_QSO_PILE, gEeprom.CW_QSO_PILE > 1 ? "s" : "");
+		break;
 	default:
-		strcpy(out, "Station left");
+		strcpy(out, "No callers left");
 		break;
 	}
 	return true;

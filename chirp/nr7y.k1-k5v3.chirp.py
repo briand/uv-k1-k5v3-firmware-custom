@@ -886,8 +886,10 @@ _NR7Y_CW_FARNSWORTH_OPTS = ["OFF"] + [
     "%d WPM" % w for w in range(_NR7Y_CW_FARNSWORTH_WPM_MIN,
                                 _NR7Y_CW_FARNSWORTH_WPM_MAX + 1)]
 
-# Proper roger dah length in dits (full byte at _NR7Y_CW_SETTINGS_ADDR+5),
-# mirrors CW_ROGER_DAH_DITS_* in App/settings.h
+# Proper roger dah length in dits (bits 0-4 of _NR7Y_CW_SETTINGS_ADDR+5),
+# mirrors CW_ROGER_DAH_DITS_* in App/settings.h. Bits 5-6 hold the QSO drill's
+# pile-up size: (size - 1) XOR (default - 1), so zeros read as the default.
+# Bit 7 set (0xFF, unset) is the defaults for both.
 _NR7Y_CW_ROGER_DITS_MIN = 3
 _NR7Y_CW_ROGER_DITS_MAX = 20
 _NR7Y_CW_ROGER_DITS_DEFAULT = 9
@@ -905,6 +907,8 @@ _NR7Y_CW_HANG_10MS_DEFAULT = 30
 _NR7Y_CW_NOISE_LEVEL_MAX = 15
 _NR7Y_CW_NOISE_LEVEL_DEFAULT = 15
 _NR7Y_CW_QSO_DIFFICULTIES = ["Easy", "Medium", "Hard"]
+_NR7Y_CW_QSO_PILE_MAX = 4      # mirrors CW_QSO_PILE_* in App/settings.h
+_NR7Y_CW_QSO_PILE_DEFAULT = 3
 
 # Extended key actions for NR7Y firmware with CW modulator, mirroring
 # App/settings.h enum ACTION_OPT_t.
@@ -4289,6 +4293,17 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
         except Exception as e:
             LOG.error("CW QSO difficulty: %s", e)
 
+        try:
+            rs_qp = RadioSetting("cw_qso_pile", "QSO Drill Pile-up",
+                                 RadioSettingValueInteger(1, _NR7Y_CW_QSO_PILE_MAX,
+                                                          self._get_cw_qso_pile()))
+            rs_qp.set_doc("The most stations that call you at once in the QSO drill, "
+                          "1-4; how many come depends on how active you are (keys 1 "
+                          "and 7 in the drill)")
+            cw.append(rs_qp)
+        except Exception as e:
+            LOG.error("CW QSO pile-up: %s", e)
+
         # CW Macros (4 messages)
         macros = RadioSettingGroup("cw_macros", "CW Macros")
         for i in range(1, 5):
@@ -4408,6 +4423,8 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
             elif name == "cw_qso_difficulty":
                 self._set_cw_qso_difficulty(
                     _NR7Y_CW_QSO_DIFFICULTIES.index(str(element.value)))
+            elif name == "cw_qso_pile":
+                self._set_cw_qso_pile(int(element.value))
             elif name.startswith("cw_msg"):
                 # "cw_msg1" → idx 1 … "cw_msg4" → idx 4
                 self._set_cw_msg(int(name[6:]), str(element.value))
@@ -4578,18 +4595,39 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
     def _set_cw_repeat_delay(self, delay):
         self._mmap_set(_NR7Y_CW_SETTINGS_ADDR + 3, max(0, min(127, int(delay))) & 0x7F)
 
-    # -- Proper roger dah length (full byte at CW byte 5) --
+    # -- Proper roger dah length (CW byte 5 bits 0-4) and the QSO drill's
+    #    pile-up size (bits 5-6) --
 
     def _get_cw_roger_dits(self):
         """Return proper roger dah length in dits (3-20)."""
         b = self._mmap_byte(_NR7Y_CW_SETTINGS_ADDR + 5)
-        if not _NR7Y_CW_ROGER_DITS_MIN <= b <= _NR7Y_CW_ROGER_DITS_MAX:
+        if b >= 0x80 or not _NR7Y_CW_ROGER_DITS_MIN <= (b & 0x1F) <= _NR7Y_CW_ROGER_DITS_MAX:
             return _NR7Y_CW_ROGER_DITS_DEFAULT  # blank/invalid EEPROM
-        return b
+        return b & 0x1F
+
+    def _cw_byte5_pile_bits(self):
+        """Return CW byte 5's pile-up bits in place, 0 while the byte is unset."""
+        b = self._mmap_byte(_NR7Y_CW_SETTINGS_ADDR + 5)
+        return 0 if b >= 0x80 else b & 0x60
 
     def _set_cw_roger_dits(self, dits):
         dits = max(_NR7Y_CW_ROGER_DITS_MIN, min(_NR7Y_CW_ROGER_DITS_MAX, int(dits)))
-        self._mmap_set(_NR7Y_CW_SETTINGS_ADDR + 5, dits)
+        self._mmap_set(_NR7Y_CW_SETTINGS_ADDR + 5, dits | self._cw_byte5_pile_bits())
+
+    def _get_cw_qso_pile(self):
+        """Return the most callers at once in the QSO drill (1-4)."""
+        code = self._cw_byte5_pile_bits() >> 5
+        return ((code ^ (_NR7Y_CW_QSO_PILE_DEFAULT - 1)) & 0x03) + 1
+
+    def _set_cw_qso_pile(self, size):
+        size = max(1, min(_NR7Y_CW_QSO_PILE_MAX, int(size)))
+        b = self._mmap_byte(_NR7Y_CW_SETTINGS_ADDR + 5)
+        if b >= 0x80:
+            if size == _NR7Y_CW_QSO_PILE_DEFAULT:
+                return  # an unset byte left at the defaults stays unset
+            b = _NR7Y_CW_ROGER_DITS_DEFAULT
+        code = ((size - 1) ^ (_NR7Y_CW_QSO_PILE_DEFAULT - 1)) & 0x03
+        self._mmap_set(_NR7Y_CW_SETTINGS_ADDR + 5, (b & 0x1F) | (code << 5))
 
     # -- Break-in hang time (full byte at CW byte 7, 10 ms units) --
 

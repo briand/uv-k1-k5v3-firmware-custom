@@ -120,6 +120,10 @@ enum {
 	CW_QSO_DIFFICULTIES,
 };
 
+// QSO drill pile-up: the most stations that call you at once, one per synthesizer voice
+#define CW_QSO_PILE_MAX     4
+#define CW_QSO_PILE_DEFAULT 3
+
 #endif
 
 enum TxLockModes_t {
@@ -452,6 +456,7 @@ typedef struct {
 	bool                  CW_PRACTICE_NOISE;    // code practice plays live receive audio under the sidetone
 	uint8_t               CW_PRACTICE_NOISE_LEVEL;  // its AF DAC gain, 0-15
 	uint8_t               CW_QSO_DIFFICULTY;    // QSO drill, CW_QSO_EASY to CW_QSO_HARD
+	uint8_t               CW_QSO_PILE;          // QSO drill, most callers at once, 1 to CW_QSO_PILE_MAX
 #endif
 
 } EEPROM_Config_t;
