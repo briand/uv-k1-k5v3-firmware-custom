@@ -119,11 +119,16 @@ typedef enum CW_IambicMode_t CW_IambicMode_t;
 #define CW_KEY_WPM_DEFAULT        18
 
 // Number of CW settings bytes (EEPROM_Config_t CW_SETTINGS)
-#define CW_SETTINGS_SIZE          11
+#define CW_SETTINGS_SIZE          13
 
 // Copy practice effective speed (Farnsworth): the slowest the gaps between
 // characters can stretch to. It always stays below the keyer speed.
 #define CW_FARNSWORTH_WPM_MIN     5
+
+// Code practice band noise level: the BK4819's AF DAC gain for receive audio,
+// about 2 dB a step, shown as 1-16
+#define CW_PRACTICE_NOISE_LEVEL_MAX     15
+#define CW_PRACTICE_NOISE_LEVEL_DEFAULT 15
 
 #endif
 
@@ -449,6 +454,8 @@ typedef struct {
 			uint8_t CW_HANG_10MS;             // break-in hang time in 10 ms units
 			uint8_t CW_FARNSWORTH_WPM;        // copy practice effective speed, 0 = keyer spacing
 			uint8_t CW_FARNSWORTH_AUTO;       // copy practice narrows and widens the spacing on its own
+			uint8_t CW_PRACTICE_NOISE;        // code practice plays live receive audio under the sidetone
+			uint8_t CW_PRACTICE_NOISE_LEVEL;  // its AF DAC gain, 0-15
 		};
 		uint8_t CW_SETTINGS[CW_SETTINGS_SIZE];
 	};
@@ -538,7 +545,7 @@ void SETTINGS_UpdateChannel(uint16_t channel, const VFO_Info_t *pVFO, bool keep)
 //   +4  EEPROM schema (EEPROM_SCHEMA_*)
 //   +5  reserved (3)
 //   +8  CW settings, CW_SETTINGS_SIZE bytes (v1.x packed them into 8 at 0xA140)
-//   +19 reserved for new gEeprom values (45)
+//   +21 reserved for new gEeprom values (43)
 #define CW_BLOCK_ADDR          0x00A200
 #define CW_BLOCK_SIZE          0x40
 #define CW_BLOCK_HDR_SIZE      8

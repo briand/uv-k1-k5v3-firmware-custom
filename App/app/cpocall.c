@@ -18,6 +18,7 @@
 
 #include <string.h>
 
+#include "app/cpo.h"
 #include "app/cpocall.h"
 #include "app/cwkeyer.h"
 #include "app/cwmacro.h"
@@ -26,6 +27,9 @@
 #include "external/printf/printf.h"
 #include "misc.h"
 #include "settings.h"
+#ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
+#include "app/cwsynth.h"
+#endif
 #ifdef ENABLE_FLASHLIGHT
 #include "driver/gpio.h"
 #include "py32f071_ll_gpio.h"
@@ -149,8 +153,34 @@ static void NewCall(void)
 	*p = '\0';
 }
 
+// Under band noise the drill's station sends on its own DAC voice, apart from the
+// sidetone, so the operator can key over it; otherwise the keyer plays it
+static void Play(const char *text, uint8_t eff_wpm)
+{
+#ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
+	if (CPO_NoiseOn()) {
+		CWSYNTH_Send(CWSYNTH_STATION, text, gEeprom.CW_KEY_WPM, eff_wpm);
+		return;
+	}
+#endif
+	CW_StartTextPlayback(text, false, eff_wpm);
+}
+
+static bool Playing(void)
+{
+#ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
+	if (CWSYNTH_IsSending(CWSYNTH_STATION)) {
+		return true;
+	}
+#endif
+	return gCW_PlaybackActive;
+}
+
 static void StopPlayback(void)
 {
+#ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
+	CWSYNTH_Cancel(CWSYNTH_STATION);
+#endif
 	if (!gCW_PlaybackActive) {
 		return;
 	}
@@ -158,6 +188,9 @@ static void StopPlayback(void)
 	// on when it lands mid-element
 	CW_StopPlayback();
 	BK4819_SetScrambleFrequencyControlWord(0);
+#ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
+	CPO_NoiseSidetone(false, false);   // the same for a sidetone on the DAC
+#endif
 #ifdef ENABLE_FLASHLIGHT
 	GPIO_ResetOutputPin(GPIO_PIN_FLASHLIGHT);
 #endif
@@ -230,7 +263,7 @@ static void Begin(CPO_CallStep_t step, bool play)
 	s_pos = 0;
 	CW_ClearTxDisplay();
 	if (play && CPO_Call_IsCopyMode()) {
-		CW_StartTextPlayback(gCW_CpoCall, false, CPO_Call_EffectiveWPM());
+		Play(gCW_CpoCall, CPO_Call_EffectiveWPM());
 	}
 	gUpdateDisplay = true;
 }
@@ -358,7 +391,7 @@ void CPO_Call_Tick10ms(void)
 
 	// Steps wait for the operator to stop keying and for playback to finish, so
 	// the drill never plays over them or scores the tail of a missed word
-	if (s_step == CPO_STEP_NONE || gCW_PlaybackActive || !CW_KeyerIsIdle()) {
+	if (s_step == CPO_STEP_NONE || Playing() || !CW_KeyerIsIdle()) {
 		return;
 	}
 	s_paused = true;
@@ -367,7 +400,7 @@ void CPO_Call_Tick10ms(void)
 		return;
 	}
 	if (s_step == CPO_STEP_ACK) {
-		CW_StartTextPlayback("EE", false, 0);
+		Play("EE", 0);
 		Schedule(CPO_STEP_NEXT, CPO_CALL_RESULT_10MS);
 		return;
 	}

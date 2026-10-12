@@ -38,7 +38,8 @@ static uint16_t s_buf[DACAUDIO_HALF_LEN * 2];
 static DACAUDIO_Fill_t s_fill;
 static bool s_running = false;
 static bool s_inited = false;
-static uint32_t s_rate_hz = 8000;
+static uint32_t s_rate_hz = 32000;
+static volatile uint32_t s_next_time = 0;     // sample time of the next fill's first sample
 static volatile uint32_t s_busy_cycles = 0;   // in fills since the last TakeLoad
 static volatile uint32_t s_peak_cycles = 0;   // longest single fill since then
 static uint32_t s_load_since_ms = 0;
@@ -86,26 +87,22 @@ static void Init(void)
 	NVIC_EnableIRQ(DMA1_Channel2_3_IRQn);
 }
 
-void DACAUDIO_SetRate(uint32_t rate_hz)
+void DACAUDIO_Start(DACAUDIO_Fill_t fill, uint32_t rate_hz)
 {
+	if (s_running) {
+		return;
+	}
 	if (!s_inited) {
 		Init();
 		s_inited = true;
 	}
 	LL_TIM_SetAutoReload(TIMx, SystemCoreClock / 4 / rate_hz - 1);
 	s_rate_hz = rate_hz;
-}
-
-void DACAUDIO_Start(DACAUDIO_Fill_t fill, uint32_t rate_hz)
-{
-	if (s_running) {
-		return;
-	}
-	DACAUDIO_SetRate(rate_hz);
 
 	s_fill = fill;
-	fill(s_buf, DACAUDIO_HALF_LEN);
+	fill(s_buf, 0);
 	fill(s_buf + DACAUDIO_HALF_LEN, DACAUDIO_HALF_LEN);
+	s_next_time = 2 * DACAUDIO_HALF_LEN;
 	s_busy_cycles = 0;
 	s_peak_cycles = 0;
 	s_load_since_ms = millis();
@@ -143,6 +140,32 @@ bool DACAUDIO_IsRunning(void)
 	return s_running;
 }
 
+// The fill renders the half that has just played, to play after the other half, so
+// something placed at the same offset into the next fill's block as now is into
+// the half playing plays two half buffers from now
+uint32_t DACAUDIO_EventTime(void)
+{
+	NVIC_DisableIRQ(DMA1_Channel2_3_IRQn);
+	const uint32_t left = LL_DMA_GetDataLength(DMA1, DMA_CHANNEL);
+	uint32_t next = s_next_time;
+	if (LL_DMA_IsActiveFlag_HT3(DMA1) || LL_DMA_IsActiveFlag_TC3(DMA1)) {
+		next += DACAUDIO_HALF_LEN;   // a fill is due, and its block comes before ours
+	}
+	NVIC_EnableIRQ(DMA1_Channel2_3_IRQn);
+
+	return next + (2 * DACAUDIO_HALF_LEN - left) % DACAUDIO_HALF_LEN;
+}
+
+void DACAUDIO_Lock(void)
+{
+	NVIC_DisableIRQ(DMA1_Channel2_3_IRQn);
+}
+
+void DACAUDIO_Unlock(void)
+{
+	NVIC_EnableIRQ(DMA1_Channel2_3_IRQn);
+}
+
 void DACAUDIO_TakeLoad(uint16_t *avg_permille, uint16_t *peak_permille)
 {
 	const uint32_t now = millis();
@@ -168,7 +191,8 @@ void DACAUDIO_TakeLoad(uint16_t *avg_permille, uint16_t *peak_permille)
 static void TimedFill(uint16_t *half)
 {
 	const uint32_t t0 = SysTick->VAL;
-	s_fill(half, DACAUDIO_HALF_LEN);
+	s_fill(half, s_next_time);
+	s_next_time += DACAUDIO_HALF_LEN;
 	const uint32_t t1 = SysTick->VAL;
 	const uint32_t cycles = (t0 >= t1) ? t0 - t1 : t0 + SysTick->LOAD + 1 - t1;
 

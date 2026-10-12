@@ -1001,6 +1001,11 @@ _NR7Y_CW_HANG_10MS_MIN = 1
 _NR7Y_CW_HANG_10MS_MAX = 200
 _NR7Y_CW_HANG_10MS_DEFAULT = 30
 
+# Code practice band noise level, shown 1-16; mirrors CW_PRACTICE_NOISE_LEVEL_*
+# in App/settings.h
+_NR7Y_CW_NOISE_LEVEL_MAX = 15
+_NR7Y_CW_NOISE_LEVEL_DEFAULT = 15
+
 # CW settings, one byte each from _NR7Y_CW_SETTINGS_ADDR: name -> (offset, min,
 # max, default), the same as s_cw_settings_limits in App/settings.c. A byte out
 # of range reads as the default.
@@ -1018,8 +1023,10 @@ _NR7Y_CW_FIELDS = {
                         _NR7Y_CW_HANG_10MS_DEFAULT),
     "farnsworth_wpm":  (9, 0, _NR7Y_CW_FARNSWORTH_WPM_MAX, 0),
     "farnsworth_auto": (10, 0, 1, 0),
+    "noise":           (11, 0, 1, 0),
+    "noise_level":     (12, 0, _NR7Y_CW_NOISE_LEVEL_MAX, _NR7Y_CW_NOISE_LEVEL_DEFAULT),
 }
-_NR7Y_CW_SETTINGS_SIZE = 11
+_NR7Y_CW_SETTINGS_SIZE = 13
 
 
 def _nr7y_unpack_v1_cw_settings(old):
@@ -4392,6 +4399,30 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
         except Exception as e:
             LOG.error("CW Farnsworth auto: %s", e)
 
+        # Code practice band noise
+        try:
+            noise_opts = ["OFF", "ON"]
+            rs_pn = RadioSetting("cw_practice_noise", "Code Practice Band Noise",
+                                 RadioSettingValueList(noise_opts,
+                                                       noise_opts[self._cw_get("noise")]))
+            rs_pn.set_doc("Play live receive audio from the VFO's frequency under the "
+                          "code practice sidetone and drills, as band noise. Tune a "
+                          "quiet frequency first. Key 9 in practice turns it on and off.")
+            cw.append(rs_pn)
+        except Exception as e:
+            LOG.error("CW practice noise: %s", e)
+
+        try:
+            rs_pl = RadioSetting("cw_practice_noise_level", "Code Practice Noise Level",
+                                 RadioSettingValueInteger(
+                                     1, _NR7Y_CW_NOISE_LEVEL_MAX + 1,
+                                     self._cw_get("noise_level") + 1))
+            rs_pl.set_doc("How loud the band noise plays, 1-16, about 2 dB a step "
+                          "(keys 3 and 6 in practice)")
+            cw.append(rs_pl)
+        except Exception as e:
+            LOG.error("CW practice noise level: %s", e)
+
         # CW Macros (4 messages)
         macros = RadioSettingGroup("cw_macros", "CW Macros")
         for i in range(1, 5):
@@ -4500,6 +4531,10 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
                              0 if idx == 0 else _NR7Y_CW_FARNSWORTH_WPM_MIN + idx - 1)
             elif name == "cw_farnsworth_auto":
                 self._cw_set("farnsworth_auto", ["OFF", "ON"].index(str(element.value)))
+            elif name == "cw_practice_noise":
+                self._cw_set("noise", ["OFF", "ON"].index(str(element.value)))
+            elif name == "cw_practice_noise_level":
+                self._cw_set("noise_level", int(element.value) - 1)
             elif name.startswith("cw_msg"):
                 # "cw_msg1" → idx 1 … "cw_msg4" → idx 4
                 self._set_cw_msg(int(name[6:]), str(element.value))

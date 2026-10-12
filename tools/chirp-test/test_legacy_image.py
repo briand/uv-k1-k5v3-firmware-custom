@@ -106,7 +106,9 @@ check(all(r.get_memory(ch + 1).empty for ch in range(448, 454)),
 check(raw(r, 448 * 16, 6 * 16) == b'\xFF' * 96, "legacy macro bytes erased")
 check(raw(r, 0x8000 + 448 * 2, 2) == b'\xFF\xFF', "attributes marked deleted")
 check(raw(r, 455 * 16, 16) == CHANNEL_455, "channel 456 (block 3) untouched")
-check(raw(r, 0xA208, 11) == CW_SETTINGS_V2, "CW settings unpacked to one byte each")
+check(raw(r, 0xA208, m._NR7Y_CW_SETTINGS_SIZE) ==
+      CW_SETTINGS_V2.ljust(m._NR7Y_CW_SETTINGS_SIZE, b'\xFF'),
+      "CW settings unpacked to one byte each, settings v1.x lacked left unset")
 check(r._cw_get("sidetone") == 11, "sidetone code 2 is level 11")
 check(raw(r, 0xA140, 8) == b'\xFF' * 8, "legacy CW settings cleared")
 check(raw(r, 0xA170, 1) == b'\x02', "legacy schema byte left alone")
