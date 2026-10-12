@@ -189,9 +189,12 @@ enable_feature(ENABLE_FEAT_NR7Y_CPO
     app/cpocall.c
     ui/cpo.c
 )
-# QSO simulator bench spike: a keyed tone on the MCU DAC over receive audio (requires CPO)
-enable_feature(ENABLE_FEAT_NR7Y_DAC_SPIKE
-    app/cpodac.c
+# Code practice band noise: live receive audio under tones from the MCU DAC (requires CPO)
+if(ENABLE_FEAT_NR7Y_CPO_SYNTH AND NOT ENABLE_FEAT_NR7Y_CPO)
+    message(FATAL_ERROR "ENABLE_FEAT_NR7Y_CPO_SYNTH needs ENABLE_FEAT_NR7Y_CPO")
+endif()
+enable_feature(ENABLE_FEAT_NR7Y_CPO_SYNTH
+    app/cwsynth.c
     driver/dacaudio.c
 )
 # Millis support

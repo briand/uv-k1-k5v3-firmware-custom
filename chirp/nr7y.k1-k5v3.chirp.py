@@ -898,6 +898,13 @@ _NR7Y_CW_HANG_10MS_MIN = 1
 _NR7Y_CW_HANG_10MS_MAX = 200
 _NR7Y_CW_HANG_10MS_DEFAULT = 30
 
+# Code practice band noise (CW byte 6): level in bits 0-3 (shown 1-16), on in
+# bit 4, and valid only with bits 5-7 clear, since pre-1.0 betas left an ADC byte
+# there. Unset (0xFF) is off at the top level. Mirrors
+# CW_PRACTICE_NOISE_LEVEL_* in App/settings.h.
+_NR7Y_CW_NOISE_LEVEL_MAX = 15
+_NR7Y_CW_NOISE_LEVEL_DEFAULT = 15
+
 # Extended key actions for NR7Y firmware with CW modulator, mirroring
 # App/settings.h enum ACTION_OPT_t.
 #
@@ -4244,6 +4251,30 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
         except Exception as e:
             LOG.error("CW Farnsworth auto: %s", e)
 
+        # Code practice band noise
+        try:
+            noise_opts = ["OFF", "ON"]
+            rs_pn = RadioSetting("cw_practice_noise", "Code Practice Band Noise",
+                                 RadioSettingValueList(noise_opts,
+                                                       noise_opts[self._get_cw_practice_noise()]))
+            rs_pn.set_doc("Play live receive audio from the VFO's frequency under the "
+                          "code practice sidetone and drills, as band noise. Tune a "
+                          "quiet frequency first. Key 9 in practice turns it on and off.")
+            cw.append(rs_pn)
+        except Exception as e:
+            LOG.error("CW practice noise: %s", e)
+
+        try:
+            rs_pl = RadioSetting("cw_practice_noise_level", "Code Practice Noise Level",
+                                 RadioSettingValueInteger(
+                                     1, _NR7Y_CW_NOISE_LEVEL_MAX + 1,
+                                     self._get_cw_practice_noise_level() + 1))
+            rs_pl.set_doc("How loud the band noise plays, 1-16, about 2 dB a step "
+                          "(keys 3 and 6 in practice)")
+            cw.append(rs_pl)
+        except Exception as e:
+            LOG.error("CW practice noise level: %s", e)
+
         # CW Macros (4 messages)
         macros = RadioSettingGroup("cw_macros", "CW Macros")
         for i in range(1, 5):
@@ -4356,6 +4387,10 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
                     _NR7Y_CW_FARNSWORTH_OPTS.index(str(element.value)))
             elif name == "cw_farnsworth_auto":
                 self._set_cw_farnsworth_auto(["OFF", "ON"].index(str(element.value)))
+            elif name == "cw_practice_noise":
+                self._set_cw_practice_noise(["OFF", "ON"].index(str(element.value)))
+            elif name == "cw_practice_noise_level":
+                self._set_cw_practice_noise_level(int(element.value) - 1)
             elif name.startswith("cw_msg"):
                 # "cw_msg1" → idx 1 … "cw_msg4" → idx 4
                 self._set_cw_msg(int(name[6:]), str(element.value))
@@ -4551,6 +4586,43 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
     def _set_cw_hang_ms(self, ms):
         units = max(_NR7Y_CW_HANG_10MS_MIN, min(_NR7Y_CW_HANG_10MS_MAX, int(ms) // 10))
         self._mmap_set(_NR7Y_CW_SETTINGS_ADDR + 7, units)
+
+    # -- Code practice band noise (CW byte 6: level bits 0-3, on bit 4) --
+    # An unset byte left at the defaults stays unset, as the firmware reads it the
+    # same way.
+
+    def _cw_byte6(self):
+        """Return CW byte 6, or None while it is unset or invalid."""
+        b = self._mmap_byte(_NR7Y_CW_SETTINGS_ADDR + 6)
+        return b if (b & 0xE0) == 0 else None
+
+    def _get_cw_practice_noise(self):
+        """Return 1=ON, 0=OFF."""
+        b = self._cw_byte6()
+        return 0 if b is None else (b >> 4) & 0x01
+
+    def _get_cw_practice_noise_level(self):
+        """Return the level 0-15, which CHIRP shows as 1-16."""
+        b = self._cw_byte6()
+        return _NR7Y_CW_NOISE_LEVEL_DEFAULT if b is None else b & 0x0F
+
+    def _set_cw_practice_noise(self, enable):
+        b = self._cw_byte6()
+        if b is None:
+            if not enable:
+                return
+            b = _NR7Y_CW_NOISE_LEVEL_DEFAULT
+        self._mmap_set(_NR7Y_CW_SETTINGS_ADDR + 6,
+                       (b & 0x0F) | ((1 if enable else 0) << 4))
+
+    def _set_cw_practice_noise_level(self, level):
+        level = max(0, min(_NR7Y_CW_NOISE_LEVEL_MAX, int(level)))
+        b = self._cw_byte6()
+        if b is None:
+            if level == _NR7Y_CW_NOISE_LEVEL_DEFAULT:
+                return
+            b = 0
+        self._mmap_set(_NR7Y_CW_SETTINGS_ADDR + 6, (b & 0x10) | level)
 
     # ------------------------------------------------------------------ CW macro read/write
 

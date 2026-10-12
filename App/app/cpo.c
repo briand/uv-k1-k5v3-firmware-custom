@@ -16,10 +16,13 @@
 
 // Code practice (CPO) app skeleton
 
+#include <string.h>
+
 #include "app/cpo.h"
 #include "app/cpocall.h"
-#ifdef ENABLE_FEAT_NR7Y_DAC_SPIKE
-#include "app/cpodac.h"
+#ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
+#include "app/cwsynth.h"
+#include "external/printf/printf.h"
 #endif
 #include "audio.h"
 #include "driver/backlight.h"
@@ -47,9 +50,106 @@ static bool s_needs_redraw = false;
 static uint8_t s_entry_wpm;
 static uint8_t s_entry_farnsworth_wpm;
 static bool s_entry_farnsworth_auto;
+static bool s_entry_noise;
+static uint8_t s_entry_noise_level;
 static bool s_flashlight_sending = false;
 #ifdef ENABLE_CW_MODULATOR
 static ModulationMode_t s_saved_modulation = MODULATION_CW;
+#endif
+
+#ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
+// How long each line of the band noise hint stays up
+#define CPO_NOISE_HINT_10MS 200
+
+// Sidetone level to DAC gain: as loud as the BK4819's sidetone at the same level up
+// to where the DAC tops out, about level 9 on a UV-K1, and the DAC's top above that
+static const uint16_t SIDETONE_DAC_GAIN[CW_SIDETONE_LEVEL_MAX + 1] = {
+	0, 12, 23, 46, 92, 183, 365, 728, 1453,
+	CWSYNTH_GAIN_MAX, CWSYNTH_GAIN_MAX, CWSYNTH_GAIN_MAX, CWSYNTH_GAIN_MAX,
+	CWSYNTH_GAIN_MAX, CWSYNTH_GAIN_MAX, CWSYNTH_GAIN_MAX,
+};
+
+static bool s_noise = false;    // the receiver on AF, practice tones on the DAC
+static uint8_t s_hint = 0;      // which line of the hint is up
+static uint8_t s_hint_10ms = 0;
+
+static uint16_t SidetoneDacGain(void)
+{
+	return SIDETONE_DAC_GAIN[MIN(gEeprom.CW_SIDETONE_LEVEL, CW_SIDETONE_LEVEL_MAX)];
+}
+
+// The drill's station follows the sidetone pitch and level, which the CW menu sets
+static void SetStationVoice(void)
+{
+	CWSYNTH_SetVoice(CWSYNTH_STATION, gEeprom.CW_TONE_FREQUENCY * 10, SidetoneDacGain());
+}
+
+static void NoiseStart(void)
+{
+	// The receiver back on AF on the VFO's frequency, through the CW filter. The
+	// squelch stays open: practice doesn't service the BK4819's interrupts.
+	RADIO_SetModulation(MODULATION_CW);
+	BK4819_SetFilterBandwidth(RADIO_ResolveFilter(gTxVfo), true);
+	BK4819_SetAfDacGain(gEeprom.CW_PRACTICE_NOISE_LEVEL);
+	CWSYNTH_Start();
+	SetStationVoice();
+	s_noise = true;
+	s_hint = 0;
+	s_hint_10ms = 0;
+}
+
+static void NoiseStop(void)
+{
+	s_noise = false;
+	CWSYNTH_Stop();
+	// Practice's quiet state, as CPO_Enter leaves it
+	BK4819_SetAF(BK4819_AF_ALAM);
+	BK4819_SetScrambleFrequencyControlWord(0);
+}
+
+static void StepNoiseLevel(bool louder)
+{
+	uint8_t level = gEeprom.CW_PRACTICE_NOISE_LEVEL;
+
+	if (!s_noise) {
+		return;
+	}
+	if (louder ? level >= CW_PRACTICE_NOISE_LEVEL_MAX : level == 0) {
+		CW_ErrorBeep();
+		return;
+	}
+	level = louder ? level + 1 : level - 1;
+	gEeprom.CW_PRACTICE_NOISE_LEVEL = level;
+	BK4819_SetAfDacGain(level);
+	s_hint = 0;   // show the level
+	s_hint_10ms = 0;
+	gUpdateDisplay = true;
+}
+
+bool CPO_NoiseOn(void)
+{
+	return s_noise;
+}
+
+void CPO_NoiseSidetone(bool down, bool cue)
+{
+	if (down) {
+		CWSYNTH_SetVoice(CWSYNTH_SIDETONE, cue ? CW_ERROR_TONE_HZ : gEeprom.CW_TONE_FREQUENCY * 10,
+			SidetoneDacGain());
+	}
+	CWSYNTH_Key(CWSYNTH_SIDETONE, down);
+}
+
+void CPO_GetNoiseLine(char out[CPO_NOISE_LINE_SIZE])
+{
+	if (!s_noise) {
+		strcpy(out, "9 band noise");
+	} else if (s_hint == 0) {
+		sprintf_(out, "Band noise %u", gEeprom.CW_PRACTICE_NOISE_LEVEL + 1);
+	} else {
+		strcpy(out, "3/6 level  9 off");
+	}
+}
 #endif
 
 void CPO_Enter(void)
@@ -79,6 +179,8 @@ void CPO_Enter(void)
 	s_entry_wpm = gEeprom.CW_KEY_WPM;
 	s_entry_farnsworth_wpm = gEeprom.CW_FARNSWORTH_WPM;
 	s_entry_farnsworth_auto = gEeprom.CW_FARNSWORTH_AUTO;
+	s_entry_noise = gEeprom.CW_PRACTICE_NOISE;
+	s_entry_noise_level = gEeprom.CW_PRACTICE_NOISE_LEVEL;
     gCW_FlashlightSending = s_flashlight_sending;
 
 	// Park the radio for the session rather than asking for a VFO reconfigure --
@@ -107,6 +209,12 @@ void CPO_Enter(void)
 	AUDIO_AudioPathOn();
 	gEnableSpeaker = true;
     CW_ClearTxDisplay();
+
+#ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
+	if (gEeprom.CW_PRACTICE_NOISE) {
+		NoiseStart();
+	}
+#endif
 }
 
 void CPO_Exit(void)
@@ -122,8 +230,9 @@ void CPO_Exit(void)
 	GPIO_ResetOutputPin(GPIO_PIN_FLASHLIGHT);
 #endif
 	CPO_Call_SetMode(CPO_CALL_MODE_OFF);
-#ifdef ENABLE_FEAT_NR7Y_DAC_SPIKE
-	CPO_Dac_Stop();
+#ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
+	s_noise = false;
+	CWSYNTH_StopNow();
 #endif
 	gCW_CpoActive = false;
 	gRequestDisplayScreen = DISPLAY_MAIN;
@@ -146,7 +255,9 @@ void CPO_Exit(void)
 	CW_KeyerResetRuntime();
 	if (gEeprom.CW_KEY_WPM != s_entry_wpm
 		|| gEeprom.CW_FARNSWORTH_WPM != s_entry_farnsworth_wpm
-		|| gEeprom.CW_FARNSWORTH_AUTO != s_entry_farnsworth_auto) {
+		|| gEeprom.CW_FARNSWORTH_AUTO != s_entry_farnsworth_auto
+		|| gEeprom.CW_PRACTICE_NOISE != s_entry_noise
+		|| gEeprom.CW_PRACTICE_NOISE_LEVEL != s_entry_noise_level) {
 		gRequestSaveSettings = true;
 	}
 }
@@ -162,8 +273,16 @@ void CPO_Tick(void)
 	}
 
 	CPO_Call_Tick10ms();
-#ifdef ENABLE_FEAT_NR7Y_DAC_SPIKE
-	CPO_Dac_Tick10ms();
+#ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
+	CWSYNTH_Tick10ms();
+	if (s_noise) {
+		SetStationVoice();
+		if (++s_hint_10ms >= CPO_NOISE_HINT_10MS) {
+			s_hint_10ms = 0;
+			s_hint ^= 1;
+			gUpdateDisplay = true;
+		}
+	}
 #endif
 
 	if (s_needs_redraw | gCW_TX_DisplayUpdated) {
@@ -239,22 +358,20 @@ void CPO_ProcessKeys(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 		CPO_Call_ToggleAutoSpacing();
 		break;
 
-#ifdef ENABLE_FEAT_NR7Y_DAC_SPIKE
+#ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
 	case KEY_9:
-		CPO_Dac_NextMode();
+		gEeprom.CW_PRACTICE_NOISE = !gEeprom.CW_PRACTICE_NOISE;
+		if (gEeprom.CW_PRACTICE_NOISE) {
+			NoiseStart();
+		} else {
+			NoiseStop();
+		}
+		gUpdateDisplay = true;
 		break;
 
 	case KEY_3:
 	case KEY_6:
-		CPO_Dac_StepLevel(Key == KEY_3);
-		break;
-
-	case KEY_1:
-		CPO_Dac_NextMixer();
-		break;
-
-	case KEY_7:
-		CPO_Dac_NextVoices();
+		StepNoiseLevel(Key == KEY_3);
 		break;
 #endif
 

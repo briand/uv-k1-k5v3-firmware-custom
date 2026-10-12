@@ -442,6 +442,12 @@ gEeprom.FreqChannel[1]   = IS_FREQ_CHANNEL(Data16[5]) ? Data16[5] : (FREQ_CHANNE
 	// Data[7]: break-in hang time in 10 ms units. 0xFF (unused since v1.0.0) or out of range = 300 ms.
 	// Byte 6 is skipped on purpose: pre-1.0 betas kept an ADC low byte there that reads as a valid time.
 	gEeprom.CW_HANG_10MS = (Data[7] >= CW_HANG_10MS_MIN && Data[7] <= CW_HANG_10MS_MAX) ? Data[7] : CW_HANG_10MS_DEFAULT;
+	// Data[6]: practice band noise level in bits 0-3, on in bit 4. Valid only with bits 5-7
+	// clear, which 0xFF (unset) never is and a pre-1.0 beta's ADC byte rarely is.
+	// Unset: noise off at the top level.
+	const bool noise_valid = (Data[6] & 0xE0) == 0;
+	gEeprom.CW_PRACTICE_NOISE       = noise_valid && (Data[6] & 0x10);
+	gEeprom.CW_PRACTICE_NOISE_LEVEL = noise_valid ? (Data[6] & 0x0F) : CW_PRACTICE_NOISE_LEVEL_DEFAULT;
 #endif
 
     // 0F40..0F47
@@ -1156,7 +1162,7 @@ void SETTINGS_SaveSettings(void)
 	State[3] = (gEeprom.CW_MESSAGE_REPEAT_DELAY) & 0x7F;
 	State[4] = (uint8_t)gEeprom.CW_KEYER_MODE | (gEeprom.CW_FARNSWORTH_WPM << 2);  // keyer mode (0=A, 1=B, 2=Ultimatic, 3=Bug) in bits 0-1, effective speed in bits 2-7
 	State[5] = gEeprom.CW_ROGER_DAH_DITS;  // proper roger dah length in dits
-	// State[6] stays 0xFF: unused (was CW_ADC_CABLE_20K low)
+	State[6] = (gEeprom.CW_PRACTICE_NOISE_LEVEL & 0x0F) | (gEeprom.CW_PRACTICE_NOISE << 4);  // practice noise level bits 0-3, on bit 4, bits 5-7 clear
 	State[7] = gEeprom.CW_HANG_10MS;  // break-in hang time in 10 ms units
     PY25Q16_WriteBuffer(0x00A140, SecBuf, 0x08, false);
 #endif

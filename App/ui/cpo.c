@@ -25,9 +25,6 @@
 #include "settings.h"
 #include "app/cpo.h"
 #include "app/cpocall.h"
-#ifdef ENABLE_FEAT_NR7Y_DAC_SPIKE
-#include "app/cpodac.h"
-#endif
 #include "ui/cpo.h"
 #include "ui/helper.h"
 
@@ -41,16 +38,8 @@ void UI_DisplayCPO(void)
 
 	static const char *const titles[] = {"Code Practice", "Send Callsigns", "Copy Callsigns"};
 
-	const char *title = titles[gCW_CpoCallMode];
-#ifdef ENABLE_FEAT_NR7Y_DAC_SPIKE
-	char dac_status[CPO_DAC_STATUS_SIZE];
-	if (CPO_Dac_GetStatus(dac_status)) {
-		title = dac_status;
-	}
-#endif
-
 	UI_DisplayClear();
-	UI_PrintStringSmallNormal(title, 0, 127, 0);
+	UI_PrintStringSmallNormal(titles[gCW_CpoCallMode], 0, 127, 0);
 	if (tx_len > 0) {
 		if (drill)
 			UI_PrintStringCWLarge(String, 0, 3);
@@ -94,19 +83,13 @@ void UI_DisplayCPO(void)
 		UI_PrintStringSmallNormal("^", 121, 0, 6);
 	}
 #endif
-#ifdef ENABLE_FEAT_NR7Y_DAC_SPIKE
-	// Key hint on line 5 whenever a drill's notice or result isn't using it
+#ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
+	// Band noise and its keys on line 5, whenever a drill's notice or result isn't there
 	char notice_check[CPO_CALL_NOTICE_SIZE];
 	if (!drill || (!CPO_Call_GetNotice(notice_check) && gCW_CpoCallResult == CPO_CALL_RESULT_NONE)) {
-		UI_PrintStringSmallNormal(CPO_Dac_GetHint(), 0, 127, 5);
-	}
-	// Synthesis settings and load on lines 1-2, which only drills use
-	if (!drill && CPO_Dac_IsActive()) {
-		char line[CPO_DAC_STATUS_SIZE];
-		CPO_Dac_GetSynth(line);
-		UI_PrintStringSmallNormal(line, 0, 127, 1);
-		CPO_Dac_GetLoad(line);
-		UI_PrintStringSmallNormal(line, 0, 127, 2);
+		char noise[CPO_NOISE_LINE_SIZE];
+		CPO_GetNoiseLine(noise);
+		UI_PrintStringSmallNormal(noise, 0, 127, 5);
 	}
 #endif
 	ST7565_BlitFullScreen();

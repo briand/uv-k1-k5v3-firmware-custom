@@ -28,6 +28,21 @@ void CPO_Exit(void);
 void CPO_Tick(void);
 void CPO_ProcessKeys(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld);
 
+#ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
+#define CPO_NOISE_LINE_SIZE 19   // a full small-font line plus NUL
+
+// Practice with band noise: the receiver plays on AF, and the sidetone and the
+// drill's station play on the DAC over it
+bool CPO_NoiseOn(void);
+
+// The sidetone under band noise, keyed from the local sidetone path; cue is the
+// error dit, at its own pitch
+void CPO_NoiseSidetone(bool down, bool cue);
+
+// The band noise line: its level and keys, or how to turn it on
+void CPO_GetNoiseLine(char out[CPO_NOISE_LINE_SIZE]);
+#endif
+
 extern bool gCW_CpoActive;
 extern bool gCW_CpoBacklightOn;
 #endif

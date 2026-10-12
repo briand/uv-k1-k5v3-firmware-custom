@@ -68,6 +68,34 @@ bool CW_LocalSidetoneHeld(void)
 	return s_local_sidetone_held;
 }
 
+// The local sidetone's tone, on the BK4819's tone generator, or on the DAC in code
+// practice with band noise so the receive audio carries on under it
+static void LocalToneOn(bool cue)
+{
+#ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
+	if (CPO_NoiseOn()) {
+		CPO_NoiseSidetone(true, cue);
+		return;
+	}
+#endif
+	// gain before ALAM, so the tone path never opens at RX's DAC gain
+	CW_ApplySidetoneGain();
+	BK4819_SetAF(BK4819_AF_ALAM);
+	BK4819_SetScrambleFrequencyControlWord(cue ? CW_ERROR_TONE_HZ : gEeprom.CW_TONE_FREQUENCY * 10);
+}
+
+static void LocalToneOff(void)
+{
+#ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
+	if (CPO_NoiseOn()) {
+		CPO_NoiseSidetone(false, false);
+		return;
+	}
+#endif
+	// ALAM and the sidetone gain stay until the hang time passes (CPO keeps them)
+	BK4819_SetScrambleFrequencyControlWord(0);
+}
+
 // ---------------------------------------------------------------------------
 // CW_EndTxNow  –  end CW transmission immediately and return to monitor
 // ---------------------------------------------------------------------------
@@ -175,10 +203,7 @@ void CW_AppUpdate(void)
 					SYSTEM_DelayMs(10);
 				}
 				BACKLIGHT_TurnOn();
-				// gain before ALAM, so the tone path never opens at RX's DAC gain
-				CW_ApplySidetoneGain();
-				BK4819_SetAF(BK4819_AF_ALAM);
-				BK4819_SetScrambleFrequencyControlWord(cue ? CW_ERROR_TONE_HZ : gEeprom.CW_TONE_FREQUENCY * 10);
+				LocalToneOn(cue);
 				#ifdef ENABLE_FLASHLIGHT
 				if (gCW_FlashlightSending) {
 					GPIO_SetOutputPin(GPIO_PIN_FLASHLIGHT);
@@ -195,8 +220,7 @@ void CW_AppUpdate(void)
 					break;
 				// fall through
 			case CW_ACTION_CARRIER_OFF:
-				// ALAM and the sidetone gain stay until the hang time passes (CPO keeps them)
-				BK4819_SetScrambleFrequencyControlWord(0);
+				LocalToneOff();
 				#ifdef ENABLE_FLASHLIGHT
 				if (gCW_FlashlightSending) {
 					GPIO_ResetOutputPin(GPIO_PIN_FLASHLIGHT);
