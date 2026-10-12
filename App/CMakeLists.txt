@@ -189,6 +189,11 @@ enable_feature(ENABLE_FEAT_NR7Y_CPO
     app/cpocall.c
     ui/cpo.c
 )
+# QSO simulator bench spike: a keyed tone on the MCU DAC over receive audio (requires CPO)
+enable_feature(ENABLE_FEAT_NR7Y_DAC_SPIKE
+    app/cpodac.c
+    driver/dacaudio.c
+)
 # Millis support
 enable_feature(ENABLE_MILLIS
     driver/millis.c
