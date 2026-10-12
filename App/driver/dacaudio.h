@@ -50,8 +50,4 @@ uint32_t DACAUDIO_EventTime(void);
 void DACAUDIO_Lock(void);
 void DACAUDIO_Unlock(void);
 
-// Since the last call: fill time as a share of all CPU time, and the longest single
-// fill as a share of the time a half buffer plays, both in tenths of a percent
-void DACAUDIO_TakeLoad(uint16_t *avg_permille, uint16_t *peak_permille);
-
 #endif

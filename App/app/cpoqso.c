@@ -180,6 +180,7 @@ typedef struct {
 	uint16_t qsb_at;
 	uint16_t call_10ms;      // until it calls, 0 for no call coming
 	uint8_t patience;        // unanswered calls, or 20 s waits through another's QSO, before it leaves
+	uint8_t slot;            // its place in the pile
 	bool on;
 	bool qsk;                // it stops when you break in, and hears you
 	bool talker;             // it ragchews whatever you send
@@ -208,8 +209,8 @@ static uint8_t s_quiet_10ms;
 static uint8_t s_rate;
 static uint8_t s_rate_10ms;
 
-#define VOICE(st) (CWSYNTH_STATION + (uint8_t)((st) - s_pile))
-#define BIT(st)   (1u << ((st) - s_pile))
+#define VOICE(st) (CWSYNTH_STATION + (st)->slot)
+#define BIT(st)   (1u << (st)->slot)
 
 static char s_over[OVER_SIZE];
 static uint8_t s_over_len = 0;
@@ -244,9 +245,39 @@ static uint32_t Rnd(uint32_t n)
 	return CPO_Call_Rand() % n;
 }
 
+// True pct times in a hundred
+static bool Chance(uint8_t pct)
+{
+	return Rnd(100) < pct;
+}
+
 static bool Is(const char *a, const char *b)
 {
 	return strcmp(a, b) == 0;
+}
+
+// How OneOf matches a word against its list
+enum { WORD = 0, PREFIX, WITHIN };
+
+// t is one of the words in list (split by |), starts with one, or holds one within it
+static bool OneOf(const char *t, const char *list, uint8_t how)
+{
+	char item[8];
+
+	for (;;) {
+		uint8_t len = 0;
+		while (*list && *list != '|') {
+			item[len++] = *list++;
+		}
+		item[len] = '\0';
+		if (how == WORD ? strcmp(t, item) == 0 : how == PREFIX ? strncmp(t, item, len) == 0
+			: strstr(t, item) != NULL) {
+			return true;
+		}
+		if (!*list++) {
+			return false;
+		}
+	}
 }
 
 static uint8_t CountItems(const char *list, char sep)
@@ -387,11 +418,17 @@ static void SayChat(void)
 	Say(temp);
 }
 
-static void SayOver(void)
+// Your call DE its call
+static void SayCalls(void)
 {
 	Say(s_my);
 	Say("DE");
 	Say(s_st->call);
+}
+
+static void SayOver(void)
+{
+	SayCalls();
 	if (s_end[0]) {
 		SayEnd(s_end);
 	} else {
@@ -500,9 +537,7 @@ static bool HasRst(const char *t)
 	}
 	memcpy(head, t, n - 3);
 	head[n - 3] = '\0';
-	return n == 3 || IsRst(head) || Is(head, "UR") || Is(head, "RST") || Is(head, "TU")
-		|| Is(head, "R") || Is(head, "RR") || Is(head, "GM") || Is(head, "GA")
-		|| Is(head, "GE") || Is(head, "BK") || Is(head, "FB");
+	return n == 3 || IsRst(head) || OneOf(head, "UR|RST|TU|R|RR|GM|GA|GE|BK|FB", WORD);
 }
 
 // K, KN or BK ending an over, alone or run on to the word before it (BOSTONKN), but
@@ -543,7 +578,7 @@ static bool IsName(const char *t)
 {
 	const size_t n = strlen(t);
 
-	if (n < 2 || n >= NAME_SIZE || Is(t, "IS") || Is(t, "HR")) {
+	if (n < 2 || n >= NAME_SIZE || OneOf(t, "IS|HR", WORD)) {
 		return false;
 	}
 	for (; *t; t++) {
@@ -623,14 +658,14 @@ static void Parse(CPO_QsoOver_t *o)
 		const char *next = (i + 1 < s_tok_count) ? s_tok[i + 1] : "";
 		const size_t n = strlen(t);
 		const bool call = IsCall(t);
+		const bool rst = HasRst(t);
 
 		// Words also count run on to others without a word gap: CQCQ, DEW1ABC,
 		// NAMEDREW, QTHBOSTON, UR599, 73EE
 		if (StartsWith(t, "CQ") || (Is(t, "QRZ") && (s_state == QSO_IDLE || s_state == QSO_DONE))) {
 			o->cq = true;
 		}
-		if (strstr(t, "POTA") || strstr(t, "SOTA") || strstr(t, "WWFF") || strstr(t, "TEST")
-			|| Is(t, "FD")) {
+		if (OneOf(t, "POTA|SOTA|WWFF|TEST", WITHIN) || Is(t, "FD")) {
 			o->special = true;
 		}
 		if (StartsWith(t, "QTH") && t[n - 1] != '?') {
@@ -641,7 +676,7 @@ static void Parse(CPO_QsoOver_t *o)
 		} else if (StartsWith(t, "QRQ")) {
 			o->qrq = true;
 		}
-		if (Is(t, "RIG") || Is(t, "ANT") || Is(t, "WX") || Is(t, "PWR")) {
+		if (OneOf(t, "RIG|ANT|WX|PWR", WORD)) {
 			o->chat = true;
 		}
 		if (Is(t, "DE")) {
@@ -653,7 +688,7 @@ static void Parse(CPO_QsoOver_t *o)
 		} else if (StartsWith(t, "DE") && IsCall(t + 2)) {
 			o->de = t + 2;
 		}
-		if (HasRst(t)) {
+		if (rst) {
 			o->rst = true;
 			o->rst_599 |= EndsWith(t, "599") || EndsWith(t, "5NN");
 			o->cut |= strchr(t, 'N') != NULL;
@@ -663,7 +698,7 @@ static void Parse(CPO_QsoOver_t *o)
 		// a caller's call, as keyed or with a gap or two in it...
 		for (uint8_t words = 1; words <= 3; words++) {
 			char joined[CALL_SIZE];
-			const char *c = (words == 1) ? (call && !HasRst(t) ? t : NULL) : Join(i, words, joined);
+			const char *c = (words == 1) ? (call && !rst ? t : NULL) : Join(i, words, joined);
 			for (uint8_t k = 0; c && k < PILE_MAX; k++) {
 				const uint8_t d = (s_pile[k].on && !Is(c, s_my)) ? Distance(c, s_pile[k].call) : 0xFF;
 				if (d < o->best[k]) {
@@ -673,8 +708,7 @@ static void Parse(CPO_QsoOver_t *o)
 		}
 		// ...or part of one: with a ?, as K7? or XYZ?, or with a digit, as 7XY
 		const size_t part_len = n - (t[n - 1] == '?');
-		if (part_len >= 2 && part_len < CALL_SIZE && (part_len < n || strpbrk(t, "0123456789"))
-			&& !HasRst(t)) {
+		if (part_len >= 2 && part_len < CALL_SIZE && (part_len < n || strpbrk(t, "0123456789")) && !rst) {
 			char part[CALL_SIZE];
 			memcpy(part, t, part_len);
 			part[part_len] = '\0';
@@ -684,8 +718,8 @@ static void Parse(CPO_QsoOver_t *o)
 				}
 			}
 		}
-		if (Is(t, "NAME") || Is(t, "OP") || Is(t, "NM")) {
-			if (Is(next, "IS") || Is(next, "HR")) {
+		if (OneOf(t, "NAME|OP|NM", WORD)) {
+			if (OneOf(next, "IS|HR", WORD)) {
 				next = (i + 2 < s_tok_count) ? s_tok[i + 2] : "";
 			}
 			if (IsName(next)) {
@@ -694,10 +728,10 @@ static void Parse(CPO_QsoOver_t *o)
 		} else if (StartsWith(t, "NAME") && IsName(t + 4)) {
 			o->op = t + 4;
 		}
-		if (Is(t, "GM") || Is(t, "GA") || Is(t, "GE") || Is(t, "GD")) {
+		if (OneOf(t, "GM|GA|GE|GD", WORD)) {
 			o->greet = t;
 		}
-		if (StartsWith(t, "AGN") || (Is(t, "RPT") && (Is(prev, "PSE") || Is(prev, "PLS")))
+		if (StartsWith(t, "AGN") || (Is(t, "RPT") && OneOf(prev, "PSE|PLS", WORD))
 			|| (Is(t, "QRZ") && s_state == QSO_ANSWER)) {
 			// RPT on its own is a report, as in TNX FER RPT
 			o->ask = true;
@@ -707,7 +741,7 @@ static void Parse(CPO_QsoOver_t *o)
 			// a bare ? asks about the word before it
 			const char *what = (n == 1) ? prev : t;
 			o->ask = true;
-			if (StartsWith(what, "NAME") || StartsWith(what, "OP")) {
+			if (OneOf(what, "NAME|OP", PREFIX)) {
 				o->ask_name = true;
 			} else if (StartsWith(what, "QTH")) {
 				o->ask_qth = true;
@@ -716,7 +750,7 @@ static void Parse(CPO_QsoOver_t *o)
 			}
 		}
 		// 73, also run on to another word, and SK
-		if ((strstr(t, "73") && !HasRst(t) && !call) || Is(t, "SK")) {
+		if ((strstr(t, "73") && !rst && !call) || Is(t, "SK")) {
 			o->sign = true;
 		}
 	}
@@ -832,7 +866,7 @@ static void Arrive(void)
 	int16_t wpm = gEeprom.CW_KEY_WPM + (int16_t)Rnd(d->wpm_down + d->wpm_up + 1u) - d->wpm_down;
 	st->wpm = (wpm < 10) ? 10 : (wpm > 45) ? 45 : (uint8_t)wpm;
 	st->eff = 0;
-	if (Rnd(100) < d->spacing_pct) {
+	if (Chance(d->spacing_pct)) {
 		Spaced(st);
 	}
 	// Off zero beat, and in a pile far enough from the others to pick out, unless the
@@ -850,18 +884,18 @@ static void Arrive(void)
 	}
 	st->pitch = pitch;
 	st->level_db = d->level_db + Rnd(d->level_span_db + 1u);
-	st->qsb_db = (Rnd(100) < d->qsb_pct) ? 4 + Rnd(d->qsb_db - 3u) : 0;
+	st->qsb_db = Chance(d->qsb_pct) ? 4 + Rnd(d->qsb_db - 3u) : 0;
 	st->qsb_10ms = 300 + Rnd(900);   // fading over 3 to 12 s
 	st->qsb_at = Rnd(st->qsb_10ms);
 	// a keyer, plain half the time, else weighted or (above Easy) ragged; or a hand key
 	CWSYNTH_SetFist(VOICE(st),
-		(Rnd(100) < d->hand_pct) ? (CWSYNTH_Fist_t)(CWSYNTH_FIST_BUG + Rnd(3))
+		Chance(d->hand_pct) ? (CWSYNTH_Fist_t)(CWSYNTH_FIST_BUG + Rnd(3))
 		: Rnd(2) ? CWSYNTH_FIST_PADDLE
 		: (CWSYNTH_Fist_t)(CWSYNTH_FIST_WEIGHTED + Rnd(gEeprom.CW_QSO_DIFFICULTY == CW_QSO_EASY ? 2 : 3)),
-		(Rnd(100) < d->chirp_pct) ? 20 + Rnd(40) : 0);
+		Chance(d->chirp_pct) ? 20 + Rnd(40) : 0);
 	st->qsk = Rnd(10) < 3;
-	st->talker = Rnd(100) < 15;
-	st->lid = Rnd(100) < d->lid_pct;
+	st->talker = Chance(15);
+	st->lid = Chance(d->lid_pct);
 	st->patience = d->patience + Rnd(4);
 	st->call_10ms = 0;
 	st->on = true;
@@ -871,7 +905,7 @@ static void Arrive(void)
 // from a standing start, up to the pile-up size as you work them quickly
 static void Fill(void)
 {
-	uint8_t want = 1 + s_rate / RATE_QSO + (Rnd(100) < BONUS_PCT);
+	uint8_t want = 1 + s_rate / RATE_QSO + Chance(BONUS_PCT);
 
 	if (want > gEeprom.CW_QSO_PILE) {
 		want = gEeprom.CW_QSO_PILE;
@@ -930,14 +964,14 @@ static void Round(uint8_t mask, uint8_t times, bool careful)
 		st = &s_pile[(from + i) % PILE_MAX];
 		const bool asked = careful && (mask & BIT(st));
 		if (st->on && st != s_st && ((mask & BIT(st)) || st->lid) && (asked || Wait(st))) {
-			if (asked && Rnd(100) < CAREFUL_PCT) {
+			if (asked && Chance(CAREFUL_PCT)) {
 				if (Rnd(2)) {
 					st->wpm = (st->wpm > 12) ? st->wpm - 2 - Rnd(2) : 10;
 				} else {
 					Spaced(st);
 				}
 			}
-			if (!first && Rnd(100) < LATE_PCT) {
+			if (!first && Chance(LATE_PCT)) {
 				late |= BIT(st);
 			} else {
 				Call(st, times, at);
@@ -974,7 +1008,7 @@ static void Done(bool logged, CPO_QsoNotice_t notice)
 	if (logged) {
 		Busier(ACTIVITY_QSO);
 		s_rate = (s_rate + RATE_QSO < RATE_MAX) ? s_rate + RATE_QSO : RATE_MAX;
-		if (PileCount() || Rnd(100) < Difficulty()->tail_pct * (s_quick ? 2u : 1u) + s_rate / 4u) {
+		if (PileCount() || Chance(Difficulty()->tail_pct * (s_quick ? 2u : 1u) + s_rate / 4u)) {
 			Fill();
 		}
 	} else {
@@ -1057,7 +1091,7 @@ static void HearCq(const CPO_QsoOver_t *o)
 	// it's dead); how many is down to your rate
 	s_quick = o->special;
 	Busier(ACTIVITY_CQ);
-	if (PileCount() || Rnd(100) < 30u + s_activity * 7u / 10u) {
+	if (PileCount() || Chance(30u + s_activity * 7u / 10u)) {
 		Fill();
 	}
 	Round(PILE_ALL, s_quick ? 1 : 0, false);
@@ -1102,9 +1136,7 @@ static void HearAnswer(const CPO_QsoOver_t *o)
 		Reply(QSO_CONFIRM);
 		return;
 	}
-	Say(s_my);
-	Say("DE");
-	Say(s_st->call);
+	SayCalls();
 	if (o->rst) {
 		Say("R");
 	}
@@ -1153,8 +1185,8 @@ static void HearPile(const CPO_QsoOver_t *o)
 	for (st = s_pile; st < s_pile + PILE_MAX; st++) {
 		if (st->on && !(s_missed & BIT(st))) {
 			heard |= BIT(st);
-			if (o->best[st - s_pile] < closest) {
-				closest = o->best[st - s_pile];
+			if (o->best[st->slot] < closest) {
+				closest = o->best[st->slot];
 			}
 		}
 	}
@@ -1162,7 +1194,7 @@ static void HearPile(const CPO_QsoOver_t *o)
 		if (!(heard & BIT(st))) {
 			continue;
 		}
-		const bool nearest = o->best[st - s_pile] == closest;
+		const bool nearest = o->best[st->slot] == closest;
 		if (nearest && closest == 0) {
 			Pick(st);
 			Round(0, 1, false);   // the rest stand by, but a lid calls over it
@@ -1230,9 +1262,7 @@ static void HearConfirm(const CPO_QsoOver_t *o)
 	}
 	SayOneOf("73 GL|73 ES GL|73 CUL|HPE CUAGN 73|GL 73");
 	if (Rnd(2)) {
-		Say(s_my);
-		Say("DE");
-		Say(s_st->call);
+		SayCalls();
 	}
 	Say("\x01");
 	SayOneOf("EE|E E|TU EE|EE");
@@ -1272,7 +1302,7 @@ static uint32_t OverGapMs(void)
 	const char *gap = strrchr(s_over, ' ');
 	const char *last = gap ? gap + 1 : s_over;
 	const size_t n = strlen(last);
-	const bool end = EndMark(last) || Is(last, "AR") || Is(last, "SK") || (n && last[n - 1] == '?')
+	const bool end = EndMark(last) || OneOf(last, "AR|SK", WORD) || (n && last[n - 1] == '?')
 		|| s_state == QSO_DITDIT;
 	const uint32_t dits = end ? 4 * dit_ms : 15 * dit_ms;
 	const uint32_t floor = end ? 250 : 1200;
@@ -1296,6 +1326,9 @@ static void Reset(void)
 
 void CPO_Qso_Enter(void)
 {
+	for (uint8_t i = 0; i < PILE_MAX; i++) {
+		s_pile[i].slot = i;
+	}
 	gCW_CpoQsoLogged = 0;
 	gCW_CpoQsoFailed = 0;
 	s_notice_10ms = 0;
@@ -1342,19 +1375,16 @@ const char *CPO_Qso_DifficultyName(void)
 // same however they were keyed; -.--. and .-.-. are KN and AR here, not ( and +
 static const char *ProsignWord(char ch)
 {
-	switch (ch) {
-	case CW_PROSIGN_SK:  return "SK";
-	case CW_PROSIGN_BK:  return "BK";
-	case CW_PROSIGN_KA:  return "KA";
-	case CW_PROSIGN_SN:  return "SN";
-	case CW_PROSIGN_UR:  return "UR";
-	case CW_PROSIGN_SOS: return "SOS";
-	case '(':            return "KN";
-	case '+':            return "AR";
-	case '=':            return "BT";
-	case '&':            return "AS";
-	default:             return NULL;
+	// each prosign's code, then its letters
+	static const char WORDS[] = "\x01" "SK\0" "\x02" "BK\0" "\x03" "KA\0" "\x04" "SN\0" "\x05" "UR\0"
+		"\x06" "SOS\0" "(KN\0" "+AR\0" "=BT\0" "&AS";
+
+	for (const char *w = WORDS; w < WORDS + sizeof(WORDS); w += strlen(w) + 1) {
+		if (*w == ch) {
+			return w + 1;
+		}
 	}
+	return NULL;
 }
 
 void CPO_Qso_OnChar(char ch, bool word_gap)
@@ -1546,31 +1576,21 @@ bool CPO_Qso_GetNotice(char out[CPO_QSO_LINE_SIZE])
 	if (s_notice_10ms == 0) {
 		return false;
 	}
-	switch (s_notice) {
-	case NOTICE_DOUBLED:
-		strcpy(out, "Doubled: unheard");
-		break;
-	case NOTICE_OP:
-		sprintf_(out, "Op %s", s_my);
-		break;
-	case NOTICE_NO_CALL:
-		strcpy(out, "DE your call?");
-		break;
-	case NOTICE_DIFFICULTY:
-		sprintf_(out, "%s stations", CPO_Qso_DifficultyName());
-		break;
-	case NOTICE_LOGGED:
-		sprintf_(out, "Logged %s", s_logged);
-		break;
-	case NOTICE_NOT_LOGGED:
-		strcpy(out, "Not logged");
-		break;
-	case NOTICE_PILE:
-		sprintf_(out, "Up to %u caller%s", gEeprom.CW_QSO_PILE, gEeprom.CW_QSO_PILE > 1 ? "s" : "");
-		break;
-	default:
-		strcpy(out, "No callers left");
-		break;
-	}
+	// Each notice's text, taking the call, the difficulty's name, or the pile-up size
+	static const char *const TEXT[] = {
+		[NOTICE_DOUBLED]    = "Doubled: unheard",
+		[NOTICE_OP]         = "Op %s",
+		[NOTICE_NO_CALL]    = "DE your call?",
+		[NOTICE_LEFT]       = "No callers left",
+		[NOTICE_DIFFICULTY] = "%s stations",
+		[NOTICE_LOGGED]     = "Logged %s",
+		[NOTICE_NOT_LOGGED] = "Not logged",
+		[NOTICE_PILE]       = "Up to %s caller%s",
+	};
+	const char size[2] = { '0' + gEeprom.CW_QSO_PILE, '\0' };
+	sprintf_(out, TEXT[s_notice],
+		(s_notice == NOTICE_OP) ? s_my : (s_notice == NOTICE_DIFFICULTY) ? CPO_Qso_DifficultyName()
+		: (s_notice == NOTICE_PILE) ? size : s_logged,
+		(gEeprom.CW_QSO_PILE > 1) ? "s" : "");
 	return true;
 }
