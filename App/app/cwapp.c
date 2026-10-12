@@ -68,12 +68,13 @@ bool CW_LocalSidetoneHeld(void)
 	return s_local_sidetone_held;
 }
 
-// The local sidetone's tone, on the BK4819's tone generator, or on the DAC in code
-// practice with band noise so the receive audio carries on under it
+// The local sidetone's tone, on the BK4819's tone generator, or on the DAC when code
+// practice plays its tones there: under band noise, so the receive audio carries on
+// under it, and in the QSO drill, alongside the station
 static void LocalToneOn(bool cue)
 {
 #ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
-	if (CPO_NoiseOn()) {
+	if (CPO_SynthOn()) {
 		CPO_NoiseSidetone(true, cue);
 		return;
 	}
@@ -87,7 +88,7 @@ static void LocalToneOn(bool cue)
 static void LocalToneOff(void)
 {
 #ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
-	if (CPO_NoiseOn()) {
+	if (CPO_SynthOn()) {
 		CPO_NoiseSidetone(false, false);
 		return;
 	}

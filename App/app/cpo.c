@@ -20,10 +20,13 @@
 
 #include "app/cpo.h"
 #include "app/cpocall.h"
+#ifdef ENABLE_FEAT_NR7Y_CPO_QSO
+#include "app/cpoqso.h"
+#endif
 #ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
 #include "app/cwsynth.h"
-#include "external/printf/printf.h"
 #endif
+#include "external/printf/printf.h"
 #include "audio.h"
 #include "driver/backlight.h"
 #include "driver/bk4819.h"
@@ -56,11 +59,23 @@ static bool s_flashlight_sending = false;
 #ifdef ENABLE_CW_MODULATOR
 static ModulationMode_t s_saved_modulation = MODULATION_CW;
 #endif
+static bool s_card = false;     // the controls card is up
+static uint8_t s_hint = 0;      // which hint line is up
+static uint8_t s_hint_10ms = 0;
+
+// How long each hint line stays up
+#define CPO_HINT_10MS 200
+
+static bool QsoDrill(void)
+{
+#ifdef ENABLE_FEAT_NR7Y_CPO_QSO
+	return gCW_CpoCallMode == CPO_CALL_MODE_QSO;
+#else
+	return false;
+#endif
+}
 
 #ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
-// How long each line of the band noise hint stays up
-#define CPO_NOISE_HINT_10MS 200
-
 // Sidetone level to DAC gain: as loud as the BK4819's sidetone at the same level up
 // to where the DAC tops out, about level 9 on a UV-K1, and the DAC's top above that
 static const uint16_t SIDETONE_DAC_GAIN[CW_SIDETONE_LEVEL_MAX + 1] = {
@@ -69,9 +84,8 @@ static const uint16_t SIDETONE_DAC_GAIN[CW_SIDETONE_LEVEL_MAX + 1] = {
 	CWSYNTH_GAIN_MAX, CWSYNTH_GAIN_MAX, CWSYNTH_GAIN_MAX,
 };
 
-static bool s_noise = false;    // the receiver on AF, practice tones on the DAC
-static uint8_t s_hint = 0;      // which line of the hint is up
-static uint8_t s_hint_10ms = 0;
+static bool s_noise = false;    // band noise: the receiver on AF under the tones
+static bool s_synth = false;    // practice tones on the DAC
 
 static uint16_t SidetoneDacGain(void)
 {
@@ -84,6 +98,21 @@ static void SetStationVoice(void)
 	CWSYNTH_SetVoice(CWSYNTH_STATION, gEeprom.CW_TONE_FREQUENCY * 10, SidetoneDacGain());
 }
 
+// Tones go on the DAC under band noise, and always in the QSO drill, whose station
+// can only be heard there; the sidetone joins it so the two balance
+static void UpdateSynth(void)
+{
+	const bool want = s_noise || QsoDrill();
+
+	if (want && !s_synth) {
+		CWSYNTH_Start();
+		SetStationVoice();
+	} else if (!want && s_synth) {
+		CWSYNTH_Stop();
+	}
+	s_synth = want;
+}
+
 static void NoiseStart(void)
 {
 	// The receiver back on AF on the VFO's frequency, through the CW filter. The
@@ -91,9 +120,8 @@ static void NoiseStart(void)
 	RADIO_SetModulation(MODULATION_CW);
 	BK4819_SetFilterBandwidth(RADIO_ResolveFilter(gTxVfo), true);
 	BK4819_SetAfDacGain(gEeprom.CW_PRACTICE_NOISE_LEVEL);
-	CWSYNTH_Start();
-	SetStationVoice();
 	s_noise = true;
+	UpdateSynth();
 	s_hint = 0;
 	s_hint_10ms = 0;
 }
@@ -101,7 +129,7 @@ static void NoiseStart(void)
 static void NoiseStop(void)
 {
 	s_noise = false;
-	CWSYNTH_Stop();
+	UpdateSynth();
 	// Practice's quiet state, as CPO_Enter leaves it
 	BK4819_SetAF(BK4819_AF_ALAM);
 	BK4819_SetScrambleFrequencyControlWord(0);
@@ -126,9 +154,9 @@ static void StepNoiseLevel(bool louder)
 	gUpdateDisplay = true;
 }
 
-bool CPO_NoiseOn(void)
+bool CPO_SynthOn(void)
 {
-	return s_noise;
+	return s_synth;
 }
 
 void CPO_NoiseSidetone(bool down, bool cue)
@@ -140,17 +168,73 @@ void CPO_NoiseSidetone(bool down, bool cue)
 	CWSYNTH_Key(CWSYNTH_SIDETONE, down);
 }
 
-void CPO_GetNoiseLine(char out[CPO_NOISE_LINE_SIZE])
-{
-	if (!s_noise) {
-		strcpy(out, "9 band noise");
-	} else if (s_hint == 0) {
-		sprintf_(out, "Band noise %u", gEeprom.CW_PRACTICE_NOISE_LEVEL + 1);
-	} else {
-		strcpy(out, "3/6 level  9 off");
-	}
-}
 #endif
+
+void CPO_OnChar(char ch, bool word_gap)
+{
+#ifdef ENABLE_FEAT_NR7Y_CPO_QSO
+	if (QsoDrill()) {
+		CPO_Qso_OnChar(ch, word_gap);
+		return;
+	}
+#endif
+	(void)word_gap;
+	CPO_Call_OnChar(ch);
+}
+
+bool CPO_CardShowing(void)
+{
+	return s_card;
+}
+
+uint8_t CPO_GetCard(const char *lines[CPO_CARD_LINES])
+{
+	uint8_t n = 0;
+
+	lines[n++] = "F drill  UP/DN wpm";
+#ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
+	lines[n++] = "9 noise  3/6 level";
+#endif
+	if (CPO_Call_IsCopyMode()) {
+		lines[n++] = "2/8 gaps  0 auto";
+		lines[n++] = "5 replay the call";
+	} else if (QsoDrill()) {
+		lines[n++] = "5 abandon the QSO";
+	} else if (gCW_CpoCallMode == CPO_CALL_MODE_SEND) {
+		lines[n++] = "5 restart the call";
+	} else {
+		lines[n++] = "5 clear the text";
+	}
+#ifdef ENABLE_FLASHLIGHT
+	lines[n++] = "4 flash  * light";
+#else
+	lines[n++] = "* backlight";
+#endif
+	lines[n++] = "EXIT quit practice";
+	return n;
+}
+
+void CPO_GetHintLine(char out[CPO_HINT_LINE_SIZE])
+{
+	// Band noise and its keys (on: its level, then its keys), then the card
+#ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
+	const uint8_t lines = s_noise ? 3 : 2;
+	const uint8_t line = s_hint % lines;
+	if (line == 0) {
+		if (s_noise) {
+			sprintf_(out, "Band noise %u", gEeprom.CW_PRACTICE_NOISE_LEVEL + 1);
+		} else {
+			strcpy(out, "9 band noise");
+		}
+		return;
+	}
+	if (line == 1 && s_noise) {
+		strcpy(out, "3/6 level  9 off");
+		return;
+	}
+#endif
+	strcpy(out, "MENU controls");
+}
 
 void CPO_Enter(void)
 {
@@ -210,6 +294,9 @@ void CPO_Enter(void)
 	gEnableSpeaker = true;
     CW_ClearTxDisplay();
 
+	s_card = false;
+	s_hint = 0;
+	s_hint_10ms = 0;
 #ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
 	if (gEeprom.CW_PRACTICE_NOISE) {
 		NoiseStart();
@@ -229,9 +316,15 @@ void CPO_Exit(void)
 	gCW_FlashlightSending = false;
 	GPIO_ResetOutputPin(GPIO_PIN_FLASHLIGHT);
 #endif
+#ifdef ENABLE_FEAT_NR7Y_CPO_QSO
+	if (QsoDrill()) {
+		CPO_Qso_Exit();
+	}
+#endif
 	CPO_Call_SetMode(CPO_CALL_MODE_OFF);
 #ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
 	s_noise = false;
+	s_synth = false;
 	CWSYNTH_StopNow();
 #endif
 	gCW_CpoActive = false;
@@ -273,17 +366,22 @@ void CPO_Tick(void)
 	}
 
 	CPO_Call_Tick10ms();
-#ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
-	CWSYNTH_Tick10ms();
-	if (s_noise) {
-		SetStationVoice();
-		if (++s_hint_10ms >= CPO_NOISE_HINT_10MS) {
-			s_hint_10ms = 0;
-			s_hint ^= 1;
-			gUpdateDisplay = true;
-		}
+#ifdef ENABLE_FEAT_NR7Y_CPO_QSO
+	if (QsoDrill()) {
+		CPO_Qso_Tick10ms();
 	}
 #endif
+#ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
+	CWSYNTH_Tick10ms();
+	if (s_synth) {
+		SetStationVoice();
+	}
+#endif
+	if (++s_hint_10ms >= CPO_HINT_10MS) {
+		s_hint_10ms = 0;
+		s_hint++;
+		gUpdateDisplay = true;
+	}
 
 	if (s_needs_redraw | gCW_TX_DisplayUpdated) {
 		s_needs_redraw = false;
@@ -298,7 +396,19 @@ void CPO_ProcessKeys(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 		return;
 	}
 
+	// Any key closes the controls card, and does only that
+	if (s_card) {
+		s_card = false;
+		gUpdateDisplay = true;
+		return;
+	}
+
 	switch (Key) {
+
+	case KEY_MENU:
+		s_card = true;
+		gUpdateDisplay = true;
+		break;
 
 	case KEY_UP:
 		if (gEeprom.CW_KEY_WPM < 45) {
@@ -340,14 +450,33 @@ void CPO_ProcessKeys(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 #endif
 		break;
 	case KEY_5:
+#ifdef ENABLE_FEAT_NR7Y_CPO_QSO
+		if (QsoDrill()) {
+			CPO_Qso_Restart();
+			break;
+		}
+#endif
 		CW_ClearTxDisplay();
 		CPO_Call_Restart();
 		gUpdateDisplay = true;
 		break;
 
-	case KEY_F:
+	case KEY_F: {
+#ifdef ENABLE_FEAT_NR7Y_CPO_QSO
+		const bool was_qso = QsoDrill();
+#endif
 		CPO_Call_NextMode();
+#ifdef ENABLE_FEAT_NR7Y_CPO_QSO
+		if (was_qso) {
+			CPO_Qso_Exit();
+		}
+		if (QsoDrill()) {
+			CPO_Qso_Enter();
+		}
+		UpdateSynth();
+#endif
 		break;
+	}
 
 	case KEY_2:
 	case KEY_8:

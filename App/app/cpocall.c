@@ -96,6 +96,11 @@ static uint32_t Rand(void)
 	return s_rng_state;
 }
 
+uint32_t CPO_Call_Rand(void)
+{
+	return Rand();
+}
+
 static char RandLetter(uint8_t count)
 {
 	return 'A' + (char)(Rand() % count);
@@ -106,10 +111,11 @@ bool CPO_Call_IsCopyMode(void)
 	return gCW_CpoCallMode == CPO_CALL_MODE_COPY;
 }
 
-static void NewCall(void)
+int8_t CPO_Call_Generate(char out[CPO_CALL_MAX_LEN + 1])
 {
-	char *p = gCW_CpoCall;
+	char *p = out;
 	uint8_t suffix_len;
+	int8_t dx = -1;
 
 	// Fold in the time the operator finished the last call so the sequence
 	// doesn't repeat from session to session. xorshift must never sit at zero.
@@ -139,6 +145,7 @@ static void NewCall(void)
 	} else {
 		const uint8_t i = (Rand() % ((sizeof(DX_PREFIXES) - 1) / 2)) * 2;
 
+		dx = i / 2;
 		*p++ = DX_PREFIXES[i];
 		if (DX_PREFIXES[i + 1] != ' ') {
 			*p++ = DX_PREFIXES[i + 1];
@@ -151,14 +158,16 @@ static void NewCall(void)
 		*p++ = RandLetter(26);
 	}
 	*p = '\0';
+	return dx;
 }
 
-// Under band noise the drill's station sends on its own DAC voice, apart from the
-// sidetone, so the operator can key over it; otherwise the keyer plays it
+// With practice tones on the DAC (under band noise) the drill's station sends on its
+// own voice there, apart from the sidetone, so the operator can key over it;
+// otherwise the keyer plays it
 static void Play(const char *text, uint8_t eff_wpm)
 {
 #ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
-	if (CPO_NoiseOn()) {
+	if (CPO_SynthOn()) {
 		CWSYNTH_Send(CWSYNTH_STATION, text, gEeprom.CW_KEY_WPM, eff_wpm);
 		return;
 	}
@@ -253,7 +262,7 @@ static void Begin(CPO_CallStep_t step, bool play)
 {
 	s_step = CPO_STEP_NONE;
 	if (step == CPO_STEP_NEXT) {
-		NewCall();
+		CPO_Call_Generate(gCW_CpoCall);
 		s_tries = 0;
 		s_known = 0;
 		s_revealed = false;
@@ -284,7 +293,7 @@ void CPO_Call_SetMode(CPO_CallMode_t mode)
 
 void CPO_Call_NextMode(void)
 {
-	CPO_Call_SetMode(gCW_CpoCallMode == CPO_CALL_MODE_COPY
+	CPO_Call_SetMode(gCW_CpoCallMode + 1 == CPO_CALL_MODE_COUNT
 		? CPO_CALL_MODE_OFF
 		: (CPO_CallMode_t)(gCW_CpoCallMode + 1));
 }
@@ -292,7 +301,8 @@ void CPO_Call_NextMode(void)
 void CPO_Call_Restart(void)
 {
 	// After a hit or a reveal the next callsign is already on its way
-	if (gCW_CpoCallMode == CPO_CALL_MODE_OFF || s_step == CPO_STEP_NEXT || s_step == CPO_STEP_ACK) {
+	if ((gCW_CpoCallMode != CPO_CALL_MODE_SEND && !CPO_Call_IsCopyMode())
+		|| s_step == CPO_STEP_NEXT || s_step == CPO_STEP_ACK) {
 		return;
 	}
 	StopPlayback();
@@ -325,7 +335,7 @@ void CPO_Call_ToggleAutoSpacing(void)
 
 void CPO_Call_OnChar(char ch)
 {
-	if (gCW_CpoCallMode == CPO_CALL_MODE_OFF) {
+	if (gCW_CpoCallMode != CPO_CALL_MODE_SEND && !CPO_Call_IsCopyMode()) {
 		return;
 	}
 
