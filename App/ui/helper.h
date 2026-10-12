@@ -41,6 +41,7 @@ void UI_DisplayFrequency(const char *string, uint8_t X, uint8_t Y, bool center);
 void UI_DisplayPopup(const char *string);
 
 void UI_DrawPixelBuffer(uint8_t (*buffer)[128], uint8_t x, uint8_t y, bool black);
+void UI_DrawArrow(uint8_t x, uint8_t y, int8_t dx, int8_t dy);
 #ifdef ENABLE_FEAT_F4HWN
     //void UI_DrawLineDottedBuffer(uint8_t (*buffer)[128], int16_t x1, int16_t y1, int16_t x2, int16_t y2, bool black);
     void PutPixel(uint8_t x, uint8_t y, bool fill);

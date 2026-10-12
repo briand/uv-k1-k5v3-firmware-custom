@@ -31,7 +31,10 @@
 #include "ui/cpo.h"
 #include "ui/helper.h"
 
-// MENU's controls card, in place of the whole screen
+// MENU's controls card, in place of the whole screen. The speed keys' < and > are
+// drawn as arrows on the side of the key that does it, the way SetNav names the keys,
+// as the CW speed popup draws them: up and down on a UV-K5 (the left key is UP), left
+// and right on a UV-K1.
 static void DisplayCard(void)
 {
 	const char *lines[CPO_CARD_LINES];
@@ -39,7 +42,23 @@ static void DisplayCard(void)
 
 	UI_PrintStringSmallBold("Controls", 0, 127, 0);
 	for (uint8_t i = 0; i < n; i++) {
-		UI_PrintStringSmallNormal(lines[i], 2, 0, i + 1);
+		char line[CPO_HINT_LINE_SIZE];
+		strcpy(line, lines[i]);
+		for (char *c = line; *c; c++) {
+			if (*c != '<' && *c != '>') {
+				continue;
+			}
+			// the 6-pixel character cell's middle, 7 pixels a character from x 2
+			const uint8_t x = 2 + 7 * (c - line) + 3, y = 8 * (i + 1) + 3;
+			const int8_t way = (*c == '<') ? -1 : 1;
+			if (gEeprom.SET_NAV) {
+				UI_DrawArrow(x, y + 2 * way, 0, way);
+			} else {
+				UI_DrawArrow(x + 2 * way, y, way, 0);
+			}
+			*c = ' ';
+		}
+		UI_PrintStringSmallNormal(line, 2, 0, i + 1);
 	}
 }
 
@@ -80,26 +99,22 @@ static bool DisplayDrill(char *text, uint8_t text_len)
 }
 
 #ifdef ENABLE_FEAT_NR7Y_CPO_QSO
-// The QSO drill: what to do and who you're working above your sending, or the score
-// once the QSO has ended. True when it has line 5.
-static bool DisplayQso(const char *text, uint8_t text_len)
+// The QSO drill: your sending, how to start until it knows your call, and QSOs logged
+// and failed where the drills keep their score. True when it has line 5.
+static bool DisplayQso(char *text, uint8_t text_len)
 {
-	char lines[5][CPO_QSO_LINE_SIZE];
+	char line[CPO_QSO_LINE_SIZE];
 
-	if (CPO_Qso_GetScore(lines)) {
-		for (uint8_t i = 0; i < 5; i++) {
-			UI_PrintStringSmallNormal(lines[i], 0, 127, i + 1);
-		}
-		return true;
+	if (CPO_Qso_GetHint(line)) {
+		UI_PrintStringSmallNormal(line, 0, 127, 1);
 	}
-	CPO_Qso_GetStatus(lines[0], lines[1]);
-	UI_PrintStringSmallNormal(lines[0], 0, 127, 1);
-	UI_PrintStringSmallNormal(lines[1], 0, 127, 2);
 	if (text_len > 0) {
 		UI_PrintStringCWLarge(text, 0, 3);
 	}
-	if (CPO_Qso_GetNotice(lines[2])) {
-		UI_PrintStringSmallNormal(lines[2], 0, 127, 5);
+	sprintf_(text, "%u/%u", gCW_CpoQsoLogged, gCW_CpoQsoFailed);
+	UI_PrintStringSmallNormal(text, 44, 104, 6);
+	if (CPO_Qso_GetNotice(line)) {
+		UI_PrintStringSmallNormal(line, 0, 127, 5);
 		return true;
 	}
 	return false;
@@ -127,16 +142,19 @@ void UI_DisplayCPO(void)
 		ST7565_BlitFullScreen();
 		return;
 	}
-	UI_PrintStringSmallNormal(titles[gCW_CpoCallMode], 0, 127, 0);
-
 	bool line5_taken;
 #ifdef ENABLE_FEAT_NR7Y_CPO_QSO
 	if (gCW_CpoCallMode == CPO_CALL_MODE_QSO) {
+		char title[CPO_QSO_LINE_SIZE];
+		sprintf_(title, "QSO %s", CPO_Qso_DifficultyName());
+		UI_PrintStringSmallNormal(title, 0, 127, 0);
 		line5_taken = DisplayQso(String, tx_len);
 	} else {
+		UI_PrintStringSmallNormal(titles[gCW_CpoCallMode], 0, 127, 0);
 		line5_taken = DisplayDrill(String, tx_len);
 	}
 #else
+	UI_PrintStringSmallNormal(titles[gCW_CpoCallMode], 0, 127, 0);
 	line5_taken = DisplayDrill(String, tx_len);
 #endif
 

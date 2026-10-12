@@ -42,6 +42,7 @@
 #ifdef ENABLE_CW_MODULATOR
 #include "app/cwkeyer.h"
 #include "app/cwmacro.h"
+#include "app/cwpopup.h"
 #endif
 
 #ifdef ENABLE_CODE_PRACTICE
@@ -55,6 +56,7 @@ static uint8_t s_entry_farnsworth_wpm;
 static bool s_entry_farnsworth_auto;
 static bool s_entry_noise;
 static uint8_t s_entry_noise_level;
+static uint8_t s_entry_difficulty;
 static bool s_flashlight_sending = false;
 #ifdef ENABLE_CW_MODULATOR
 static ModulationMode_t s_saved_modulation = MODULATION_CW;
@@ -76,15 +78,21 @@ static bool QsoDrill(void)
 }
 
 #ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
-// Sidetone level to DAC gain: as loud as the BK4819's sidetone at the same level up
-// to where the DAC tops out, about level 9 on a UV-K1, and the DAC's top above that
+// Sidetone level to DAC gain, out of 4096: as loud as the BK4819's sidetone at the
+// same level up to where the DAC tops out at its full scale, just under level 9 on a
+// UV-K1, and full scale above that. Full scale is fine for the sidetone alone: break-in
+// silences the stations while it sounds.
 static const uint16_t SIDETONE_DAC_GAIN[CW_SIDETONE_LEVEL_MAX + 1] = {
-	0, 12, 23, 46, 92, 183, 365, 728, 1453,
-	CWSYNTH_GAIN_MAX, CWSYNTH_GAIN_MAX, CWSYNTH_GAIN_MAX, CWSYNTH_GAIN_MAX,
-	CWSYNTH_GAIN_MAX, CWSYNTH_GAIN_MAX, CWSYNTH_GAIN_MAX,
+	0, 16, 32, 65, 130, 258, 516, 1029, 2053,
+	4096, 4096, 4096, 4096, 4096, 4096, 4096,
 };
 
 static bool s_noise = false;    // band noise: the receiver on AF under the tones
+static bool s_noise_muted = false;   // ...turned down for your sending
+static bool s_tx_down = false;       // the sidetone is keyed, as the synthesizer has been told
+static bool s_tx_transmit = false;   // ...for your sending, not a local cue
+
+
 static bool s_synth = false;    // practice tones on the DAC
 
 static uint16_t SidetoneDacGain(void)
@@ -95,7 +103,7 @@ static uint16_t SidetoneDacGain(void)
 // The drill's station follows the sidetone pitch and level, which the CW menu sets
 static void SetStationVoice(void)
 {
-	CWSYNTH_SetVoice(CWSYNTH_STATION, gEeprom.CW_TONE_FREQUENCY * 10, SidetoneDacGain());
+	CWSYNTH_SetVoice(CWSYNTH_STATION, gEeprom.CW_TONE_FREQUENCY * 10, CPO_StationGain());
 }
 
 // Tones go on the DAC under band noise, and always in the QSO drill, whose station
@@ -106,9 +114,11 @@ static void UpdateSynth(void)
 
 	if (want && !s_synth) {
 		CWSYNTH_Start();
+		CWSYNTH_SetHang(gEeprom.CW_HANG_10MS * 10u);
 		SetStationVoice();
 	} else if (!want && s_synth) {
 		CWSYNTH_Stop();
+		s_tx_down = false;
 	}
 	s_synth = want;
 }
@@ -121,6 +131,7 @@ static void NoiseStart(void)
 	BK4819_SetFilterBandwidth(RADIO_ResolveFilter(gTxVfo), true);
 	BK4819_SetAfDacGain(gEeprom.CW_PRACTICE_NOISE_LEVEL);
 	s_noise = true;
+	s_noise_muted = false;
 	UpdateSynth();
 	s_hint = 0;
 	s_hint_10ms = 0;
@@ -129,6 +140,7 @@ static void NoiseStart(void)
 static void NoiseStop(void)
 {
 	s_noise = false;
+	s_noise_muted = false;
 	UpdateSynth();
 	// Practice's quiet state, as CPO_Enter leaves it
 	BK4819_SetAF(BK4819_AF_ALAM);
@@ -159,13 +171,31 @@ bool CPO_SynthOn(void)
 	return s_synth;
 }
 
-void CPO_NoiseSidetone(bool down, bool cue)
+uint16_t CPO_StationGain(void)
+{
+	// stations keep headroom: several can sound at once
+	const uint16_t gain = SidetoneDacGain();
+	return (gain < CWSYNTH_GAIN_MAX) ? gain : CWSYNTH_GAIN_MAX;
+}
+
+void CPO_Sidetone(bool down, bool cue)
 {
 	if (down) {
 		CWSYNTH_SetVoice(CWSYNTH_SIDETONE, cue ? CW_ERROR_TONE_HZ : gEeprom.CW_TONE_FREQUENCY * 10,
 			SidetoneDacGain());
+		s_tx_transmit = !cue;
+		// Your sending drops the band noise at once, under the sidetone's start, by its
+		// AF DAC gain to the bottom, some 30 dB down. The BK4819 stays on receive audio:
+		// leaving its tone generator clicks, and its mute pulls the DAC's sidetone down
+		// with it. The tick puts the noise back once the hang time has run out.
+		if (!cue && s_noise && !s_noise_muted) {
+			s_noise_muted = true;
+			BK4819_SetAfDacGain(0);
+		}
 	}
-	CWSYNTH_Key(CWSYNTH_SIDETONE, down);
+	s_tx_down = down;
+	// The error dit is local, not sent: it breaks nothing in
+	CWSYNTH_Key(CWSYNTH_SIDETONE, down, s_tx_transmit);
 }
 
 #endif
@@ -191,7 +221,7 @@ uint8_t CPO_GetCard(const char *lines[CPO_CARD_LINES])
 {
 	uint8_t n = 0;
 
-	lines[n++] = "F drill  UP/DN wpm";
+	lines[n++] = "F drill  < > wpm";   // the speed keys' arrows: see CPO_GetCard
 #ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
 	lines[n++] = "9 noise  3/6 level";
 #endif
@@ -199,17 +229,22 @@ uint8_t CPO_GetCard(const char *lines[CPO_CARD_LINES])
 		lines[n++] = "2/8 gaps  0 auto";
 		lines[n++] = "5 replay the call";
 	} else if (QsoDrill()) {
+		// 4 is the difficulty here, not the flashlight
 		lines[n++] = "5 abandon the QSO";
+		lines[n++] = "4 difficulty";
+		lines[n++] = "* backlight";
 	} else if (gCW_CpoCallMode == CPO_CALL_MODE_SEND) {
 		lines[n++] = "5 restart the call";
 	} else {
 		lines[n++] = "5 clear the text";
 	}
+	if (!QsoDrill()) {
 #ifdef ENABLE_FLASHLIGHT
-	lines[n++] = "4 flash  * light";
+		lines[n++] = "4 flash  * light";
 #else
-	lines[n++] = "* backlight";
+		lines[n++] = "* backlight";
 #endif
+	}
 	lines[n++] = "EXIT quit practice";
 	return n;
 }
@@ -265,6 +300,7 @@ void CPO_Enter(void)
 	s_entry_farnsworth_auto = gEeprom.CW_FARNSWORTH_AUTO;
 	s_entry_noise = gEeprom.CW_PRACTICE_NOISE;
 	s_entry_noise_level = gEeprom.CW_PRACTICE_NOISE_LEVEL;
+	s_entry_difficulty = gEeprom.CW_QSO_DIFFICULTY;
     gCW_FlashlightSending = s_flashlight_sending;
 
 	// Park the radio for the session rather than asking for a VFO reconfigure --
@@ -350,7 +386,8 @@ void CPO_Exit(void)
 		|| gEeprom.CW_FARNSWORTH_WPM != s_entry_farnsworth_wpm
 		|| gEeprom.CW_FARNSWORTH_AUTO != s_entry_farnsworth_auto
 		|| gEeprom.CW_PRACTICE_NOISE != s_entry_noise
-		|| gEeprom.CW_PRACTICE_NOISE_LEVEL != s_entry_noise_level) {
+		|| gEeprom.CW_PRACTICE_NOISE_LEVEL != s_entry_noise_level
+		|| gEeprom.CW_QSO_DIFFICULTY != s_entry_difficulty) {
 		gRequestSaveSettings = true;
 	}
 }
@@ -373,8 +410,18 @@ void CPO_Tick(void)
 #endif
 #ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
 	CWSYNTH_Tick10ms();
-	if (s_synth) {
+	// The QSO drill sets its own station's pitch and level
+	if (s_synth && !QsoDrill()) {
 		SetStationVoice();
+	}
+	// Break-in follows the CW hang time, which the menu can change. Once it has run
+	// out after your last element, the band noise comes back at its level.
+	if (s_synth) {
+		CWSYNTH_SetHang(gEeprom.CW_HANG_10MS * 10u);
+		if (s_noise_muted && !s_tx_down && !CWSYNTH_Transmitting()) {
+			s_noise_muted = false;
+			BK4819_SetAfDacGain(gEeprom.CW_PRACTICE_NOISE_LEVEL);
+		}
 	}
 #endif
 	if (++s_hint_10ms >= CPO_HINT_10MS) {
@@ -390,8 +437,30 @@ void CPO_Tick(void)
 	}
 }
 
+// Speed a step up or down, the way the CW speed popup goes (it follows SetNav), with
+// the error dit at either end
+static void StepWpm(int8_t direction)
+{
+	const int wpm = gEeprom.CW_KEY_WPM + direction;
+
+	if (wpm < 10 || wpm > 45) {
+		CW_ErrorBeep();
+		return;
+	}
+	gEeprom.CW_KEY_WPM = wpm;
+	CW_UpdateWPM();
+	gUpdateDisplay = true;
+}
+
 void CPO_ProcessKeys(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 {
+	// Speed steps on the press and on every repeat while the arrow is held, as the CW
+	// speed popup's do
+	if ((Key == KEY_UP || Key == KEY_DOWN) && bKeyPressed && !s_card) {
+		StepWpm(CW_Popup_KeyDirection(Key));
+		return;
+	}
+
 	if (!bKeyPressed || bKeyHeld) {
 		return;
 	}
@@ -410,26 +479,6 @@ void CPO_ProcessKeys(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 		gUpdateDisplay = true;
 		break;
 
-	case KEY_UP:
-		if (gEeprom.CW_KEY_WPM < 45) {
-			gEeprom.CW_KEY_WPM++;
-#ifdef ENABLE_CW_MODULATOR
-			CW_UpdateWPM();
-#endif
-			gUpdateDisplay = true;
-		}
-		break;
-
-	case KEY_DOWN:
-		if (gEeprom.CW_KEY_WPM > 10) {
-			gEeprom.CW_KEY_WPM--;
-#ifdef ENABLE_CW_MODULATOR
-			CW_UpdateWPM();
-#endif
-			gUpdateDisplay = true;
-        }
-		break;
-
 	case KEY_STAR:
 		gCW_CpoBacklightOn = !gCW_CpoBacklightOn;
 		if (gCW_CpoBacklightOn) {
@@ -443,6 +492,12 @@ void CPO_ProcessKeys(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 		break;
 
 	case KEY_4:
+#ifdef ENABLE_FEAT_NR7Y_CPO_QSO
+		if (QsoDrill()) {
+			CPO_Qso_NextDifficulty();
+			break;
+		}
+#endif
 #ifdef ENABLE_FLASHLIGHT
 		gCW_FlashlightSending = !gCW_FlashlightSending;
         s_flashlight_sending = gCW_FlashlightSending;

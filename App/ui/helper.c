@@ -354,6 +354,14 @@ void UI_DrawPixelBuffer(uint8_t (*buffer)[128], uint8_t x, uint8_t y, bool black
         buffer[y/8][x] &= ~pattern;
 }
 
+// Arrowhead 4 px deep and 7 px across with its tip at (x, y), pointing along (dx, dy)
+void UI_DrawArrow(uint8_t x, uint8_t y, int8_t dx, int8_t dy)
+{
+	for (int8_t depth = 0; depth < 4; depth++)
+		for (int8_t side = -depth; side <= depth; side++)
+			UI_DrawPixelBuffer(gFrameBuffer, x - depth * dx + side * dy, y - depth * dy + side * dx, true);
+}
+
 static void sort(int16_t *a, int16_t *b)
 {
     if(*a > *b) {

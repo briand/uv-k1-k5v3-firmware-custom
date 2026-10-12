@@ -952,14 +952,6 @@ static void DrawCWPopupKeyInput(uint8_t index)
 		UI_PrintStringSmallNormal(last + 1, 9, 118, 4);
 }
 
-// Arrowhead 4 px deep and 7 px across with its tip at (x, y), pointing along (dx, dy)
-static void DrawCWPopupArrow(uint8_t x, uint8_t y, int8_t dx, int8_t dy)
-{
-	for (int8_t depth = 0; depth < 4; depth++)
-		for (int8_t side = -depth; side <= depth; side++)
-			UI_DrawPixelBuffer(gFrameBuffer, x - depth * dx + side * dy, y - depth * dy + side * dx, true);
-}
-
 // Lift the popup's title row (line 2, inside the box) n pixels into line 1, under the
 // box's top border at row 9, to open a gap above the value
 static void RaiseCWPopupTitle(uint8_t n)
@@ -1035,12 +1027,12 @@ static void DrawCWPopup(void)
 	// sits under it; with the UV-K1's LEFT/RIGHT the left key steps down.
 	if (kind == CW_POPUP_KEYER_MODE || kind == CW_POPUP_SPEED || kind == CW_POPUP_KEY_INPUT) {
 		if (gEeprom.SET_NAV) {
-			DrawCWPopupArrow(17, 34, 0, -1);  // rows 34-37
-			DrawCWPopupArrow(17, 44, 0, 1);   // rows 41-44
+			UI_DrawArrow(17, 34, 0, -1);  // rows 34-37
+			UI_DrawArrow(17, 44, 0, 1);   // rows 41-44
 		}
 		else {
-			DrawCWPopupArrow(15,  41, -1, 0);  // rows 38-44
-			DrawCWPopupArrow(112, 41, 1, 0);
+			UI_DrawArrow(15,  41, -1, 0);  // rows 38-44
+			UI_DrawArrow(112, 41, 1, 0);
 		}
 	}
 }

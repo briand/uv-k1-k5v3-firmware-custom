@@ -47,6 +47,7 @@ void CW_Popup_StepKeyerMode(void);  // first press shows the current mode, later
 void CW_Popup_StepKeyInput(void);   // first press shows the current input, later presses step it
 
 bool CW_Popup_ProcessKey(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld);  // true when the key was used
+int8_t CW_Popup_KeyDirection(KEY_Code_t Key);  // up/down as +1/-1, flipped like the menu and dial when SetNav is off
 void CW_Popup_OnAction(uint8_t action);  // a side key action is about to run
 void CW_Popup_OnKeying(void);      // the keyer or playback just keyed an element
 void CW_Popup_Tick10ms(void);

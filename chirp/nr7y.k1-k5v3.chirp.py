@@ -898,12 +898,13 @@ _NR7Y_CW_HANG_10MS_MIN = 1
 _NR7Y_CW_HANG_10MS_MAX = 200
 _NR7Y_CW_HANG_10MS_DEFAULT = 30
 
-# Code practice band noise (CW byte 6): level in bits 0-3 (shown 1-16), on in
-# bit 4, and valid only with bits 5-7 clear, since pre-1.0 betas left an ADC byte
-# there. Unset (0xFF) is off at the top level. Mirrors
-# CW_PRACTICE_NOISE_LEVEL_* in App/settings.h.
+# Code practice (CW byte 6): band noise level in bits 0-3 (shown 1-16), noise on
+# in bit 4, QSO drill difficulty in bits 5-6. Valid only with bit 7 clear and a
+# difficulty in range. Unset (0xFF) is noise off at the top level, and Easy.
+# Mirrors CW_PRACTICE_NOISE_LEVEL_* and CW_QSO_* in App/settings.h.
 _NR7Y_CW_NOISE_LEVEL_MAX = 15
 _NR7Y_CW_NOISE_LEVEL_DEFAULT = 15
+_NR7Y_CW_QSO_DIFFICULTIES = ["Easy", "Medium", "Hard"]
 
 # Extended key actions for NR7Y firmware with CW modulator, mirroring
 # App/settings.h enum ACTION_OPT_t.
@@ -4275,6 +4276,19 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
         except Exception as e:
             LOG.error("CW practice noise level: %s", e)
 
+        try:
+            rs_qd = RadioSetting("cw_qso_difficulty", "QSO Drill Difficulty",
+                                 RadioSettingValueList(
+                                     _NR7Y_CW_QSO_DIFFICULTIES,
+                                     _NR7Y_CW_QSO_DIFFICULTIES[self._get_cw_qso_difficulty()]))
+            rs_qd.set_doc("How the QSO drill's stations come on: Easy is strong, at "
+                          "your speed, on a paddle; Medium and Hard bring other "
+                          "speeds, weak and fading signals, bugs and straight keys, "
+                          "chirp, and impatient tail-enders (key 4 in the drill)")
+            cw.append(rs_qd)
+        except Exception as e:
+            LOG.error("CW QSO difficulty: %s", e)
+
         # CW Macros (4 messages)
         macros = RadioSettingGroup("cw_macros", "CW Macros")
         for i in range(1, 5):
@@ -4391,6 +4405,9 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
                 self._set_cw_practice_noise(["OFF", "ON"].index(str(element.value)))
             elif name == "cw_practice_noise_level":
                 self._set_cw_practice_noise_level(int(element.value) - 1)
+            elif name == "cw_qso_difficulty":
+                self._set_cw_qso_difficulty(
+                    _NR7Y_CW_QSO_DIFFICULTIES.index(str(element.value)))
             elif name.startswith("cw_msg"):
                 # "cw_msg1" → idx 1 … "cw_msg4" → idx 4
                 self._set_cw_msg(int(name[6:]), str(element.value))
@@ -4587,14 +4604,17 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
         units = max(_NR7Y_CW_HANG_10MS_MIN, min(_NR7Y_CW_HANG_10MS_MAX, int(ms) // 10))
         self._mmap_set(_NR7Y_CW_SETTINGS_ADDR + 7, units)
 
-    # -- Code practice band noise (CW byte 6: level bits 0-3, on bit 4) --
+    # -- Code practice (CW byte 6: noise level bits 0-3, noise on bit 4,
+    #    QSO difficulty bits 5-6) --
     # An unset byte left at the defaults stays unset, as the firmware reads it the
     # same way.
 
     def _cw_byte6(self):
         """Return CW byte 6, or None while it is unset or invalid."""
         b = self._mmap_byte(_NR7Y_CW_SETTINGS_ADDR + 6)
-        return b if (b & 0xE0) == 0 else None
+        if b >= 0x80 or ((b >> 5) & 0x03) >= len(_NR7Y_CW_QSO_DIFFICULTIES):
+            return None
+        return b
 
     def _get_cw_practice_noise(self):
         """Return 1=ON, 0=OFF."""
@@ -4613,7 +4633,7 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
                 return
             b = _NR7Y_CW_NOISE_LEVEL_DEFAULT
         self._mmap_set(_NR7Y_CW_SETTINGS_ADDR + 6,
-                       (b & 0x0F) | ((1 if enable else 0) << 4))
+                       (b & 0x6F) | ((1 if enable else 0) << 4))
 
     def _set_cw_practice_noise_level(self, level):
         level = max(0, min(_NR7Y_CW_NOISE_LEVEL_MAX, int(level)))
@@ -4622,7 +4642,21 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
             if level == _NR7Y_CW_NOISE_LEVEL_DEFAULT:
                 return
             b = 0
-        self._mmap_set(_NR7Y_CW_SETTINGS_ADDR + 6, (b & 0x10) | level)
+        self._mmap_set(_NR7Y_CW_SETTINGS_ADDR + 6, (b & 0x70) | level)
+
+    def _get_cw_qso_difficulty(self):
+        """Return 0=Easy, 1=Medium, 2=Hard."""
+        b = self._cw_byte6()
+        return 0 if b is None else (b >> 5) & 0x03
+
+    def _set_cw_qso_difficulty(self, difficulty):
+        difficulty = max(0, min(len(_NR7Y_CW_QSO_DIFFICULTIES) - 1, int(difficulty)))
+        b = self._cw_byte6()
+        if b is None:
+            if difficulty == 0:
+                return
+            b = _NR7Y_CW_NOISE_LEVEL_DEFAULT
+        self._mmap_set(_NR7Y_CW_SETTINGS_ADDR + 6, (b & 0x1F) | (difficulty << 5))
 
     # ------------------------------------------------------------------ CW macro read/write
 

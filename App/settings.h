@@ -112,6 +112,14 @@ typedef enum CW_IambicMode_t CW_IambicMode_t;
 #define CW_PRACTICE_NOISE_LEVEL_MAX     15
 #define CW_PRACTICE_NOISE_LEVEL_DEFAULT 15
 
+// QSO drill difficulty: how the stations it puts on the air speak (see cpoqso.c)
+enum {
+	CW_QSO_EASY = 0,
+	CW_QSO_MEDIUM,
+	CW_QSO_HARD,
+	CW_QSO_DIFFICULTIES,
+};
+
 #endif
 
 enum TxLockModes_t {
@@ -443,6 +451,7 @@ typedef struct {
 	bool                  CW_FARNSWORTH_AUTO;   // copy practice narrows and widens the spacing on its own
 	bool                  CW_PRACTICE_NOISE;    // code practice plays live receive audio under the sidetone
 	uint8_t               CW_PRACTICE_NOISE_LEVEL;  // its AF DAC gain, 0-15
+	uint8_t               CW_QSO_DIFFICULTY;    // QSO drill, CW_QSO_EASY to CW_QSO_HARD
 #endif
 
 } EEPROM_Config_t;
