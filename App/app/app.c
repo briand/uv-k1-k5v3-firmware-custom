@@ -1710,7 +1710,12 @@ void APP_TimeSlice10ms(void)
     if (gCurrentFunction != FUNCTION_POWER_SAVE || !gRxIdleMode)
         CheckRadioInterrupts();
 #ifdef ENABLE_FEAT_F4HWN_ACTION_PICKER
-    if (gActionPickerKey != 0 && FUNCTION_IsRx()) {
+    // Close the picker when a signal actually arrives. Not FUNCTION_IsRx():
+    // that includes FUNCTION_MONITOR, which ENABLE_CW_MODULATOR holds on
+    // permanently for CW and USB channels, so the picker was dismissed on the
+    // very next tick and never appeared in those modes.
+    if (gActionPickerKey != 0 &&
+        (gCurrentFunction == FUNCTION_INCOMING || gCurrentFunction == FUNCTION_RECEIVE)) {
         gActionPickerKey = 0;
         gUpdateDisplay = true;
     }
