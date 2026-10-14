@@ -34,7 +34,8 @@
 
 // MENU's settings menu over the whole screen, laid out as the main menu: the row's
 // name big in the left pane between its neighbours' small ones, its value big in the
-// right pane, and the row count under the dotted rule. Editing, the name moves to the
+// right pane, and the row count under the dotted rule, with a PRACTICE badge against
+// the divider beside it that tells it from the main menu. Editing, the name moves to the
 // top and its neighbours go, as in the main menu. On the key list the speed keys are
 // arrows, drawn the way SetNav names the keys as the CW speed popup draws them: up and
 // down on a UV-K5 (the left key is UP), left and right on a UV-K1.
@@ -42,6 +43,10 @@ static void DisplayMenu(const CPO_Menu_t *menu)
 {
 	char text[12];
 
+	// The main menu's rounded badge at the foot of the value pane, so it doesn't read as
+	// the value's title, its left edge on the divider (x 48-106). It goes down first: it
+	// inverts what's under it, and the divider drawn over it stays whole.
+	UI_PrintStringSmallNormalInverse("PRACTICE", 49, 0, 6);
 	UI_DrawLineBuffer(gFrameBuffer, 48, 0, 48, 55, 1);
 	for (uint8_t x = 0; x < 48; x += 2) {
 		gFrameBuffer[5][x] = 0x40;
