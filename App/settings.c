@@ -416,7 +416,8 @@ gEeprom.FreqChannel[1]   = IS_FREQ_CHANNEL(Data16[5]) ? Data16[5] : (FREQ_CHANNE
 	PY25Q16_ReadBuffer(0x00A140, Data, 8);
 	gEeprom.CW_TONE_FREQUENCY = Data[0] == 0xff ? 60 : 45 + (Data[0] & 0xf) * 5;  // Same as gMenuSelection: 50 Hz steps from 450, default 600
 	gEeprom.CW_SIDETONE_LEVEL = Data[0] == 0xff ? CW_SIDETONE_LEVEL_DEFAULT : s_cw_sidetone_code_to_level[Data[0] >> 4];  // menu level 0-15 (0=off), stored as a code in bits 4-7; see CW_ApplySidetoneGain for the applied gain curve
-	gEeprom.CW_KEY_WPM        = ((Data[1] & 0x7f) <= 45 && (Data[1] & 0x7f) >= 10) ? Data[1] & 0x7f : 18;  // bits 0-6, valid range 10-45, default 18 WPM
+	const bool wpm_valid = (Data[1] & 0x3f) <= 45 && (Data[1] & 0x3f) >= 10;
+	gEeprom.CW_KEY_WPM        = wpm_valid ? Data[1] & 0x3f : 18;  // bits 0-5, valid range 10-45, default 18 WPM
 	// Data[4]: keyer mode in bits 0-1, copy practice effective speed in bits 2-7 (0 = off).
 	// 0xFF = not yet written (old layout packed mode into bit 7 of Data[1]). Carry-over:
 	// read legacy bit if Data[1] is valid, then always write the new byte on next save.
@@ -435,6 +436,12 @@ gEeprom.FreqChannel[1]   = IS_FREQ_CHANNEL(Data16[5]) ? Data16[5] : (FREQ_CHANNE
 	gEeprom.CW_KEY_INPUT 	  = CW_KEY_INPUT_menu_to_bitmap[gEeprom.CW_KEY_INPUT_MENU];
 	gEeprom.CW_BREAKIN_ENABLE	  = (Data[2] < 0x80) ? ((Data[2] >> 6) & 0x01) : 1;  // bit 6: 0=break-in off, 1=break-in on, default on
 	gEeprom.CW_FARNSWORTH_AUTO	  = (Data[2] < 0x80) && (Data[2] & 0x20);  // bit 5: copy practice auto spacing, default off
+	// Practice callsigns' greatest length, less CW_CALL_LEN_MIN, XOR the default's, in two
+	// bits every earlier save left 0: Data[1] bit 6 (above any speed) and Data[2] bit 4
+	// (above any key input). So those zeros read as the default, as does a byte that
+	// isn't valid.
+	const uint8_t call_len = ((wpm_valid ? Data[1] >> 6 : 0) & 0x01) | ((Data[2] < 0x80 ? Data[2] >> 3 : 0) & 0x02);
+	gEeprom.CW_CALL_LEN = CW_CALL_LEN_MIN + (call_len ^ (CW_CALL_LEN_DEFAULT - CW_CALL_LEN_MIN));
 	// Data[3]: high bit = invalid, bits 0-6 = repeat delay (seconds)
 	gEeprom.CW_MESSAGE_REPEAT_DELAY = (Data[3] < 0x80) ? (Data[3] & 0x7F) : 4;  // default 4s
 	// Data[5]: proper roger dah length in dits in bits 0-4. 0xFF (unused since v1.0.0) or out
@@ -1161,8 +1168,9 @@ void SETTINGS_SaveSettings(void)
     State = SecBuf;
 
 	State[0] = (gEeprom.CW_TONE_FREQUENCY - 45) / 5 | (CWSidetoneLevelToCode(gEeprom.CW_SIDETONE_LEVEL) << 4);
-	State[1] = gEeprom.CW_KEY_WPM & 0x7F;  // WPM in bits 0-6; keyer mode moved to State[4]
-	State[2] = (gEeprom.CW_KEY_INPUT_MENU & 0x1F) | (gEeprom.CW_FARNSWORTH_AUTO << 5) | ((gEeprom.CW_BREAKIN_ENABLE & 0x01) << 6);  // key input in bits 0-4, auto spacing bit 5, breakin bit 6
+	const uint8_t call_len = (gEeprom.CW_CALL_LEN - CW_CALL_LEN_MIN) ^ (CW_CALL_LEN_DEFAULT - CW_CALL_LEN_MIN);
+	State[1] = (gEeprom.CW_KEY_WPM & 0x3F) | (call_len & 0x01) << 6;  // WPM in bits 0-5, call length's low bit in 6; keyer mode moved to State[4]
+	State[2] = (gEeprom.CW_KEY_INPUT_MENU & 0x0F) | (call_len & 0x02) << 3 | (gEeprom.CW_FARNSWORTH_AUTO << 5) | ((gEeprom.CW_BREAKIN_ENABLE & 0x01) << 6);  // key input in bits 0-3, call length's high bit 4, auto spacing bit 5, breakin bit 6
 	// State[3]: store menu value (delay/2) in bits 0-6, clear high bit to mark valid
 	State[3] = (gEeprom.CW_MESSAGE_REPEAT_DELAY) & 0x7F;
 	State[4] = (uint8_t)gEeprom.CW_KEYER_MODE | (gEeprom.CW_FARNSWORTH_WPM << 2);  // keyer mode (0=A, 1=B, 2=Ultimatic, 3=Bug) in bits 0-1, effective speed in bits 2-7

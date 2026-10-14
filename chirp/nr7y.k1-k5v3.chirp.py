@@ -910,6 +910,16 @@ _NR7Y_CW_QSO_DIFFICULTIES = ["Easy", "Medium", "Hard"]
 _NR7Y_CW_QSO_PILE_MAX = 4      # mirrors CW_QSO_PILE_* in App/settings.h
 _NR7Y_CW_QSO_PILE_DEFAULT = 3
 
+# Practice callsigns' greatest length, 4-7, mirrors CW_CALL_LEN_* in App/settings.h.
+# 6 (the default) is no limit, and 7 adds portable calls. Stored as (length - 4)
+# XOR (default - 4) in two bits earlier firmware always left 0, so they read as the
+# default: bit 6 of byte 1 (above the speed) holds the low bit, bit 4 of byte 2
+# (above the key input) the high one. A byte that isn't valid counts 0.
+_NR7Y_CW_CALL_LEN_MIN = 4
+_NR7Y_CW_CALL_LEN_MAX = 7
+_NR7Y_CW_CALL_LEN_DEFAULT = 6
+_NR7Y_CW_WPM_DEFAULT = 18
+
 # Extended key actions for NR7Y firmware with CW modulator, mirroring
 # App/settings.h enum ACTION_OPT_t.
 #
@@ -4304,6 +4314,19 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
         except Exception as e:
             LOG.error("CW QSO pile-up: %s", e)
 
+        try:
+            rs_cl = RadioSetting("cw_call_len", "Practice Callsign Length",
+                                 RadioSettingValueInteger(_NR7Y_CW_CALL_LEN_MIN,
+                                                          _NR7Y_CW_CALL_LEN_MAX,
+                                                          self._get_cw_call_len()))
+            rs_cl.set_doc("The longest callsign the send, copy and QSO drills use, "
+                          "4-7. They run 4-6 characters, so 6 is no limit; 7 adds "
+                          "portable calls such as K7ABC/P and W1AB/7 (keys 1 and 7 "
+                          "in the send and copy drills)")
+            cw.append(rs_cl)
+        except Exception as e:
+            LOG.error("CW practice call length: %s", e)
+
         # CW Macros (4 messages)
         macros = RadioSettingGroup("cw_macros", "CW Macros")
         for i in range(1, 5):
@@ -4425,6 +4448,8 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
                     _NR7Y_CW_QSO_DIFFICULTIES.index(str(element.value)))
             elif name == "cw_qso_pile":
                 self._set_cw_qso_pile(int(element.value))
+            elif name == "cw_call_len":
+                self._set_cw_call_len(int(element.value))
             elif name.startswith("cw_msg"):
                 # "cw_msg1" → idx 1 … "cw_msg4" → idx 4
                 self._set_cw_msg(int(name[6:]), str(element.value))
@@ -4517,28 +4542,32 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
         mode = self._get_cw_keyer_mode()
         self._mmap_set(_NR7Y_CW_SETTINGS_ADDR + 4, mode | (eff << 2))
 
-    # -- Keyer speed (bits 0-6 of CW byte 1; mode no longer shares this byte) --
+    # -- Keyer speed (bits 0-5 of CW byte 1; bit 6 is the practice call length's
+    #    low bit; mode no longer shares this byte) --
+
+    def _cw_byte1_valid(self, b):
+        return 10 <= (b & 0x3F) <= 45
 
     def _get_cw_wpm(self):
         """Return WPM (10-45)."""
         b = self._mmap_byte(_NR7Y_CW_SETTINGS_ADDR + 1)
-        if b == 0xFF:
-            return 18  # Default 18 WPM
-        wpm = b & 0x7F
-        return wpm if 10 <= wpm <= 45 else 18
+        return b & 0x3F if self._cw_byte1_valid(b) else _NR7Y_CW_WPM_DEFAULT
 
     def _set_cw_wpm(self, wpm):
         wpm = max(10, min(45, int(wpm)))
-        self._mmap_set(_NR7Y_CW_SETTINGS_ADDR + 1, wpm & 0x7F)
+        b = self._mmap_byte(_NR7Y_CW_SETTINGS_ADDR + 1)
+        keep = (b & 0x40) if self._cw_byte1_valid(b) else 0   # call length's low bit
+        self._mmap_set(_NR7Y_CW_SETTINGS_ADDR + 1, wpm | keep)
 
-    # -- Key input mode (bits 0-4 of CW byte 2) --
+    # -- Key input mode (bits 0-3 of CW byte 2; bit 4 is the practice call length's
+    #    high bit) --
 
     def _get_cw_key_input_idx(self):
         """Return key input menu index 0-10."""
         b = self._mmap_byte(_NR7Y_CW_SETTINGS_ADDR + 2)
         if b == 0xFF or b >= 0x80:
             return 0   # Default HandKey
-        idx = b & 0x1F
+        idx = b & 0x0F
         return idx if idx < len(_NR7Y_CW_KEY_INPUT_MODES) else 0
 
     def _set_cw_key_input_idx(self, idx):
@@ -4546,9 +4575,10 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
             idx = 0
         b = self._mmap_byte(_NR7Y_CW_SETTINGS_ADDR + 2)
         break_in = (b >> 6) & 0x01
-        auto = (b & 0x20) if b < 0x80 else 0   # bit 5: copy practice auto spacing
+        # bit 4: call length's high bit, bit 5: copy practice auto spacing
+        keep = (b & 0x30) if b < 0x80 else 0
         self._mmap_set(_NR7Y_CW_SETTINGS_ADDR + 2,
-                       (int(idx) & 0x1F) | auto | (break_in << 6))
+                       (int(idx) & 0x0F) | keep | (break_in << 6))
 
     # -- Break-in enable (bit 6 of CW byte 2) --
 
@@ -4562,6 +4592,8 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
     def _set_cw_breakin(self, enable):
         enable = 1 if enable else 0
         b = self._mmap_byte(_NR7Y_CW_SETTINGS_ADDR + 2)
+        if b >= 0x80:
+            b = 0x00   # blank byte: HandKey, the call length's default
         auto = (b & 0x20) if b < 0x80 else 0   # bit 5: copy practice auto spacing
         self._mmap_set(_NR7Y_CW_SETTINGS_ADDR + 2,
                        (b & 0x1F) | auto | (enable << 6))
@@ -4628,6 +4660,32 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
             b = _NR7Y_CW_ROGER_DITS_DEFAULT
         code = ((size - 1) ^ (_NR7Y_CW_QSO_PILE_DEFAULT - 1)) & 0x03
         self._mmap_set(_NR7Y_CW_SETTINGS_ADDR + 5, (b & 0x1F) | (code << 5))
+
+    # -- Practice callsign length (CW byte 1 bit 6, byte 2 bit 4) --
+
+    def _get_cw_call_len(self):
+        """Return the longest practice callsign (4-7; 7 adds portable calls)."""
+        b1 = self._mmap_byte(_NR7Y_CW_SETTINGS_ADDR + 1)
+        b2 = self._mmap_byte(_NR7Y_CW_SETTINGS_ADDR + 2)
+        code = (((b1 >> 6) & 0x01) if self._cw_byte1_valid(b1) else 0) | \
+            (((b2 >> 3) & 0x02) if b2 < 0x80 else 0)
+        return _NR7Y_CW_CALL_LEN_MIN + \
+            (code ^ (_NR7Y_CW_CALL_LEN_DEFAULT - _NR7Y_CW_CALL_LEN_MIN))
+
+    def _set_cw_call_len(self, length):
+        length = max(_NR7Y_CW_CALL_LEN_MIN, min(_NR7Y_CW_CALL_LEN_MAX, int(length)))
+        if length == self._get_cw_call_len():
+            return  # unchanged: an unset byte stays unset
+        code = (length - _NR7Y_CW_CALL_LEN_MIN) ^ \
+            (_NR7Y_CW_CALL_LEN_DEFAULT - _NR7Y_CW_CALL_LEN_MIN)
+        b1 = self._mmap_byte(_NR7Y_CW_SETTINGS_ADDR + 1)
+        if not self._cw_byte1_valid(b1):
+            b1 = _NR7Y_CW_WPM_DEFAULT   # blank byte: the firmware's default speed
+        self._mmap_set(_NR7Y_CW_SETTINGS_ADDR + 1, (b1 & 0x3F) | (code & 0x01) << 6)
+        b2 = self._mmap_byte(_NR7Y_CW_SETTINGS_ADDR + 2)
+        if b2 >= 0x80:
+            b2 = 0x40   # blank byte: the firmware's defaults (HandKey, break-in on)
+        self._mmap_set(_NR7Y_CW_SETTINGS_ADDR + 2, (b2 & ~0x10 & 0x7F) | (code & 0x02) << 3)
 
     # -- Break-in hang time (full byte at CW byte 7, 10 ms units) --
 

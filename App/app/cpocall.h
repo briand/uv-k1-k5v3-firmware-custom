@@ -33,7 +33,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define CPO_CALL_MAX_LEN 6
+#define CPO_CALL_MAX_LEN 7   // CW_CALL_LEN_MAX: a portable call such as K7ABC/P
 #define CPO_CALL_LINE_SIZE (CPO_CALL_MAX_LEN + 2)   // notes plus '?' plus NUL
 #define CPO_CALL_NOTICE_SIZE 15                     // "Spacing 12 WPM" plus NUL
 
@@ -56,9 +56,10 @@ typedef enum {
 // Switch mode; resets the score and starts on a new callsign
 void CPO_Call_SetMode(CPO_CallMode_t mode);
 
-// A random callsign like the drill's: US, or DX from a list of common prefixes.
-// Returns the DX prefix's index in that list, or -1 for a US call, whose call area
-// is its digit.
+// A random callsign like the drill's: US, or DX from a list of common prefixes, no
+// longer than CW_CALL_LEN. At CW_CALL_LEN_MAX some are portable: a DX call /P, a US
+// call / another call area. Returns the DX prefix's index in that list, or -1 for a
+// US call, whose call area is its last digit.
 int8_t CPO_Call_Generate(char out[CPO_CALL_MAX_LEN + 1]);
 
 // The drill's random numbers (xorshift32), reseeded with each new callsign
@@ -78,6 +79,10 @@ uint8_t CPO_Call_EffectiveWPM(void);
 // 2 and 8 keys, copy mode only: effective speed one step up (narrower gaps) or
 // down (wider). Stepping up to the keyer speed turns the spacing off.
 void CPO_Call_StepSpacing(bool narrower);
+
+// 1 and 7 keys, the callsign drills: the longest call, from the next one on, up or
+// down; an error dit past CW_CALL_LEN_MIN or CW_CALL_LEN_MAX
+void CPO_Call_StepCallLen(bool longer);
 
 // 0 key, copy mode only: auto spacing on/off
 void CPO_Call_ToggleAutoSpacing(void);

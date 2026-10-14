@@ -124,6 +124,12 @@ enum {
 #define CW_QSO_PILE_MAX     4
 #define CW_QSO_PILE_DEFAULT 3
 
+// Practice callsigns' greatest length. The drills' calls run 4 to 6 characters, so 6
+// (the default) is no limit, and 7 adds portable calls such as K7ABC/P and W1AB/7.
+#define CW_CALL_LEN_MIN     4
+#define CW_CALL_LEN_MAX     7
+#define CW_CALL_LEN_DEFAULT 6
+
 #endif
 
 enum TxLockModes_t {
@@ -457,6 +463,7 @@ typedef struct {
 	uint8_t               CW_PRACTICE_NOISE_LEVEL;  // its AF DAC gain, 0-15
 	uint8_t               CW_QSO_DIFFICULTY;    // QSO drill, CW_QSO_EASY to CW_QSO_HARD
 	uint8_t               CW_QSO_PILE;          // QSO drill, most callers at once, 1 to CW_QSO_PILE_MAX
+	uint8_t               CW_CALL_LEN;          // practice callsigns, at most this long, CW_CALL_LEN_MIN to _MAX
 #endif
 
 } EEPROM_Config_t;
