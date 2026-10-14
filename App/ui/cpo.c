@@ -32,34 +32,47 @@
 #include "ui/cpo.h"
 #include "ui/helper.h"
 
-// MENU's controls card, in place of the whole screen. The speed keys' < and > are
-// drawn as arrows on the side of the key that does it, the way SetNav names the keys,
-// as the CW speed popup draws them: up and down on a UV-K5 (the left key is UP), left
-// and right on a UV-K1.
-static void DisplayCard(void)
+// MENU's settings menu over the whole screen, laid out as the main menu: the row's
+// name big in the left pane between its neighbours' small ones, its value big in the
+// right pane, and the row count under the dotted rule. Editing, the name moves to the
+// top and its neighbours go, as in the main menu. On the key list the speed keys are
+// arrows, drawn the way SetNav names the keys as the CW speed popup draws them: up and
+// down on a UV-K5 (the left key is UP), left and right on a UV-K1.
+static void DisplayMenu(const CPO_Menu_t *menu)
 {
-	const char *lines[CPO_CARD_LINES];
-	const uint8_t n = CPO_GetCard(lines);
+	char text[12];
 
-	UI_PrintStringSmallBold("Controls", 0, 127, 0);
-	for (uint8_t i = 0; i < n; i++) {
-		char line[CPO_CARD_LINE_SIZE];
-		strcpy(line, lines[i]);
-		for (char *c = line; *c; c++) {
-			if (*c != '<' && *c != '>') {
-				continue;
-			}
-			// the 6-pixel character cell's middle, 7 pixels a character from x 2
-			const uint8_t x = 2 + 7 * (c - line) + 3, y = 8 * (i + 1) + 3;
-			const int8_t way = (*c == '<') ? -1 : 1;
-			if (gEeprom.SET_NAV) {
-				UI_DrawArrow(x, y + 2 * way, 0, way);
-			} else {
-				UI_DrawArrow(x + 2 * way, y, way, 0);
-			}
-			*c = ' ';
+	UI_DrawLineBuffer(gFrameBuffer, 48, 0, 48, 55, 1);
+	for (uint8_t x = 0; x < 48; x += 2) {
+		gFrameBuffer[5][x] = 0x40;
+	}
+	if (menu->editing) {
+		UI_PrintString(menu->name, 0, 0, 0, 8);
+	} else {
+		UI_PrintStringSmallNormal(menu->prev, 0, 0, 1);
+		UI_PrintString(menu->name, 0, 0, 2, 8);
+		UI_PrintStringSmallNormal(menu->next, 0, 0, 4);
+	}
+	sprintf_(text, "%02u/%02u", menu->index + 1, menu->count);
+	UI_PrintStringSmallNormal(text, 6, 0, 6);
+
+	if (!menu->keys) {
+		UI_PrintString(menu->value, 50, 127, 2, 8);
+		return;
+	}
+	sprintf_(text, "5  %s", menu->again);
+	UI_PrintStringSmallNormal("F  drill", 52, 0, 1);
+	UI_PrintStringSmallNormal(text, 52, 0, 2);
+	UI_PrintStringSmallNormal("*  light", 52, 0, 3);
+	UI_PrintStringSmallNormal("    speed", 52, 0, 4);
+	// in the first and third character cells, at their middles
+	for (int8_t way = -1; way <= 1; way += 2) {
+		const uint8_t x = 52 + 3 + 7 * (way + 1), y = 8 * 4 + 3;
+		if (gEeprom.SET_NAV) {
+			UI_DrawArrow(x, y + 2 * way, 0, way);
+		} else {
+			UI_DrawArrow(x + 2 * way, y, way, 0);
 		}
-		UI_PrintStringSmallNormal(line, 2, 0, i + 1);
 	}
 }
 
@@ -81,10 +94,9 @@ static void DrawKey(char key, uint8_t x, uint8_t y)
 	}
 }
 
-// A setting's popup in the CW popups' box, over everything but the title and line 6.
-// The keys that change it go where the CW popups' arrows do, a pair one over the other
-// as on the keypad; the drill picker gets the M, check mark and arrows of the keyer
-// mode popup.
+// A popup in the CW popups' box, over everything but the title and line 6. The key
+// that changes it goes where the CW popups' arrows do; the drill picker gets the M,
+// check mark and arrows of the keyer mode popup.
 static void DisplayPopup(void)
 {
 	CPO_Popup_t popup;
@@ -102,10 +114,7 @@ static void DisplayPopup(void)
 		UI_DrawCWPopupArrows();
 		return;
 	}
-	DrawKey(popup.keys[0], 12, 28);   // level with the value
-	if (popup.keys[1]) {
-		DrawKey(popup.keys[1], 12, 37);
-	}
+	DrawKey(popup.key, 12, 28);   // level with the value
 }
 
 // Plain practice and the callsign drills: your sending, and the drill's call, result
@@ -177,9 +186,11 @@ void UI_DisplayCPO(void)
 #endif
 	};
 
+	CPO_Menu_t menu;
+
 	UI_DisplayClear();
-	if (CPO_CardShowing()) {
-		DisplayCard();
+	if (CPO_GetMenu(&menu)) {
+		DisplayMenu(&menu);
 		ST7565_BlitFullScreen();
 		return;
 	}
@@ -219,7 +230,7 @@ void UI_DisplayCPO(void)
 		UI_PrintStringSmallNormal("^", 121, 0, 6);
 	}
 #endif
-	// MENU's controls card, as a key cap at the bottom left, by the MENU key on the radio
+	// MENU's settings menu, as a key cap at the bottom left, by the MENU key on the radio
 	UI_PrintStringSmallNormalInverse("M", 1, 0, 6);
 	ST7565_BlitFullScreen();
 }

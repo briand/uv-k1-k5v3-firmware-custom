@@ -4249,7 +4249,8 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
             rs_fw.set_doc("Effective speed of the copy practice drills: characters "
                           "play at the keyer speed with the gaps between them "
                           "stretched to this speed (Farnsworth). Off, or at or above "
-                          "the keyer speed, keeps normal spacing.")
+                          "the keyer speed, keeps normal spacing. Spacng in the "
+                          "practice menu.")
             cw.append(rs_fw)
         except Exception as e:
             LOG.error("CW Farnsworth speed: %s", e)
@@ -4261,7 +4262,7 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
                                                        auto_opts[self._get_cw_farnsworth_auto()]))
             rs_fa.set_doc("Narrow the copy practice spacing a step after 5 calls in a "
                           "row copied on the first listen, and widen it a step when a "
-                          "call has to be revealed.")
+                          "call has to be revealed. AutoSp in the practice menu.")
             cw.append(rs_fa)
         except Exception as e:
             LOG.error("CW Farnsworth auto: %s", e)
@@ -4274,7 +4275,7 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
                                                        noise_opts[self._get_cw_practice_noise()]))
             rs_pn.set_doc("Play live receive audio from the VFO's frequency under the "
                           "code practice sidetone and drills, as band noise. Tune a "
-                          "quiet frequency first. Key 9 in practice turns it on and off.")
+                          "quiet frequency first. Noise in the practice menu.")
             cw.append(rs_pn)
         except Exception as e:
             LOG.error("CW practice noise: %s", e)
@@ -4285,7 +4286,7 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
                                      1, _NR7Y_CW_NOISE_LEVEL_MAX + 1,
                                      self._get_cw_practice_noise_level() + 1))
             rs_pl.set_doc("How loud the band noise plays, 1-16, about 2 dB a step "
-                          "(keys 3 and 6 in practice)")
+                          "(NLevel in the practice menu)")
             cw.append(rs_pl)
         except Exception as e:
             LOG.error("CW practice noise level: %s", e)
@@ -4298,7 +4299,8 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
             rs_qd.set_doc("How the QSO drill's stations come on: Easy is strong, at "
                           "your speed, on a paddle; Medium and Hard bring other "
                           "speeds, weak and fading signals, bugs and straight keys, "
-                          "chirp, and impatient tail-enders (key 4 in the drill)")
+                          "chirp, and impatient tail-enders (Diffic in the practice "
+                          "menu)")
             cw.append(rs_qd)
         except Exception as e:
             LOG.error("CW QSO difficulty: %s", e)
@@ -4308,8 +4310,8 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
                                  RadioSettingValueInteger(1, _NR7Y_CW_QSO_PILE_MAX,
                                                           self._get_cw_qso_pile()))
             rs_qp.set_doc("The most stations that call you at once in the QSO drill, "
-                          "1-4; how many come depends on how active you are (keys 1 "
-                          "and 7 in the drill)")
+                          "1-4; how many come depends on how active you are (Pileup "
+                          "in the practice menu)")
             cw.append(rs_qp)
         except Exception as e:
             LOG.error("CW QSO pile-up: %s", e)
@@ -4321,8 +4323,8 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
                                                           self._get_cw_call_len()))
             rs_cl.set_doc("The longest callsign the send, copy and QSO drills use, "
                           "4-7. They run 4-6 characters, so 6 is no limit; 7 adds "
-                          "portable calls such as K7ABC/P and W1AB/7 (keys 1 and 7 "
-                          "in the send and copy drills)")
+                          "portable calls such as K7ABC/P and W1AB/7 (CallLn in the "
+                          "practice menu)")
             cw.append(rs_cl)
         except Exception as e:
             LOG.error("CW practice call length: %s", e)

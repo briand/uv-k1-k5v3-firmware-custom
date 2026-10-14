@@ -71,20 +71,11 @@ static uint32_t PracticeSettings(void)
 #ifdef ENABLE_CW_MODULATOR
 static ModulationMode_t s_saved_modulation = MODULATION_CW;
 #endif
-static bool s_card = false;     // the controls card is up
-
-// A setting's popup over the drill: see CPO_GetPopup
+// A popup over the drill: see CPO_GetPopup
 typedef enum {
 	POPUP_NONE = 0,
 	POPUP_DRILL,        // F: a drill to switch to, applied only on MENU
-	POPUP_NOISE,        // 9 on or off, 3/6 its level
-	POPUP_SPACING,      // 2/8, copy drill
-	POPUP_AUTO,         // 0, copy drill
-	POPUP_PILE,         // 1/7, QSO drill
-	POPUP_DIFFICULTY,   // 4, QSO drill
-	POPUP_FLASH,        // 4, the other drills
 	POPUP_LIGHT,        // *
-	POPUP_CALL_LEN,     // 1/7, callsign drills
 } CPO_PopupKind_t;
 
 static CPO_PopupKind_t s_popup = POPUP_NONE;
@@ -168,18 +159,14 @@ static void NoiseStop(void)
 	BK4819_SetScrambleFrequencyControlWord(0);
 }
 
-static void StepNoiseLevel(bool louder)
+// Heard at once while the noise plays, unless your sending has it turned down: the
+// tick brings it back at the new level
+static void SetNoiseLevel(uint8_t level)
 {
-	uint8_t level = gEeprom.CW_PRACTICE_NOISE_LEVEL;
-
-	// With the noise off its popup says so, and names 9
-	if (!s_noise || (louder ? level >= CW_PRACTICE_NOISE_LEVEL_MAX : level == 0)) {
-		CW_ErrorBeep();
-		return;
-	}
-	level = louder ? level + 1 : level - 1;
 	gEeprom.CW_PRACTICE_NOISE_LEVEL = level;
-	BK4819_SetAfDacGain(level);
+	if (s_noise && !s_noise_muted) {
+		BK4819_SetAfDacGain(level);
+	}
 }
 
 bool CPO_SynthOn(void)
@@ -228,41 +215,268 @@ void CPO_OnChar(char ch, bool word_gap)
 	CPO_Call_OnChar(ch);
 }
 
-bool CPO_CardShowing(void)
+// ---- MENU's settings menu ----
+
+// Its rows, in the order it lists them: those for every drill, then the callsign
+// drills', then the QSO drill's, then the keys practice keeps
+typedef enum {
+#ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
+	ROW_NOISE,
+	ROW_LEVEL,
+#endif
+#ifdef ENABLE_FLASHLIGHT
+	ROW_FLASH,
+#endif
+	ROW_CALL_LEN,
+	ROW_SPACING,
+	ROW_AUTO,
+#ifdef ENABLE_FEAT_NR7Y_CPO_QSO
+	ROW_PILE,
+	ROW_DIFFICULTY,
+#endif
+	ROW_KEYS,
+	ROW_COUNT,
+} CPO_MenuRow_t;
+
+// Each row's name, as short as the main menu's, and range. On/off and the difficulties
+// wrap around; numbers stop at their ends with the error dit.
+typedef struct {
+	char name[7];
+	uint8_t lo, hi;
+	bool wrap;
+} CPO_MenuRowDef_t;
+
+static const CPO_MenuRowDef_t ROWS[ROW_COUNT] = {
+#ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
+	[ROW_NOISE]      = {"Noise",  0, 1, true},
+	[ROW_LEVEL]      = {"NLevel", 0, CW_PRACTICE_NOISE_LEVEL_MAX, false},
+#endif
+#ifdef ENABLE_FLASHLIGHT
+	[ROW_FLASH]      = {"Flash",  0, 1, true},
+#endif
+	[ROW_CALL_LEN]   = {"CallLn", CW_CALL_LEN_MIN, CW_CALL_LEN_MAX, false},
+	[ROW_SPACING]    = {"Spacng", CW_FARNSWORTH_WPM_MIN, 0, false},   // up to the keyer speed, which is off
+	[ROW_AUTO]       = {"AutoSp", 0, 1, true},
+#ifdef ENABLE_FEAT_NR7Y_CPO_QSO
+	[ROW_PILE]       = {"Pileup", 1, CW_QSO_PILE_MAX, false},
+	[ROW_DIFFICULTY] = {"Diffic", 0, CW_QSO_DIFFICULTIES - 1, true},
+#endif
+	[ROW_KEYS]       = {"Keys",   0, 0, false},
+};
+
+static bool s_menu = false;        // the settings menu is up
+static bool s_menu_edit = false;   // ...editing its row, which applies as it changes
+static uint8_t s_row;              // its row, kept from one opening to the next
+static uint8_t s_edit_from;        // the row's value when the edit began, for EXIT
+static uint16_t s_menu_10ms;       // idle time left
+
+static uint8_t RowGet(uint8_t row)
 {
-	return s_card;
+	switch (row) {
+#ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
+	case ROW_NOISE:
+		return gEeprom.CW_PRACTICE_NOISE;
+	case ROW_LEVEL:
+		return gEeprom.CW_PRACTICE_NOISE_LEVEL;
+#endif
+#ifdef ENABLE_FLASHLIGHT
+	case ROW_FLASH:
+		return gCW_FlashlightSending;
+#endif
+	case ROW_CALL_LEN:
+		return gEeprom.CW_CALL_LEN;
+	case ROW_SPACING: {
+		const uint8_t eff_wpm = CPO_Call_EffectiveWPM();
+		return eff_wpm ? eff_wpm : gEeprom.CW_KEY_WPM;
+	}
+	case ROW_AUTO:
+		return gEeprom.CW_FARNSWORTH_AUTO;
+#ifdef ENABLE_FEAT_NR7Y_CPO_QSO
+	case ROW_PILE:
+		return gEeprom.CW_QSO_PILE;
+	case ROW_DIFFICULTY:
+		return gEeprom.CW_QSO_DIFFICULTY;
+#endif
+	default:
+		return 0;
+	}
 }
 
-uint8_t CPO_GetCard(const char *lines[CPO_CARD_LINES])
+static void RowSet(uint8_t row, uint8_t value)
 {
-	uint8_t n = 0;
-
-	lines[n++] = "F drill  < > wpm";   // the speed keys' arrows: see CPO_GetCard
+	switch (row) {
 #ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
-	lines[n++] = "9 noise  3/6 level";
+	case ROW_NOISE:
+		gEeprom.CW_PRACTICE_NOISE = value;
+		if (value) {
+			NoiseStart();
+		} else {
+			NoiseStop();
+		}
+		break;
+	case ROW_LEVEL:
+		SetNoiseLevel(value);
+		break;
 #endif
-	if (CPO_Call_IsCopyMode()) {
-		lines[n++] = "2/8 gaps  0 auto";
-		lines[n++] = "1/7 len  5 replay";
-	} else if (QsoDrill()) {
-		// 4 is the difficulty here, not the flashlight
-		lines[n++] = "1/7 pile-up size";
-		lines[n++] = "4 difficulty";
-		lines[n++] = "5 abandon  * light";
-	} else if (gCW_CpoCallMode == CPO_CALL_MODE_SEND) {
-		lines[n++] = "1/7 len  5 restart";
-	} else {
-		lines[n++] = "5 clear the text";
-	}
-	if (!QsoDrill()) {
 #ifdef ENABLE_FLASHLIGHT
-		lines[n++] = "4 flash  * light";
-#else
-		lines[n++] = "* backlight";
+	case ROW_FLASH:
+		gCW_FlashlightSending = value;
+		s_flashlight_sending = value;
+		break;
 #endif
+	case ROW_CALL_LEN:
+		gEeprom.CW_CALL_LEN = value;
+		break;
+	case ROW_SPACING:
+		CPO_Call_SetSpacing(value);
+		break;
+	case ROW_AUTO:
+		CPO_Call_SetAutoSpacing(value);
+		break;
+#ifdef ENABLE_FEAT_NR7Y_CPO_QSO
+	case ROW_PILE:
+		gEeprom.CW_QSO_PILE = value;
+		break;
+	case ROW_DIFFICULTY:
+		gEeprom.CW_QSO_DIFFICULTY = value;
+		break;
+#endif
+	default:
+		break;
 	}
-	lines[n++] = "EXIT quit practice";
-	return n;
+}
+
+// The row's value a step on; false at the end of a range that doesn't wrap
+static bool StepRow(int8_t direction)
+{
+	const CPO_MenuRowDef_t *def = &ROWS[s_row];
+	const uint8_t hi = (s_row == ROW_SPACING) ? gEeprom.CW_KEY_WPM : def->hi;
+	uint8_t value = RowGet(s_row);
+
+	if (direction > 0 ? value >= hi : value <= def->lo) {
+		if (!def->wrap) {
+			return false;
+		}
+		value = (direction > 0) ? def->lo : hi;
+	} else {
+		value += direction;
+	}
+	RowSet(s_row, value);
+	return true;
+}
+
+static void CloseMenu(void)
+{
+	s_menu = false;
+	s_menu_edit = false;
+	gUpdateDisplay = true;
+}
+
+// The menu's keys while it's up; false for a key that closes it and goes on to do its
+// usual job
+static bool MenuKeys(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
+{
+	if (Key == KEY_UP || Key == KEY_DOWN) {
+		// On the press and every repeat while held, as the main menu's. Up goes up the
+		// list as there, and steps a value the way SetNav names the keys.
+		if (!bKeyPressed) {
+			return true;
+		}
+		if (!s_menu_edit) {
+			s_row = (s_row + ((Key == KEY_UP) ? ROW_COUNT - 1 : 1)) % ROW_COUNT;
+		} else if (!StepRow(CW_Popup_KeyDirection(Key))) {
+			CW_ErrorBeep();
+		}
+	} else if (!bKeyPressed || bKeyHeld) {
+		return true;
+	} else if (Key == KEY_MENU) {
+		// Edit the row, or keep the edit
+		if (s_menu_edit) {
+			s_menu_edit = false;
+		} else if (s_row != ROW_KEYS) {
+			s_menu_edit = true;
+			s_edit_from = RowGet(s_row);
+		}
+	} else if (Key == KEY_EXIT) {
+		// Put the edit back, or close
+		if (!s_menu_edit) {
+			CloseMenu();
+			return true;
+		}
+		if (RowGet(s_row) != s_edit_from) {
+			RowSet(s_row, s_edit_from);
+		}
+		s_menu_edit = false;
+	} else {
+		CloseMenu();
+		return false;
+	}
+	s_menu_10ms = menu_timeout_500ms * 50u;
+	gUpdateDisplay = true;
+	return true;
+}
+
+bool CPO_GetMenu(CPO_Menu_t *menu)
+{
+	// What 5 does in each drill, for the key list
+	static const char *const AGAIN[CPO_CALL_MODE_COUNT] = {
+		"clear", "restart", "replay",
+#ifdef ENABLE_FEAT_NR7Y_CPO_QSO
+		"abandon",
+#endif
+	};
+	char *value = menu->value;
+	const uint8_t v = RowGet(s_row);
+
+	if (!s_menu) {
+		return false;
+	}
+	menu->name = ROWS[s_row].name;
+	menu->prev = ROWS[(s_row + ROW_COUNT - 1) % ROW_COUNT].name;
+	menu->next = ROWS[(s_row + 1) % ROW_COUNT].name;
+	menu->index = s_row;
+	menu->count = ROW_COUNT;
+	menu->editing = s_menu_edit;
+	menu->keys = s_row == ROW_KEYS;
+	menu->again = AGAIN[gCW_CpoCallMode];
+	value[0] = '\0';
+
+	switch (s_row) {
+#ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
+	case ROW_LEVEL:
+		sprintf_(value, "%u", v + 1);   // shown 1-16
+		break;
+#endif
+	case ROW_CALL_LEN:
+		sprintf_(value, "UP TO %u", v);
+		break;
+	case ROW_SPACING:
+		if (v < gEeprom.CW_KEY_WPM) {
+			sprintf_(value, "%u WPM", v);
+		} else {
+			strcpy(value, "OFF");
+		}
+		break;
+#ifdef ENABLE_FEAT_NR7Y_CPO_QSO
+	case ROW_PILE:
+		sprintf_(value, "%u", v);
+		break;
+	case ROW_DIFFICULTY:
+		strcpy(value, CPO_Qso_DifficultyName());
+		for (char *c = value; *c; c++) {
+			if (*c >= 'a') {
+				*c -= 'a' - 'A';
+			}
+		}
+		break;
+#endif
+	case ROW_KEYS:
+		break;
+	default:
+		strcpy(value, v ? "ON" : "OFF");
+		break;
+	}
+	return true;
 }
 
 static void ShowPopup(CPO_PopupKind_t kind)
@@ -313,95 +527,32 @@ void CPO_OnKeying(void)
 	if (s_popup != POPUP_NONE) {
 		ClosePopup(false);
 	}
+	if (s_menu) {
+		CloseMenu();
+	}
 }
 
 bool CPO_GetPopup(CPO_Popup_t *popup)
 {
-	static const char *const TITLES[] = {
-		[POPUP_DRILL]      = "DRILL",
-		[POPUP_NOISE]      = "BAND NOISE",
-		[POPUP_SPACING]    = "SPACING",
-		[POPUP_AUTO]       = "AUTO SPACING",
-		[POPUP_PILE]       = "PILE-UP",
-		[POPUP_DIFFICULTY] = "DIFFICULTY",
-		[POPUP_FLASH]      = "FLASH SENDING",
-		[POPUP_LIGHT]      = "BACKLIGHT",
-		[POPUP_CALL_LEN]   = "CALL LENGTH",
-	};
-	static const char KEYS[][3] = {
-		[POPUP_NOISE]      = "36",
-		[POPUP_SPACING]    = "28",
-		[POPUP_AUTO]       = "0",
-		[POPUP_PILE]       = "17",
-		[POPUP_DIFFICULTY] = "4",
-		[POPUP_FLASH]      = "4",
-		[POPUP_LIGHT]      = "*",
-		[POPUP_CALL_LEN]   = "17",
-	};
 	static const char *const DRILLS[CPO_CALL_MODE_COUNT] = {
 		"OFF", "SEND CALLS", "COPY CALLS",
 #ifdef ENABLE_FEAT_NR7Y_CPO_QSO
 		"QSO",
 #endif
 	};
-	char *value = popup->value;
-	bool on = false;
 
 	if (s_popup == POPUP_NONE) {
 		return false;
 	}
-	popup->title = TITLES[s_popup];
-	memcpy(popup->keys, KEYS[s_popup], sizeof(popup->keys));
 	popup->confirm = s_popup == POPUP_DRILL;
-
-	switch (s_popup) {
-	case POPUP_DRILL:
-		strcpy(value, DRILLS[s_drill]);
-		return true;
-#ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
-	case POPUP_NOISE:
-		if (s_noise) {
-			sprintf_(value, "%u", gEeprom.CW_PRACTICE_NOISE_LEVEL + 1);
-			return true;
-		}
-		strcpy(popup->keys, "9");   // off: the key that turns it on
-		break;
-#endif
-	case POPUP_SPACING:
-		if (CPO_Call_EffectiveWPM() != 0) {
-			sprintf_(value, "%u WPM", CPO_Call_EffectiveWPM());
-			return true;
-		}
-		break;
-	case POPUP_AUTO:
-		on = gEeprom.CW_FARNSWORTH_AUTO;
-		break;
-	case POPUP_CALL_LEN:
-		sprintf_(value, "UP TO %u", gEeprom.CW_CALL_LEN);
-		return true;
-#ifdef ENABLE_FEAT_NR7Y_CPO_QSO
-	case POPUP_PILE:
-		sprintf_(value, "%u CALLER%s", gEeprom.CW_QSO_PILE, (gEeprom.CW_QSO_PILE > 1) ? "S" : "");
-		return true;
-	case POPUP_DIFFICULTY:
-		strcpy(value, CPO_Qso_DifficultyName());
-		for (char *c = value; *c; c++) {
-			if (*c >= 'a') {
-				*c -= 'a' - 'A';
-			}
-		}
-		return true;
-#endif
-#ifdef ENABLE_FLASHLIGHT
-	case POPUP_FLASH:
-		on = gCW_FlashlightSending;
-		break;
-#endif
-	default:
-		on = gCW_CpoBacklightOn;
-		break;
+	if (popup->confirm) {
+		popup->title = "DRILL";
+		strcpy(popup->value, DRILLS[s_drill]);
+	} else {
+		popup->title = "BACKLIGHT";
+		popup->key = '*';
+		strcpy(popup->value, gCW_CpoBacklightOn ? "ON" : "OFF");
 	}
-	strcpy(value, on ? "ON" : "OFF");
 	return true;
 }
 
@@ -461,7 +612,9 @@ void CPO_Enter(void)
 	gEnableSpeaker = true;
     CW_ClearTxDisplay();
 
-	s_card = false;
+	s_menu = false;
+	s_menu_edit = false;
+	s_row = 0;
 	s_popup = POPUP_NONE;
 #ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
 	if (gEeprom.CW_PRACTICE_NOISE) {
@@ -553,6 +706,9 @@ void CPO_Tick(void)
 	if (s_popup != POPUP_NONE && --s_popup_10ms == 0) {
 		ClosePopup(false);
 	}
+	if (s_menu && --s_menu_10ms == 0) {
+		CloseMenu();   // keeping an edit, which has already applied
+	}
 
 	if (s_needs_redraw | gCW_TX_DisplayUpdated) {
 		s_needs_redraw = false;
@@ -578,9 +734,13 @@ static void StepWpm(int8_t direction)
 
 void CPO_ProcessKeys(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 {
+	if (s_menu && MenuKeys(Key, bKeyPressed, bKeyHeld)) {
+		return;
+	}
+
 	// Up/down step on the press and on every repeat while held, as the CW popups' do:
 	// the drill in the picker, else the speed, which line 6 shows clear of any popup
-	if ((Key == KEY_UP || Key == KEY_DOWN) && bKeyPressed && !s_card) {
+	if ((Key == KEY_UP || Key == KEY_DOWN) && bKeyPressed) {
 		const int8_t direction = CW_Popup_KeyDirection(Key);
 		if (s_popup == POPUP_DRILL) {
 			StepDrill(direction);
@@ -609,22 +769,17 @@ void CPO_ProcessKeys(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 		ClosePopup(false);
 	}
 
-	// Any key closes the controls card, EXIT too, and does only that
-	if (s_card) {
-		s_card = false;
-		gUpdateDisplay = true;
-		return;
-	}
-
-	if (Key == KEY_EXIT) {
-		CPO_Exit();
-		return;
-	}
-
+	// The settings menu has the rest; practice keeps F, 5, * and the speed keys
 	switch (Key) {
 
+	case KEY_EXIT:
+		CPO_Exit();
+		break;
+
 	case KEY_MENU:
-		s_card = true;
+		s_menu = true;
+		s_menu_edit = false;
+		s_menu_10ms = menu_timeout_500ms * 50u;
 		gUpdateDisplay = true;
 		break;
 
@@ -637,36 +792,6 @@ void CPO_ProcessKeys(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 			BACKLIGHT_TurnOff();
 		}
 		ShowPopup(POPUP_LIGHT);
-		break;
-
-	case KEY_4:
-#ifdef ENABLE_FEAT_NR7Y_CPO_QSO
-		if (QsoDrill()) {
-			CPO_Qso_NextDifficulty();
-			ShowPopup(POPUP_DIFFICULTY);
-			break;
-		}
-#endif
-#ifdef ENABLE_FLASHLIGHT
-		gCW_FlashlightSending = !gCW_FlashlightSending;
-        s_flashlight_sending = gCW_FlashlightSending;
-		ShowPopup(POPUP_FLASH);
-#endif
-		break;
-	case KEY_1:
-	case KEY_7:
-#ifdef ENABLE_FEAT_NR7Y_CPO_QSO
-		if (QsoDrill()) {
-			CPO_Qso_StepPile(Key == KEY_1);
-			ShowPopup(POPUP_PILE);
-			break;
-		}
-#endif
-		// The callsign drills' longest call, which the QSO drill's callers keep to too
-		if (gCW_CpoCallMode != CPO_CALL_MODE_OFF) {
-			CPO_Call_StepCallLen(Key == KEY_1);
-			ShowPopup(POPUP_CALL_LEN);
-		}
 		break;
 
 	case KEY_5:
@@ -686,39 +811,6 @@ void CPO_ProcessKeys(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 		s_drill = gCW_CpoCallMode;
 		ShowPopup(POPUP_DRILL);
 		break;
-
-	case KEY_2:
-	case KEY_8:
-		if (CPO_Call_IsCopyMode()) {
-			CPO_Call_StepSpacing(Key == KEY_2);
-			ShowPopup(POPUP_SPACING);
-		}
-		break;
-
-	case KEY_0:
-		if (CPO_Call_IsCopyMode()) {
-			CPO_Call_ToggleAutoSpacing();
-			ShowPopup(POPUP_AUTO);
-		}
-		break;
-
-#ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
-	case KEY_9:
-		gEeprom.CW_PRACTICE_NOISE = !gEeprom.CW_PRACTICE_NOISE;
-		if (gEeprom.CW_PRACTICE_NOISE) {
-			NoiseStart();
-		} else {
-			NoiseStop();
-		}
-		ShowPopup(POPUP_NOISE);
-		break;
-
-	case KEY_3:
-	case KEY_6:
-		StepNoiseLevel(Key == KEY_3);
-		ShowPopup(POPUP_NOISE);
-		break;
-#endif
 
 	default:
 		break;

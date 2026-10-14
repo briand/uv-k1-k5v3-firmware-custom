@@ -1349,22 +1349,6 @@ void CPO_Qso_Restart(void)
 	Reset();
 }
 
-void CPO_Qso_NextDifficulty(void)
-{
-	gEeprom.CW_QSO_DIFFICULTY = (gEeprom.CW_QSO_DIFFICULTY + 1) % CW_QSO_DIFFICULTIES;
-}
-
-void CPO_Qso_StepPile(bool up)
-{
-	const uint8_t n = gEeprom.CW_QSO_PILE;
-
-	if (up ? n >= CW_QSO_PILE_MAX : n <= 1) {
-		CW_ErrorBeep();
-		return;
-	}
-	gEeprom.CW_QSO_PILE = up ? n + 1 : n - 1;
-}
-
 const char *CPO_Qso_DifficultyName(void)
 {
 	return DIFFICULTY_NAMES[gEeprom.CW_QSO_DIFFICULTY % CW_QSO_DIFFICULTIES];

@@ -2332,7 +2332,7 @@ static void ProcessKey(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 {
 #ifdef ENABLE_CODE_PRACTICE
 	if (gCW_CpoActive) {
-		// EXIT too: it closes a popup or the controls card first, and quits practice from there
+		// EXIT too: it closes a popup or the settings menu first, and quits practice from there
 		CPO_ProcessKeys(Key, bKeyPressed, bKeyHeld);
 		return;
 	}

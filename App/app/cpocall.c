@@ -236,9 +236,16 @@ static uint8_t SpacingWPM(void)
 	return eff_wpm ? eff_wpm : gEeprom.CW_KEY_WPM;
 }
 
-// One step of effective speed. Reaching the keyer speed is stored as off, so
-// raising the keyer speed later doesn't bring the spacing back.
-static void StepSpacing(bool narrower)
+// Reaching the keyer speed is stored as off, so raising the keyer speed later doesn't
+// bring the spacing back
+void CPO_Call_SetSpacing(uint8_t eff_wpm)
+{
+	gEeprom.CW_FARNSWORTH_WPM = (eff_wpm >= gEeprom.CW_KEY_WPM) ? 0 : eff_wpm;
+	s_streak = 0;
+}
+
+// A step auto spacing takes, named on the notice line
+static void AutoStep(bool narrower)
 {
 	uint8_t eff_wpm = SpacingWPM();
 
@@ -247,15 +254,7 @@ static void StepSpacing(bool narrower)
 	} else if (eff_wpm > CW_FARNSWORTH_WPM_MIN) {
 		eff_wpm--;
 	}
-	gEeprom.CW_FARNSWORTH_WPM = (eff_wpm >= gEeprom.CW_KEY_WPM) ? 0 : eff_wpm;
-	s_streak = 0;
-}
-
-// A step auto spacing takes, named on the notice line. The keys' own steps show in
-// practice's popup.
-static void AutoStep(bool narrower)
-{
-	StepSpacing(narrower);
+	CPO_Call_SetSpacing(eff_wpm);
 	s_notice_10ms = CPO_CALL_NOTICE_10MS;
 	gUpdateDisplay = true;
 }
@@ -334,30 +333,9 @@ uint8_t CPO_Call_EffectiveWPM(void)
 	return (eff_wpm != 0 && eff_wpm < gEeprom.CW_KEY_WPM) ? eff_wpm : 0;
 }
 
-void CPO_Call_StepSpacing(bool narrower)
+void CPO_Call_SetAutoSpacing(bool on)
 {
-	if (CPO_Call_IsCopyMode()) {
-		StepSpacing(narrower);
-	}
-}
-
-void CPO_Call_StepCallLen(bool longer)
-{
-	const uint8_t len = gEeprom.CW_CALL_LEN;
-
-	if (longer ? len >= CW_CALL_LEN_MAX : len <= CW_CALL_LEN_MIN) {
-		CW_ErrorBeep();
-		return;
-	}
-	gEeprom.CW_CALL_LEN = longer ? len + 1 : len - 1;
-}
-
-void CPO_Call_ToggleAutoSpacing(void)
-{
-	if (!CPO_Call_IsCopyMode()) {
-		return;
-	}
-	gEeprom.CW_FARNSWORTH_AUTO = !gEeprom.CW_FARNSWORTH_AUTO;
+	gEeprom.CW_FARNSWORTH_AUTO = on;
 	s_streak = 0;
 }
 
