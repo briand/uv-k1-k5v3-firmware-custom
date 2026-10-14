@@ -122,7 +122,7 @@ enum {
 
 // QSO drill pile-up: the most stations that call you at once, one per synthesizer voice
 #define CW_QSO_PILE_MAX     4
-#define CW_QSO_PILE_DEFAULT 3
+#define CW_QSO_PILE_DEFAULT 2
 
 // Practice callsigns' greatest length. The drills' calls run 4 to 6 characters, so 6
 // (the default) is no limit, and 7 adds portable calls such as K7ABC/P and W1AB/7.

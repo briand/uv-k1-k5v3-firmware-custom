@@ -908,7 +908,7 @@ _NR7Y_CW_NOISE_LEVEL_MAX = 15
 _NR7Y_CW_NOISE_LEVEL_DEFAULT = 15
 _NR7Y_CW_QSO_DIFFICULTIES = ["Easy", "Medium", "Hard"]
 _NR7Y_CW_QSO_PILE_MAX = 4      # mirrors CW_QSO_PILE_* in App/settings.h
-_NR7Y_CW_QSO_PILE_DEFAULT = 3
+_NR7Y_CW_QSO_PILE_DEFAULT = 2
 
 # Practice callsigns' greatest length, 4-7, mirrors CW_CALL_LEN_* in App/settings.h.
 # 6 (the default) is no limit, and 7 adds portable calls. Stored as (length - 4)
