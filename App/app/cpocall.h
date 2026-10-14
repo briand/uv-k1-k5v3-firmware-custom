@@ -23,9 +23,10 @@
 // Every character is scored as it is decoded.
 //
 // Copy mode can play with Farnsworth spacing: characters at the keyer speed,
-// with the gaps between them stretched to a slower effective speed (8 widens, 2
-// narrows). Auto spacing (0) narrows the gaps a step after a run of calls copied on
-// the first listen and widens them a step when a call has to be revealed.
+// with the gaps between them stretched to a slower effective speed (practice's
+// Spacng). Auto spacing (AutoSp) narrows the gaps a step after a run of calls copied
+// on the first listen and widens them a step when a call has to be revealed. The
+// calls are no longer than practice's CallLn.
 
 #ifndef APP_CPOCALL_H
 #define APP_CPOCALL_H
@@ -76,16 +77,12 @@ bool CPO_Call_IsCopyMode(void);
 // speed passes it again.
 uint8_t CPO_Call_EffectiveWPM(void);
 
-// 2 and 8 keys, copy mode only: effective speed one step up (narrower gaps) or
-// down (wider). Stepping up to the keyer speed turns the spacing off.
-void CPO_Call_StepSpacing(bool narrower);
+// Copy mode's effective speed, CW_FARNSWORTH_WPM_MIN up to the keyer speed, which
+// turns the spacing off
+void CPO_Call_SetSpacing(uint8_t eff_wpm);
 
-// 1 and 7 keys, the callsign drills: the longest call, from the next one on, up or
-// down; an error dit past CW_CALL_LEN_MIN or CW_CALL_LEN_MAX
-void CPO_Call_StepCallLen(bool longer);
-
-// 0 key, copy mode only: auto spacing on/off
-void CPO_Call_ToggleAutoSpacing(void);
+// Auto spacing on or off, starting its count of clean copies over
+void CPO_Call_SetAutoSpacing(bool on);
 
 // The line shown for a moment after auto spacing takes a step, e.g. "Spacing 12 WPM";
 // false while there is none
