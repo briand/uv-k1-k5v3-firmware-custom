@@ -602,15 +602,15 @@ void CPO_ProcessKeys(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 		ClosePopup(false);
 	}
 
-	if (Key == KEY_EXIT) {
-		CPO_Exit();
-		return;
-	}
-
-	// Any other key closes the controls card, and does only that
+	// Any key closes the controls card, EXIT too, and does only that
 	if (s_card) {
 		s_card = false;
 		gUpdateDisplay = true;
+		return;
+	}
+
+	if (Key == KEY_EXIT) {
+		CPO_Exit();
 		return;
 	}
 
