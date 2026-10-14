@@ -289,7 +289,11 @@ gEeprom.FreqChannel[1]   = IS_FREQ_CHANNEL(Data16[5]) ? Data16[5] : (FREQ_CHANNE
         } __attribute__((packed)) fmCfg;
         PY25Q16_ReadBuffer(0x00A020, &fmCfg, 4);
 
-        gEeprom.FM_Band = fmCfg.band;
+        // Never saved, the record is erased flash, whose band bits read as band 3
+        // (64-76 MHz): start on band 0 (87.5-108 MHz, US and European broadcast)
+        // instead. A saved record always holds a tunable frequency, so a 0xFFFF one
+        // is unset, and a band someone chose is kept.
+        gEeprom.FM_Band = (fmCfg.selFreq == 0xFFFF) ? 0 : fmCfg.band;
         //gEeprom.FM_Space = fmCfg.space;
 
         uint16_t freqLoLimit = BK1080_GetFreqLoLimit(gEeprom.FM_Band);

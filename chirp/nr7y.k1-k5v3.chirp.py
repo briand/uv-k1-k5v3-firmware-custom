@@ -753,6 +753,15 @@ FM_BAND_LIST = [
 
 FM_TUNING_MODE_LIST = ["Frequency (VFO)", "Channel (MR)"]
 
+
+def fm_band_of(mem):
+    """The FM band the firmware runs on. A record never saved is erased flash,
+    whose band bits read as 3 (64-76 MHz); the firmware takes band 0 for it,
+    known by its 0xFFFF frequency, which a saved record never holds."""
+    if int(mem.fm_selected_frequency) == 0xFFFF:
+        return 0
+    return int(mem.fm_band) & 0x03
+
 # Widest range any band can reach, used when validating stored channels. A
 # channel is kept as long as *some* band could tune it: validating against only
 # the currently selected band would silently erase a perfectly good channel list
@@ -2190,7 +2199,7 @@ class UVK5RadioEgzumer(chirp_common.CloneModeRadio):
                     0, min(int(element.value) - 1, FM_CHANNELS_MAX - 1))
 
             elif elname == "fm_selected_frequency":
-                band_lo, band_hi = FM_BAND_LIMITS[int(_mem.fm_band) & 0x03]
+                band_lo, band_hi = FM_BAND_LIMITS[fm_band_of(_mem)]
                 try:
                     val2 = int(round(float(str(element.value).strip()) * 10))
                 except Exception:
@@ -3166,7 +3175,7 @@ class UVK5RadioEgzumer(chirp_common.CloneModeRadio):
 
         # int() matters: list_def hands back the bitwise object untouched when
         # the value is already in range, and that is not hashable.
-        tmpfmband = int(list_def(int(_mem.fm_band), FM_BAND_LIST, 0))
+        tmpfmband = int(list_def(fm_band_of(_mem), FM_BAND_LIST, 0))
         band_lo, band_hi = FM_BAND_LIMITS[tmpfmband]
         val = RadioSettingValueList(FM_BAND_LIST, FM_BAND_LIST[tmpfmband])
         rs = RadioSetting("fm_band", "Band", val)
