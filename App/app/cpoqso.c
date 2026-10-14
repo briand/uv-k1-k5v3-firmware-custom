@@ -1023,11 +1023,14 @@ static void Pick(CPO_QsoStation_t *st)
 	s_st = st;
 	st->call_10ms = 0;
 	if (st->dx < 0) {
-		const char *digit = st->call;
-		while (*digit < '0' || *digit > '9') {
-			digit++;
+		// Its call area: the last digit, which a portable call's / puts after its home one
+		char area = '0';
+		for (const char *c = st->call; *c; c++) {
+			if (*c >= '0' && *c <= '9') {
+				area = *c;
+			}
 		}
-		PickRandom(US_QTH[*digit - '0'], '|', s_qth, sizeof(s_qth));
+		PickRandom(US_QTH[area - '0'], '|', s_qth, sizeof(s_qth));
 	} else {
 		PickItem(DX_QTH, '|', st->dx, s_qth, sizeof(s_qth));
 	}

@@ -104,18 +104,12 @@ bool CPO_Call_IsCopyMode(void)
 	return gCW_CpoCallMode == CPO_CALL_MODE_COPY;
 }
 
-int8_t CPO_Call_Generate(char out[CPO_CALL_MAX_LEN + 1])
+// A call of any length the drills use, 4 to 6 characters
+static int8_t Generate(char *out)
 {
 	char *p = out;
 	uint8_t suffix_len;
 	int8_t dx = -1;
-
-	// Fold in the time the operator finished the last call so the sequence
-	// doesn't repeat from session to session. xorshift must never sit at zero.
-	s_rng_state ^= millis();
-	if (s_rng_state == 0) {
-		s_rng_state = 0x2545F491;
-	}
 
 	if (Rand() % 3 != 0) {
 		// US: 1x2, 1x3, 2x1, 2x2 or 2x3
@@ -151,6 +145,43 @@ int8_t CPO_Call_Generate(char out[CPO_CALL_MAX_LEN + 1])
 		*p++ = RandLetter(26);
 	}
 	*p = '\0';
+	return dx;
+}
+
+int8_t CPO_Call_Generate(char out[CPO_CALL_MAX_LEN + 1])
+{
+	const uint8_t max = gEeprom.CW_CALL_LEN;
+	int8_t dx;
+
+	// Fold in the time the operator finished the last call so the sequence
+	// doesn't repeat from session to session. xorshift must never sit at zero.
+	s_rng_state ^= millis();
+	if (s_rng_state == 0) {
+		s_rng_state = 0x2545F491;
+	}
+
+	// At the longest setting a quarter of the calls go portable, on a call short
+	// enough to take it: a DX call /P, a US call / another call area
+	const bool portable = max >= CPO_CALL_MAX_LEN && Rand() % 4 == 0;
+
+	// Calls that don't fit are drawn again, so the mix of the ones that do stays as is
+	do {
+		dx = Generate(out);
+	} while (strlen(out) > (portable ? max - 2u : max));
+	if (portable) {
+		char *end = out + strlen(out);
+		*end++ = '/';
+		if (dx < 0) {
+			const char *home = out;   // the area digit, a US call's only one
+			while (*home < '0' || *home > '9') {
+				home++;
+			}
+			*end = '0' + (char)((*home - '0' + 1 + Rand() % 9) % 10);
+		} else {
+			*end = 'P';
+		}
+		end[1] = '\0';
+	}
 	return dx;
 }
 
@@ -308,6 +339,17 @@ void CPO_Call_StepSpacing(bool narrower)
 	if (CPO_Call_IsCopyMode()) {
 		StepSpacing(narrower);
 	}
+}
+
+void CPO_Call_StepCallLen(bool longer)
+{
+	const uint8_t len = gEeprom.CW_CALL_LEN;
+
+	if (longer ? len >= CW_CALL_LEN_MAX : len <= CW_CALL_LEN_MIN) {
+		CW_ErrorBeep();
+		return;
+	}
+	gEeprom.CW_CALL_LEN = longer ? len + 1 : len - 1;
 }
 
 void CPO_Call_ToggleAutoSpacing(void)

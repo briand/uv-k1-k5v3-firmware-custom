@@ -1010,6 +1010,12 @@ _NR7Y_CW_QSO_DIFFICULTIES = ["Easy", "Medium", "Hard"]
 _NR7Y_CW_QSO_PILE_MAX = 4
 _NR7Y_CW_QSO_PILE_DEFAULT = 3
 
+# Practice callsigns' greatest length, 4-7, mirrors CW_CALL_LEN_* in App/settings.h.
+# 6 (the default) is no limit, and 7 adds portable calls.
+_NR7Y_CW_CALL_LEN_MIN = 4
+_NR7Y_CW_CALL_LEN_MAX = 7
+_NR7Y_CW_CALL_LEN_DEFAULT = 6
+
 # CW settings, one byte each from _NR7Y_CW_SETTINGS_ADDR: name -> (offset, min,
 # max, default), the same as s_cw_settings_limits in App/settings.c. A byte out
 # of range reads as the default.
@@ -1031,8 +1037,9 @@ _NR7Y_CW_FIELDS = {
     "noise_level":     (12, 0, _NR7Y_CW_NOISE_LEVEL_MAX, _NR7Y_CW_NOISE_LEVEL_DEFAULT),
     "qso_difficulty":  (13, 0, len(_NR7Y_CW_QSO_DIFFICULTIES) - 1, 0),
     "qso_pile":        (14, 1, _NR7Y_CW_QSO_PILE_MAX, _NR7Y_CW_QSO_PILE_DEFAULT),
+    "call_len":        (15, _NR7Y_CW_CALL_LEN_MIN, _NR7Y_CW_CALL_LEN_MAX, _NR7Y_CW_CALL_LEN_DEFAULT),
 }
-_NR7Y_CW_SETTINGS_SIZE = 15
+_NR7Y_CW_SETTINGS_SIZE = 16
 
 
 def _nr7y_unpack_v1_cw_settings(old):
@@ -4453,6 +4460,19 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
         except Exception as e:
             LOG.error("CW QSO pile-up: %s", e)
 
+        try:
+            rs_cl = RadioSetting("cw_call_len", "Practice Callsign Length",
+                                 RadioSettingValueInteger(_NR7Y_CW_CALL_LEN_MIN,
+                                                          _NR7Y_CW_CALL_LEN_MAX,
+                                                          self._cw_get("call_len")))
+            rs_cl.set_doc("The longest callsign the send, copy and QSO drills use, "
+                          "4-7. They run 4-6 characters, so 6 is no limit; 7 adds "
+                          "portable calls such as K7ABC/P and W1AB/7 (keys 1 and 7 "
+                          "in the send and copy drills)")
+            cw.append(rs_cl)
+        except Exception as e:
+            LOG.error("CW practice call length: %s", e)
+
         # CW Macros (4 messages)
         macros = RadioSettingGroup("cw_macros", "CW Macros")
         for i in range(1, 5):
@@ -4570,6 +4590,8 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
                              _NR7Y_CW_QSO_DIFFICULTIES.index(str(element.value)))
             elif name == "cw_qso_pile":
                 self._cw_set("qso_pile", element.value)
+            elif name == "cw_call_len":
+                self._cw_set("call_len", element.value)
             elif name.startswith("cw_msg"):
                 # "cw_msg1" → idx 1 … "cw_msg4" → idx 4
                 self._set_cw_msg(int(name[6:]), str(element.value))

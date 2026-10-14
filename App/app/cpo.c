@@ -65,7 +65,8 @@ static uint32_t PracticeSettings(void)
 		| (uint32_t)gEeprom.CW_PRACTICE_NOISE << 13    // 1
 		| (uint32_t)gEeprom.CW_PRACTICE_NOISE_LEVEL << 14   // 4
 		| (uint32_t)gEeprom.CW_QSO_DIFFICULTY << 18    // 2
-		| (uint32_t)gEeprom.CW_QSO_PILE << 20;         // 3
+		| (uint32_t)gEeprom.CW_QSO_PILE << 20          // 3
+		| (uint32_t)gEeprom.CW_CALL_LEN << 23;         // 3
 }
 #ifdef ENABLE_CW_MODULATOR
 static ModulationMode_t s_saved_modulation = MODULATION_CW;
@@ -83,6 +84,7 @@ typedef enum {
 	POPUP_DIFFICULTY,   // 4, QSO drill
 	POPUP_FLASH,        // 4, the other drills
 	POPUP_LIGHT,        // *
+	POPUP_CALL_LEN,     // 1/7, callsign drills
 } CPO_PopupKind_t;
 
 static CPO_PopupKind_t s_popup = POPUP_NONE;
@@ -241,14 +243,14 @@ uint8_t CPO_GetCard(const char *lines[CPO_CARD_LINES])
 #endif
 	if (CPO_Call_IsCopyMode()) {
 		lines[n++] = "2/8 gaps  0 auto";
-		lines[n++] = "5 replay the call";
+		lines[n++] = "1/7 len  5 replay";
 	} else if (QsoDrill()) {
 		// 4 is the difficulty here, not the flashlight
 		lines[n++] = "1/7 pile-up size";
 		lines[n++] = "4 difficulty";
 		lines[n++] = "5 abandon  * light";
 	} else if (gCW_CpoCallMode == CPO_CALL_MODE_SEND) {
-		lines[n++] = "5 restart the call";
+		lines[n++] = "1/7 len  5 restart";
 	} else {
 		lines[n++] = "5 clear the text";
 	}
@@ -324,6 +326,7 @@ bool CPO_GetPopup(CPO_Popup_t *popup)
 		[POPUP_DIFFICULTY] = "DIFFICULTY",
 		[POPUP_FLASH]      = "FLASH SENDING",
 		[POPUP_LIGHT]      = "BACKLIGHT",
+		[POPUP_CALL_LEN]   = "CALL LENGTH",
 	};
 	static const char KEYS[][3] = {
 		[POPUP_NOISE]      = "36",
@@ -333,6 +336,7 @@ bool CPO_GetPopup(CPO_Popup_t *popup)
 		[POPUP_DIFFICULTY] = "4",
 		[POPUP_FLASH]      = "4",
 		[POPUP_LIGHT]      = "*",
+		[POPUP_CALL_LEN]   = "17",
 	};
 	static const char *const DRILLS[CPO_CALL_MODE_COUNT] = {
 		"OFF", "SEND CALLS", "COPY CALLS",
@@ -372,6 +376,9 @@ bool CPO_GetPopup(CPO_Popup_t *popup)
 	case POPUP_AUTO:
 		on = gEeprom.CW_FARNSWORTH_AUTO;
 		break;
+	case POPUP_CALL_LEN:
+		sprintf_(value, "UP TO %u", gEeprom.CW_CALL_LEN);
+		return true;
 #ifdef ENABLE_FEAT_NR7Y_CPO_QSO
 	case POPUP_PILE:
 		sprintf_(value, "%u CALLER%s", gEeprom.CW_QSO_PILE, (gEeprom.CW_QSO_PILE > 1) ? "S" : "");
@@ -652,8 +659,14 @@ void CPO_ProcessKeys(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 		if (QsoDrill()) {
 			CPO_Qso_StepPile(Key == KEY_1);
 			ShowPopup(POPUP_PILE);
+			break;
 		}
 #endif
+		// The callsign drills' longest call, which the QSO drill's callers keep to too
+		if (gCW_CpoCallMode != CPO_CALL_MODE_OFF) {
+			CPO_Call_StepCallLen(Key == KEY_1);
+			ShowPopup(POPUP_CALL_LEN);
+		}
 		break;
 
 	case KEY_5:
