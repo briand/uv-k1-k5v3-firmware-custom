@@ -2332,11 +2332,7 @@ static void ProcessKey(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 {
 #ifdef ENABLE_CODE_PRACTICE
 	if (gCW_CpoActive) {
-		if (Key == KEY_EXIT) {
-			CPO_Exit();
-			gRequestDisplayScreen = DISPLAY_MAIN;
-			return;
-		}
+		// EXIT too: it closes a popup first, and quits practice from there
 		CPO_ProcessKeys(Key, bKeyPressed, bKeyHeld);
 		return;
 	}

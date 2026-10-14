@@ -22,6 +22,7 @@
 #endif
 #include "driver/st7565.h"
 #include "external/printf/printf.h"
+#include "font.h"
 #include "settings.h"
 #include "app/cpo.h"
 #include "app/cpocall.h"
@@ -42,7 +43,7 @@ static void DisplayCard(void)
 
 	UI_PrintStringSmallBold("Controls", 0, 127, 0);
 	for (uint8_t i = 0; i < n; i++) {
-		char line[CPO_HINT_LINE_SIZE];
+		char line[CPO_CARD_LINE_SIZE];
 		strcpy(line, lines[i]);
 		for (char *c = line; *c; c++) {
 			if (*c != '<' && *c != '>') {
@@ -62,9 +63,54 @@ static void DisplayCard(void)
 	}
 }
 
+// Line 6, left to right: MENU's key cap (x 0-9), the speed, the score centered in the
+// space up to the marks ("999/999" and "25(12)" fit), and the marks
+#define SPEED_START 14   // 5 px clear of the key cap
+#define SCORE_START 55
+#define SCORE_END   107
+
+// A key's name in the small font with its top row at pixel row y
+static void DrawKey(char key, uint8_t x, uint8_t y)
+{
+	const uint8_t *glyph = gFontSmall[key - ' ' - 1];
+
+	for (uint8_t i = 0; i < sizeof(gFontSmall[0]); i++) {
+		const uint16_t column = (uint16_t)glyph[i] << (y % 8);
+		gFrameBuffer[y / 8][x + i]     |= column;
+		gFrameBuffer[y / 8 + 1][x + i] |= column >> 8;
+	}
+}
+
+// A setting's popup in the CW popups' box, over everything but the title and line 6.
+// The keys that change it go where the CW popups' arrows do, a pair one over the other
+// as on the keypad; the drill picker gets the M, check mark and arrows of the keyer
+// mode popup.
+static void DisplayPopup(void)
+{
+	CPO_Popup_t popup;
+
+	if (!CPO_GetPopup(&popup)) {
+		return;
+	}
+	// clear the sides the box leaves, where the drill's big text would show
+	for (uint8_t line = 1; line <= 5; line++) {
+		memset(gFrameBuffer[line], 0, sizeof(gFrameBuffer[line]));
+	}
+	UI_DrawCWPopupBox(popup.title, popup.confirm);
+	UI_PrintString(popup.value, 9, 118, 3, 8);
+	if (popup.confirm) {
+		UI_DrawCWPopupArrows();
+		return;
+	}
+	DrawKey(popup.keys[0], 12, 28);   // level with the value
+	if (popup.keys[1]) {
+		DrawKey(popup.keys[1], 12, 37);
+	}
+}
+
 // Plain practice and the callsign drills: your sending, and the drill's call, result
-// and score. True when the drill has line 5.
-static bool DisplayDrill(char *text, uint8_t text_len)
+// and score
+static void DisplayDrill(char *text, uint8_t text_len)
 {
 	const bool drill = gCW_CpoCallMode != CPO_CALL_MODE_OFF;
 
@@ -75,7 +121,7 @@ static bool DisplayDrill(char *text, uint8_t text_len)
 			UI_PrintStringCW(text, 0, 0, 3);
 	}
 	if (!drill) {
-		return false;
+		return;
 	}
 
 	// Left-aligned like the keyed line so each character sits above its copy
@@ -83,7 +129,7 @@ static bool DisplayDrill(char *text, uint8_t text_len)
 	CPO_Call_GetCallLine(call_line);
 	UI_PrintStringCWLarge(call_line, 0, 1);
 	sprintf_(text, "%u/%u", gCW_CpoCallHits, gCW_CpoCallMisses);
-	UI_PrintStringSmallNormal(text, 44, 104, 6);
+	UI_PrintStringSmallNormal(text, SCORE_START, SCORE_END, 6);
 
 	char notice[CPO_CALL_NOTICE_SIZE];
 	if (CPO_Call_GetNotice(notice)) {
@@ -92,16 +138,13 @@ static bool DisplayDrill(char *text, uint8_t text_len)
 		UI_PrintStringSmallNormal("OK", 0, 127, 5);
 	} else if (gCW_CpoCallResult == CPO_CALL_RESULT_MISS) {
 		UI_PrintStringSmallNormal("MISS", 0, 127, 5);
-	} else {
-		return false;
 	}
-	return true;
 }
 
 #ifdef ENABLE_FEAT_NR7Y_CPO_QSO
 // The QSO drill: your sending, how to start until it knows your call, and QSOs logged
-// and failed where the drills keep their score. True when it has line 5.
-static bool DisplayQso(char *text, uint8_t text_len)
+// and failed where the drills keep their score
+static void DisplayQso(char *text, uint8_t text_len)
 {
 	char line[CPO_QSO_LINE_SIZE];
 
@@ -112,12 +155,10 @@ static bool DisplayQso(char *text, uint8_t text_len)
 		UI_PrintStringCWLarge(text, 0, 3);
 	}
 	sprintf_(text, "%u/%u", gCW_CpoQsoLogged, gCW_CpoQsoFailed);
-	UI_PrintStringSmallNormal(text, 44, 104, 6);
+	UI_PrintStringSmallNormal(text, SCORE_START, SCORE_END, 6);
 	if (CPO_Qso_GetNotice(line)) {
 		UI_PrintStringSmallNormal(line, 0, 127, 5);
-		return true;
 	}
-	return false;
 }
 #endif
 
@@ -132,7 +173,7 @@ void UI_DisplayCPO(void)
 	static const char *const titles[CPO_CALL_MODE_COUNT] = {
 		"Code Practice", "Send Callsigns", "Copy Callsigns",
 #ifdef ENABLE_FEAT_NR7Y_CPO_QSO
-		"QSO %s",   // its difficulty
+		"QSO Drill (%s)",   // its difficulty
 #endif
 	};
 
@@ -142,17 +183,20 @@ void UI_DisplayCPO(void)
 		ST7565_BlitFullScreen();
 		return;
 	}
-	bool line5_taken;
 #ifdef ENABLE_FEAT_NR7Y_CPO_QSO
 	char title[CPO_QSO_LINE_SIZE];
 	sprintf_(title, titles[gCW_CpoCallMode], CPO_Qso_DifficultyName());
 	UI_PrintStringSmallNormal(title, 0, 127, 0);
-	line5_taken = (gCW_CpoCallMode == CPO_CALL_MODE_QSO) ? DisplayQso(String, tx_len)
-		: DisplayDrill(String, tx_len);
+	if (gCW_CpoCallMode == CPO_CALL_MODE_QSO) {
+		DisplayQso(String, tx_len);
+	} else {
+		DisplayDrill(String, tx_len);
+	}
 #else
 	UI_PrintStringSmallNormal(titles[gCW_CpoCallMode], 0, 127, 0);
-	line5_taken = DisplayDrill(String, tx_len);
+	DisplayDrill(String, tx_len);
 #endif
+	DisplayPopup();
 
 	// Farnsworth spacing shows as character speed then effective speed, "25(12)", in
 	// the space "25 WPM" takes. A slash would read like the score beside it.
@@ -163,7 +207,7 @@ void UI_DisplayCPO(void)
 	} else {
 		sprintf_(String, "%u WPM", gEeprom.CW_KEY_WPM);
 	}
-	UI_PrintStringSmallNormal(String, 2, 0, 6);
+	UI_PrintStringSmallNormal(String, SPEED_START, 0, 6);
 	if (copy && gEeprom.CW_FARNSWORTH_AUTO) {
 		UI_PrintStringSmallNormal("A", 114, 0, 6);
 	}
@@ -175,10 +219,7 @@ void UI_DisplayCPO(void)
 		UI_PrintStringSmallNormal("^", 121, 0, 6);
 	}
 #endif
-	if (!line5_taken) {
-		char hint[CPO_HINT_LINE_SIZE];
-		CPO_GetHintLine(hint);
-		UI_PrintStringSmallNormal(hint, 0, 127, 5);
-	}
+	// MENU's controls card, as a key cap at the bottom left, by the MENU key on the radio
+	UI_PrintStringSmallNormalInverse("M", 1, 0, 6);
 	ST7565_BlitFullScreen();
 }

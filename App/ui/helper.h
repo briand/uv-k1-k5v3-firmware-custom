@@ -42,6 +42,14 @@ void UI_DisplayPopup(const char *string);
 
 void UI_DrawPixelBuffer(uint8_t (*buffer)[128], uint8_t x, uint8_t y, bool black);
 void UI_DrawArrow(uint8_t x, uint8_t y, int8_t dx, int8_t dy);
+#ifdef ENABLE_CW_MODULATOR
+// The CW popups' box over lines 1-5 between x 7 and 120, with its title raised in it.
+// confirm marks a choice only MENU applies, with an M and a check mark.
+void UI_DrawCWPopupBox(const char *title, bool confirm);
+// The step arrows low in the box, the way SetNav names the keys: up and down stacked
+// at the left, or left and right at either side
+void UI_DrawCWPopupArrows(void);
+#endif
 #ifdef ENABLE_FEAT_F4HWN
     //void UI_DrawLineDottedBuffer(uint8_t (*buffer)[128], int16_t x1, int16_t y1, int16_t x2, int16_t y2, bool black);
     void PutPixel(uint8_t x, uint8_t y, bool fill);

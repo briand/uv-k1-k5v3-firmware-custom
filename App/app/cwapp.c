@@ -176,6 +176,11 @@ void CW_AppUpdate(void)
 	if (action == CW_ACTION_CARRIER_ON && !cue) {
 		CW_Popup_OnKeying();
 		CW_RIT_OnKeying();
+#ifdef ENABLE_CODE_PRACTICE
+		// a practice popup closes for your keying, not the copy drill playing its call
+		if (!fromPlayback)
+			CPO_OnKeying();
+#endif
 	}
 
 	// Playback started timing this element before the TX/sidetone setup below ran;

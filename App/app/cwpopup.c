@@ -23,7 +23,6 @@
 #include "settings.h"
 #include "ui/ui.h"
 
-#define CW_POPUP_SHOW_10MS     200  // 2 s after the last key press
 #define CW_WPM_MIN             10   // same range as the CWwpm menu
 #define CW_WPM_MAX             45
 
