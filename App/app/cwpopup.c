@@ -23,8 +23,6 @@
 #include "settings.h"
 #include "ui/ui.h"
 
-#define CW_POPUP_SHOW_10MS     200  // 2 s after the last key press
-
 static CW_PopupKind_t s_kind;
 static uint16_t       s_10ms;           // idle time left, counted on the 10 ms tick so it's exact
 static uint8_t        s_pending;        // keyer mode or key input index shown, applied only on MENU

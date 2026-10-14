@@ -71,11 +71,23 @@ static uint32_t PracticeSettings(void)
 static ModulationMode_t s_saved_modulation = MODULATION_CW;
 #endif
 static bool s_card = false;     // the controls card is up
-static uint8_t s_hint = 0;      // which hint line is up
-static uint8_t s_hint_10ms = 0;
 
-// How long each hint line stays up
-#define CPO_HINT_10MS 200
+// A setting's popup over the drill: see CPO_GetPopup
+typedef enum {
+	POPUP_NONE = 0,
+	POPUP_DRILL,        // F: a drill to switch to, applied only on MENU
+	POPUP_NOISE,        // 9 on or off, 3/6 its level
+	POPUP_SPACING,      // 2/8, copy drill
+	POPUP_AUTO,         // 0, copy drill
+	POPUP_PILE,         // 1/7, QSO drill
+	POPUP_DIFFICULTY,   // 4, QSO drill
+	POPUP_FLASH,        // 4, the other drills
+	POPUP_LIGHT,        // *
+} CPO_PopupKind_t;
+
+static CPO_PopupKind_t s_popup = POPUP_NONE;
+static uint16_t s_popup_10ms;   // idle time left, on the 10 ms tick like the CW popups'
+static CPO_CallMode_t s_drill;  // the drill the picker shows
 
 static bool QsoDrill(void)
 {
@@ -142,8 +154,6 @@ static void NoiseStart(void)
 	s_noise = true;
 	s_noise_muted = false;
 	UpdateSynth();
-	s_hint = 0;
-	s_hint_10ms = 0;
 }
 
 static void NoiseStop(void)
@@ -160,19 +170,14 @@ static void StepNoiseLevel(bool louder)
 {
 	uint8_t level = gEeprom.CW_PRACTICE_NOISE_LEVEL;
 
-	if (!s_noise) {
-		return;
-	}
-	if (louder ? level >= CW_PRACTICE_NOISE_LEVEL_MAX : level == 0) {
+	// With the noise off its popup says so, and names 9
+	if (!s_noise || (louder ? level >= CW_PRACTICE_NOISE_LEVEL_MAX : level == 0)) {
 		CW_ErrorBeep();
 		return;
 	}
 	level = louder ? level + 1 : level - 1;
 	gEeprom.CW_PRACTICE_NOISE_LEVEL = level;
 	BK4819_SetAfDacGain(level);
-	s_hint = 0;   // show the level
-	s_hint_10ms = 0;
-	gUpdateDisplay = true;
 }
 
 bool CPO_SynthOn(void)
@@ -258,26 +263,139 @@ uint8_t CPO_GetCard(const char *lines[CPO_CARD_LINES])
 	return n;
 }
 
-void CPO_GetHintLine(char out[CPO_HINT_LINE_SIZE])
+static void ShowPopup(CPO_PopupKind_t kind)
 {
-	// Band noise and its keys (on: its level, then its keys), then the card
-#ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
-	const uint8_t lines = s_noise ? 3 : 2;
-	const uint8_t line = s_hint % lines;
-	if (line == 0) {
-		if (s_noise) {
-			sprintf_(out, "Band noise %u", gEeprom.CW_PRACTICE_NOISE_LEVEL + 1);
-		} else {
-			strcpy(out, "9 band noise");
-		}
-		return;
-	}
-	if (line == 1 && s_noise) {
-		strcpy(out, "3/6 level  9 off");
-		return;
-	}
+	s_popup = kind;
+	// The picker waits for MENU as long as the menu does, as the keyer mode popup does
+	s_popup_10ms = (kind == POPUP_DRILL) ? menu_timeout_500ms * 50u : CW_POPUP_SHOW_10MS;
+	gUpdateDisplay = true;
+}
+
+static void SetDrill(CPO_CallMode_t mode)
+{
+#ifdef ENABLE_FEAT_NR7Y_CPO_QSO
+	const bool was_qso = QsoDrill();
 #endif
-	strcpy(out, "MENU controls");
+	CPO_Call_SetMode(mode);
+#ifdef ENABLE_FEAT_NR7Y_CPO_QSO
+	if (was_qso) {
+		CPO_Qso_Exit();
+	}
+	if (QsoDrill()) {
+		CPO_Qso_Enter();
+	}
+	UpdateSynth();
+#endif
+}
+
+// confirm is MENU, which switches to the picker's drill unless it's the one in use;
+// anything else drops it. Every other popup's change is already made.
+static void ClosePopup(bool confirm)
+{
+	if (confirm && s_popup == POPUP_DRILL && s_drill != gCW_CpoCallMode) {
+		SetDrill(s_drill);
+	}
+	s_popup = POPUP_NONE;
+	gUpdateDisplay = true;
+}
+
+// The picker's drill a step through F's list, wrapping
+static void StepDrill(int8_t direction)
+{
+	s_drill = (CPO_CallMode_t)((s_drill + CPO_CALL_MODE_COUNT + direction) % CPO_CALL_MODE_COUNT);
+	ShowPopup(POPUP_DRILL);
+}
+
+void CPO_OnKeying(void)
+{
+	if (s_popup != POPUP_NONE) {
+		ClosePopup(false);
+	}
+}
+
+bool CPO_GetPopup(CPO_Popup_t *popup)
+{
+	static const char *const TITLES[] = {
+		[POPUP_DRILL]      = "DRILL",
+		[POPUP_NOISE]      = "BAND NOISE",
+		[POPUP_SPACING]    = "SPACING",
+		[POPUP_AUTO]       = "AUTO SPACING",
+		[POPUP_PILE]       = "PILE-UP",
+		[POPUP_DIFFICULTY] = "DIFFICULTY",
+		[POPUP_FLASH]      = "FLASH SENDING",
+		[POPUP_LIGHT]      = "BACKLIGHT",
+	};
+	static const char KEYS[][3] = {
+		[POPUP_NOISE]      = "36",
+		[POPUP_SPACING]    = "28",
+		[POPUP_AUTO]       = "0",
+		[POPUP_PILE]       = "17",
+		[POPUP_DIFFICULTY] = "4",
+		[POPUP_FLASH]      = "4",
+		[POPUP_LIGHT]      = "*",
+	};
+	static const char *const DRILLS[CPO_CALL_MODE_COUNT] = {
+		"OFF", "SEND CALLS", "COPY CALLS",
+#ifdef ENABLE_FEAT_NR7Y_CPO_QSO
+		"QSO",
+#endif
+	};
+	char *value = popup->value;
+	bool on = false;
+
+	if (s_popup == POPUP_NONE) {
+		return false;
+	}
+	popup->title = TITLES[s_popup];
+	memcpy(popup->keys, KEYS[s_popup], sizeof(popup->keys));
+	popup->confirm = s_popup == POPUP_DRILL;
+
+	switch (s_popup) {
+	case POPUP_DRILL:
+		strcpy(value, DRILLS[s_drill]);
+		return true;
+#ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
+	case POPUP_NOISE:
+		if (s_noise) {
+			sprintf_(value, "%u", gEeprom.CW_PRACTICE_NOISE_LEVEL + 1);
+			return true;
+		}
+		strcpy(popup->keys, "9");   // off: the key that turns it on
+		break;
+#endif
+	case POPUP_SPACING:
+		if (CPO_Call_EffectiveWPM() != 0) {
+			sprintf_(value, "%u WPM", CPO_Call_EffectiveWPM());
+			return true;
+		}
+		break;
+	case POPUP_AUTO:
+		on = gEeprom.CW_FARNSWORTH_AUTO;
+		break;
+#ifdef ENABLE_FEAT_NR7Y_CPO_QSO
+	case POPUP_PILE:
+		sprintf_(value, "%u CALLER%s", gEeprom.CW_QSO_PILE, (gEeprom.CW_QSO_PILE > 1) ? "S" : "");
+		return true;
+	case POPUP_DIFFICULTY:
+		strcpy(value, CPO_Qso_DifficultyName());
+		for (char *c = value; *c; c++) {
+			if (*c >= 'a') {
+				*c -= 'a' - 'A';
+			}
+		}
+		return true;
+#endif
+#ifdef ENABLE_FLASHLIGHT
+	case POPUP_FLASH:
+		on = gCW_FlashlightSending;
+		break;
+#endif
+	default:
+		on = gCW_CpoBacklightOn;
+		break;
+	}
+	strcpy(value, on ? "ON" : "OFF");
+	return true;
 }
 
 void CPO_Enter(void)
@@ -337,8 +455,7 @@ void CPO_Enter(void)
     CW_ClearTxDisplay();
 
 	s_card = false;
-	s_hint = 0;
-	s_hint_10ms = 0;
+	s_popup = POPUP_NONE;
 #ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
 	if (gEeprom.CW_PRACTICE_NOISE) {
 		NoiseStart();
@@ -364,6 +481,7 @@ void CPO_Exit(void)
 	}
 #endif
 	CPO_Call_SetMode(CPO_CALL_MODE_OFF);
+	s_popup = POPUP_NONE;
 #ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
 	s_noise = false;
 	s_synth = false;
@@ -425,10 +543,8 @@ void CPO_Tick(void)
 		}
 	}
 #endif
-	if (++s_hint_10ms >= CPO_HINT_10MS) {
-		s_hint_10ms = 0;
-		s_hint++;
-		gUpdateDisplay = true;
+	if (s_popup != POPUP_NONE && --s_popup_10ms == 0) {
+		ClosePopup(false);
 	}
 
 	if (s_needs_redraw | gCW_TX_DisplayUpdated) {
@@ -455,10 +571,16 @@ static void StepWpm(int8_t direction)
 
 void CPO_ProcessKeys(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 {
-	// Speed steps on the press and on every repeat while the arrow is held, as the CW
-	// speed popup's do
+	// Up/down step on the press and on every repeat while held, as the CW popups' do:
+	// the drill in the picker, else the speed, which line 6 shows clear of any popup
 	if ((Key == KEY_UP || Key == KEY_DOWN) && bKeyPressed && !s_card) {
-		StepWpm(CW_Popup_KeyDirection(Key));
+		const int8_t direction = CW_Popup_KeyDirection(Key);
+		if (s_popup == POPUP_DRILL) {
+			StepDrill(direction);
+		} else {
+			ClosePopup(false);
+			StepWpm(direction);
+		}
 		return;
 	}
 
@@ -466,7 +588,26 @@ void CPO_ProcessKeys(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 		return;
 	}
 
-	// Any key closes the controls card, and does only that
+	if (s_popup != POPUP_NONE) {
+		// MENU switches to the picker's drill and EXIT drops it; either only closes it
+		if (Key == KEY_MENU || Key == KEY_EXIT) {
+			ClosePopup(Key == KEY_MENU);
+			return;
+		}
+		if (Key == KEY_F && s_popup == POPUP_DRILL) {
+			StepDrill(1);
+			return;
+		}
+		// Any other key closes it, dropping a pending drill, and then does its usual job
+		ClosePopup(false);
+	}
+
+	if (Key == KEY_EXIT) {
+		CPO_Exit();
+		return;
+	}
+
+	// Any other key closes the controls card, and does only that
 	if (s_card) {
 		s_card = false;
 		gUpdateDisplay = true;
@@ -485,24 +626,24 @@ void CPO_ProcessKeys(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 		if (gCW_CpoBacklightOn) {
 			BACKLIGHT_TurnOn();
 			gBacklightCountdown_500ms = 2;
-            gUpdateDisplay = true;
 		} else {
 			BACKLIGHT_TurnOff();
-            gUpdateDisplay = true;
 		}
+		ShowPopup(POPUP_LIGHT);
 		break;
 
 	case KEY_4:
 #ifdef ENABLE_FEAT_NR7Y_CPO_QSO
 		if (QsoDrill()) {
 			CPO_Qso_NextDifficulty();
+			ShowPopup(POPUP_DIFFICULTY);
 			break;
 		}
 #endif
 #ifdef ENABLE_FLASHLIGHT
 		gCW_FlashlightSending = !gCW_FlashlightSending;
         s_flashlight_sending = gCW_FlashlightSending;
-		gUpdateDisplay = true;
+		ShowPopup(POPUP_FLASH);
 #endif
 		break;
 	case KEY_1:
@@ -510,6 +651,7 @@ void CPO_ProcessKeys(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 #ifdef ENABLE_FEAT_NR7Y_CPO_QSO
 		if (QsoDrill()) {
 			CPO_Qso_StepPile(Key == KEY_1);
+			ShowPopup(POPUP_PILE);
 		}
 #endif
 		break;
@@ -526,30 +668,25 @@ void CPO_ProcessKeys(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 		gUpdateDisplay = true;
 		break;
 
-	case KEY_F: {
-#ifdef ENABLE_FEAT_NR7Y_CPO_QSO
-		const bool was_qso = QsoDrill();
-#endif
-		CPO_Call_NextMode();
-#ifdef ENABLE_FEAT_NR7Y_CPO_QSO
-		if (was_qso) {
-			CPO_Qso_Exit();
-		}
-		if (QsoDrill()) {
-			CPO_Qso_Enter();
-		}
-		UpdateSynth();
-#endif
+	case KEY_F:
+		// The picker opens on the drill in use
+		s_drill = gCW_CpoCallMode;
+		ShowPopup(POPUP_DRILL);
 		break;
-	}
 
 	case KEY_2:
 	case KEY_8:
-		CPO_Call_StepSpacing(Key == KEY_2);
+		if (CPO_Call_IsCopyMode()) {
+			CPO_Call_StepSpacing(Key == KEY_2);
+			ShowPopup(POPUP_SPACING);
+		}
 		break;
 
 	case KEY_0:
-		CPO_Call_ToggleAutoSpacing();
+		if (CPO_Call_IsCopyMode()) {
+			CPO_Call_ToggleAutoSpacing();
+			ShowPopup(POPUP_AUTO);
+		}
 		break;
 
 #ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
@@ -560,12 +697,13 @@ void CPO_ProcessKeys(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 		} else {
 			NoiseStop();
 		}
-		gUpdateDisplay = true;
+		ShowPopup(POPUP_NOISE);
 		break;
 
 	case KEY_3:
 	case KEY_6:
 		StepNoiseLevel(Key == KEY_3);
+		ShowPopup(POPUP_NOISE);
 		break;
 #endif
 

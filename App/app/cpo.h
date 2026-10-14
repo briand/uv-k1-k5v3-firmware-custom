@@ -28,15 +28,32 @@ void CPO_Exit(void);
 void CPO_Tick(void);
 void CPO_ProcessKeys(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld);
 
-#define CPO_HINT_LINE_SIZE 19   // a full small-font line plus NUL
+#define CPO_CARD_LINE_SIZE 19   // a full small-font line plus NUL
 #define CPO_CARD_LINES     6
 
 // Every character the CW encoder decodes, and whether a word gap came before it:
 // to the QSO drill when it runs, else the callsign drill
 void CPO_OnChar(char ch, bool word_gap);
 
-// The hint line, which takes turns with the band noise level, its keys, and MENU
-void CPO_GetHintLine(char out[CPO_HINT_LINE_SIZE]);
+// Your keying closes a setting's popup, as it does the CW popups, dropping a drill the
+// picker hasn't switched to
+void CPO_OnKeying(void);
+
+// A setting's popup over the drill, in the CW popups' box, for 2 s after its key. F's
+// drill picker is the confirm kind: F or up/down step it, only MENU switches to it, and
+// EXIT, any other key, keying or the menu's idle timeout drop it. Up/down are always
+// the speed otherwise, on line 6 with no popup.
+#define CPO_POPUP_VALUE_SIZE 12   // 13 big-font characters fit the box
+typedef struct {
+	const char *title;
+	char value[CPO_POPUP_VALUE_SIZE];
+	// The key that changes it, or a pair drawn one over the other as on the keypad,
+	// the upper one raising it; the picker draws the step arrows instead
+	char keys[3];
+	bool confirm;   // the drill picker: a choice only MENU applies
+} CPO_Popup_t;
+
+bool CPO_GetPopup(CPO_Popup_t *popup);   // false while none is up
 
 // The controls card MENU puts up, which any key takes down, and its lines for the
 // drill in use. In them < and > stand for the left and right speed keys, which the

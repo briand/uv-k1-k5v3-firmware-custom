@@ -45,7 +45,7 @@
 #define CPO_CALL_MAX_TRIES 3
 // Keeps "999/999" inside the space the score gets on the WPM line
 #define CPO_CALL_SCORE_MAX 999
-// How long the line naming a spacing change stays up
+// How long the line naming a step auto spacing took stays up
 #define CPO_CALL_NOTICE_10MS 150
 // Auto spacing: calls in a row copied on the first listen before the gaps narrow a step
 #define CPO_CALL_AUTO_STREAK 5
@@ -57,12 +57,6 @@ typedef enum {
 	CPO_STEP_NEXT,       // new callsign (played in copy mode)
 	CPO_STEP_ACK,        // copy mode: "dit dit", then NEXT
 } CPO_CallStep_t;
-
-// What the notice line names
-typedef enum {
-	CPO_NOTICE_SPACING = 0,   // the effective speed, or that the spacing is off
-	CPO_NOTICE_AUTO,          // auto spacing on or off
-} CPO_CallNotice_t;
 
 CPO_CallMode_t gCW_CpoCallMode = CPO_CALL_MODE_OFF;
 char gCW_CpoCall[CPO_CALL_MAX_LEN + 1];
@@ -79,7 +73,6 @@ static uint16_t s_wait_10ms = 0;   // counts down only while the operator is idl
 static bool s_paused = false;      // operator has paused since s_step was set
 static bool s_clean = false;       // copy mode: no miss, ? or replay on this call yet
 static uint8_t s_streak = 0;       // copy mode: calls in a row copied clean
-static CPO_CallNotice_t s_notice = CPO_NOTICE_SPACING;
 static uint8_t s_notice_10ms = 0;  // counts down while the notice line is up
 static uint32_t s_rng_state = 0;
 
@@ -205,13 +198,6 @@ static void StopPlayback(void)
 #endif
 }
 
-static void ShowNotice(CPO_CallNotice_t notice)
-{
-	s_notice = notice;
-	s_notice_10ms = CPO_CALL_NOTICE_10MS;
-	gUpdateDisplay = true;
-}
-
 // The effective speed in use, counting off as the keyer speed
 static uint8_t SpacingWPM(void)
 {
@@ -232,7 +218,15 @@ static void StepSpacing(bool narrower)
 	}
 	gEeprom.CW_FARNSWORTH_WPM = (eff_wpm >= gEeprom.CW_KEY_WPM) ? 0 : eff_wpm;
 	s_streak = 0;
-	ShowNotice(CPO_NOTICE_SPACING);
+}
+
+// A step auto spacing takes, named on the notice line. The keys' own steps show in
+// practice's popup.
+static void AutoStep(bool narrower)
+{
+	StepSpacing(narrower);
+	s_notice_10ms = CPO_CALL_NOTICE_10MS;
+	gUpdateDisplay = true;
 }
 
 // Copy mode, a call copied: a run of them copied on the first listen narrows the
@@ -244,7 +238,7 @@ static void CountCopy(void)
 	} else if (++s_streak >= CPO_CALL_AUTO_STREAK) {
 		s_streak = 0;
 		if (gEeprom.CW_FARNSWORTH_AUTO && CPO_Call_EffectiveWPM() != 0) {
-			StepSpacing(true);
+			AutoStep(true);
 		}
 	}
 }
@@ -291,13 +285,6 @@ void CPO_Call_SetMode(CPO_CallMode_t mode)
 	}
 }
 
-void CPO_Call_NextMode(void)
-{
-	CPO_Call_SetMode(gCW_CpoCallMode + 1 == CPO_CALL_MODE_COUNT
-		? CPO_CALL_MODE_OFF
-		: (CPO_CallMode_t)(gCW_CpoCallMode + 1));
-}
-
 void CPO_Call_Restart(void)
 {
 	// After a hit or a reveal the next callsign is already on its way
@@ -330,7 +317,6 @@ void CPO_Call_ToggleAutoSpacing(void)
 	}
 	gEeprom.CW_FARNSWORTH_AUTO = !gEeprom.CW_FARNSWORTH_AUTO;
 	s_streak = 0;
-	ShowNotice(CPO_NOTICE_AUTO);
 }
 
 void CPO_Call_OnChar(char ch)
@@ -372,7 +358,7 @@ void CPO_Call_OnChar(char ch)
 			Schedule(CPO_STEP_NEXT, CPO_CALL_REVEAL_10MS);
 			s_streak = 0;
 			if (gEeprom.CW_FARNSWORTH_AUTO) {
-				StepSpacing(false);
+				AutoStep(false);
 			}
 		} else {
 			Schedule(CPO_STEP_RETRY, CPO_CALL_RESULT_10MS);
@@ -434,9 +420,7 @@ bool CPO_Call_GetNotice(char out[CPO_CALL_NOTICE_SIZE])
 	if (s_notice_10ms == 0) {
 		return false;
 	}
-	if (s_notice == CPO_NOTICE_AUTO) {
-		strcpy(out, gEeprom.CW_FARNSWORTH_AUTO ? "Auto spacing on" : "Auto spacing off");
-	} else if (CPO_Call_EffectiveWPM() != 0) {
+	if (CPO_Call_EffectiveWPM() != 0) {
 		sprintf_(out, "Spacing %u WPM", CPO_Call_EffectiveWPM());
 	} else {
 		strcpy(out, "Farnsworth off");

@@ -27,6 +27,10 @@
 
 #include "driver/keyboard.h"
 
+// How long a popup whose change is already made stays up after the last key press, 2 s.
+// One that waits for MENU stays as long as the menu does.
+#define CW_POPUP_SHOW_10MS 200
+
 typedef enum {
 	CW_POPUP_NONE = 0,
 	CW_POPUP_KEYER_MODE,   // up/down or the action step a pending mode; only MENU applies it, the menu's idle timeout drops it

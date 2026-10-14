@@ -84,10 +84,8 @@ typedef enum {
 	NOTICE_OP,
 	NOTICE_NO_CALL,
 	NOTICE_LEFT,
-	NOTICE_DIFFICULTY,
 	NOTICE_LOGGED,
 	NOTICE_NOT_LOGGED,
-	NOTICE_PILE,
 } CPO_QsoNotice_t;
 
 // What an over said, as far as the station cares
@@ -1351,7 +1349,6 @@ void CPO_Qso_Restart(void)
 void CPO_Qso_NextDifficulty(void)
 {
 	gEeprom.CW_QSO_DIFFICULTY = (gEeprom.CW_QSO_DIFFICULTY + 1) % CW_QSO_DIFFICULTIES;
-	Notice(NOTICE_DIFFICULTY);
 }
 
 void CPO_Qso_StepPile(bool up)
@@ -1363,7 +1360,6 @@ void CPO_Qso_StepPile(bool up)
 		return;
 	}
 	gEeprom.CW_QSO_PILE = up ? n + 1 : n - 1;
-	Notice(NOTICE_PILE);
 }
 
 const char *CPO_Qso_DifficultyName(void)
@@ -1576,21 +1572,15 @@ bool CPO_Qso_GetNotice(char out[CPO_QSO_LINE_SIZE])
 	if (s_notice_10ms == 0) {
 		return false;
 	}
-	// Each notice's text, taking the call, the difficulty's name, or the pile-up size
+	// Each notice's text, taking your call or the one logged
 	static const char *const TEXT[] = {
 		[NOTICE_DOUBLED]    = "Doubled: unheard",
 		[NOTICE_OP]         = "Op %s",
 		[NOTICE_NO_CALL]    = "DE your call?",
 		[NOTICE_LEFT]       = "No callers left",
-		[NOTICE_DIFFICULTY] = "%s stations",
 		[NOTICE_LOGGED]     = "Logged %s",
 		[NOTICE_NOT_LOGGED] = "Not logged",
-		[NOTICE_PILE]       = "Up to %s caller%s",
 	};
-	const char size[2] = { '0' + gEeprom.CW_QSO_PILE, '\0' };
-	sprintf_(out, TEXT[s_notice],
-		(s_notice == NOTICE_OP) ? s_my : (s_notice == NOTICE_DIFFICULTY) ? CPO_Qso_DifficultyName()
-		: (s_notice == NOTICE_PILE) ? size : s_logged,
-		(gEeprom.CW_QSO_PILE > 1) ? "s" : "");
+	sprintf_(out, TEXT[s_notice], (s_notice == NOTICE_OP) ? s_my : s_logged);
 	return true;
 }
