@@ -189,6 +189,21 @@ enable_feature(ENABLE_FEAT_NR7Y_CPO
     app/cpocall.c
     ui/cpo.c
 )
+# Code practice band noise: live receive audio under tones from the MCU DAC (requires CPO)
+if(ENABLE_FEAT_NR7Y_CPO_SYNTH AND NOT ENABLE_FEAT_NR7Y_CPO)
+    message(FATAL_ERROR "ENABLE_FEAT_NR7Y_CPO_SYNTH needs ENABLE_FEAT_NR7Y_CPO")
+endif()
+enable_feature(ENABLE_FEAT_NR7Y_CPO_SYNTH
+    app/cwsynth.c
+    driver/dacaudio.c
+)
+# QSO drill: a station on the synthesizer works you through a QSO (requires CPO_SYNTH)
+if(ENABLE_FEAT_NR7Y_CPO_QSO AND NOT ENABLE_FEAT_NR7Y_CPO_SYNTH)
+    message(FATAL_ERROR "ENABLE_FEAT_NR7Y_CPO_QSO needs ENABLE_FEAT_NR7Y_CPO_SYNTH")
+endif()
+enable_feature(ENABLE_FEAT_NR7Y_CPO_QSO
+    app/cpoqso.c
+)
 # Millis support
 enable_feature(ENABLE_MILLIS
     driver/millis.c

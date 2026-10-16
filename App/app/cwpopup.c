@@ -23,7 +23,6 @@
 #include "settings.h"
 #include "ui/ui.h"
 
-#define CW_POPUP_SHOW_10MS     200  // 2 s after the last key press
 #define CW_WPM_MIN             10   // same range as the CWwpm menu
 #define CW_WPM_MAX             45
 
@@ -158,8 +157,7 @@ static void StepPending(int8_t direction)
 	s_pending = (uint8_t)((s_pending + count + direction) % count);
 }
 
-// Up/down as +1/-1, flipped like the menu and dial when SetNav is off
-static int8_t KeyDirection(KEY_Code_t Key)
+int8_t CW_Popup_KeyDirection(KEY_Code_t Key)
 {
 	const int8_t direction = (Key == KEY_UP) ? 1 : -1;
 
@@ -210,9 +208,9 @@ bool CW_Popup_ProcessKey(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 	if ((s_kind == CW_POPUP_SPEED || IsPending(s_kind)) && (Key == KEY_UP || Key == KEY_DOWN)) {
 		if (bKeyPressed) {  // first press and every auto-repeat while held
 			if (s_kind == CW_POPUP_SPEED)
-				StepSpeed(KeyDirection(Key));
+				StepSpeed(CW_Popup_KeyDirection(Key));
 			else
-				StepPending(KeyDirection(Key));
+				StepPending(CW_Popup_KeyDirection(Key));
 			CW_Popup_Show(s_kind);
 		}
 		return true;

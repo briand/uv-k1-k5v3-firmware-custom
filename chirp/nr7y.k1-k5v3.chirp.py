@@ -753,6 +753,15 @@ FM_BAND_LIST = [
 
 FM_TUNING_MODE_LIST = ["Frequency (VFO)", "Channel (MR)"]
 
+
+def fm_band_of(mem):
+    """The FM band the firmware runs on. A record never saved is erased flash,
+    whose band bits read as 3 (64-76 MHz); the firmware takes band 0 for it,
+    known by its 0xFFFF frequency, which a saved record never holds."""
+    if int(mem.fm_selected_frequency) == 0xFFFF:
+        return 0
+    return int(mem.fm_band) & 0x03
+
 # Widest range any band can reach, used when validating stored channels. A
 # channel is kept as long as *some* band could tune it: validating against only
 # the currently selected band would silently erase a perfectly good channel list
@@ -886,8 +895,10 @@ _NR7Y_CW_FARNSWORTH_OPTS = ["OFF"] + [
     "%d WPM" % w for w in range(_NR7Y_CW_FARNSWORTH_WPM_MIN,
                                 _NR7Y_CW_FARNSWORTH_WPM_MAX + 1)]
 
-# Proper roger dah length in dits (full byte at _NR7Y_CW_SETTINGS_ADDR+5),
-# mirrors CW_ROGER_DAH_DITS_* in App/settings.h
+# Proper roger dah length in dits (bits 0-4 of _NR7Y_CW_SETTINGS_ADDR+5),
+# mirrors CW_ROGER_DAH_DITS_* in App/settings.h. Bits 5-6 hold the QSO drill's
+# pile-up size: (size - 1) XOR (default - 1), so zeros read as the default.
+# Bit 7 set (0xFF, unset) is the defaults for both.
 _NR7Y_CW_ROGER_DITS_MIN = 3
 _NR7Y_CW_ROGER_DITS_MAX = 20
 _NR7Y_CW_ROGER_DITS_DEFAULT = 9
@@ -897,6 +908,26 @@ _NR7Y_CW_ROGER_DITS_DEFAULT = 9
 _NR7Y_CW_HANG_10MS_MIN = 1
 _NR7Y_CW_HANG_10MS_MAX = 200
 _NR7Y_CW_HANG_10MS_DEFAULT = 30
+
+# Code practice (CW byte 6): band noise level in bits 0-3 (shown 1-16), noise on
+# in bit 4, QSO drill difficulty in bits 5-6. Valid only with bit 7 clear and a
+# difficulty in range. Unset (0xFF) is noise off at the top level, and Easy.
+# Mirrors CW_PRACTICE_NOISE_LEVEL_* and CW_QSO_* in App/settings.h.
+_NR7Y_CW_NOISE_LEVEL_MAX = 15
+_NR7Y_CW_NOISE_LEVEL_DEFAULT = 15
+_NR7Y_CW_QSO_DIFFICULTIES = ["Easy", "Medium", "Hard"]
+_NR7Y_CW_QSO_PILE_MAX = 4      # mirrors CW_QSO_PILE_* in App/settings.h
+_NR7Y_CW_QSO_PILE_DEFAULT = 2
+
+# Practice callsigns' greatest length, 4-7, mirrors CW_CALL_LEN_* in App/settings.h.
+# 6 (the default) is no limit, and 7 adds portable calls. Stored as (length - 4)
+# XOR (default - 4) in two bits earlier firmware always left 0, so they read as the
+# default: bit 6 of byte 1 (above the speed) holds the low bit, bit 4 of byte 2
+# (above the key input) the high one. A byte that isn't valid counts 0.
+_NR7Y_CW_CALL_LEN_MIN = 4
+_NR7Y_CW_CALL_LEN_MAX = 7
+_NR7Y_CW_CALL_LEN_DEFAULT = 6
+_NR7Y_CW_WPM_DEFAULT = 18
 
 # Extended key actions for NR7Y firmware with CW modulator, mirroring
 # App/settings.h enum ACTION_OPT_t.
@@ -2167,7 +2198,7 @@ class UVK5RadioEgzumer(chirp_common.CloneModeRadio):
                     0, min(int(element.value) - 1, FM_CHANNELS_MAX - 1))
 
             elif elname == "fm_selected_frequency":
-                band_lo, band_hi = FM_BAND_LIMITS[int(_mem.fm_band) & 0x03]
+                band_lo, band_hi = FM_BAND_LIMITS[fm_band_of(_mem)]
                 try:
                     val2 = int(round(float(str(element.value).strip()) * 10))
                 except Exception:
@@ -3143,7 +3174,7 @@ class UVK5RadioEgzumer(chirp_common.CloneModeRadio):
 
         # int() matters: list_def hands back the bitwise object untouched when
         # the value is already in range, and that is not hashable.
-        tmpfmband = int(list_def(int(_mem.fm_band), FM_BAND_LIST, 0))
+        tmpfmband = int(list_def(fm_band_of(_mem), FM_BAND_LIST, 0))
         band_lo, band_hi = FM_BAND_LIMITS[tmpfmband]
         val = RadioSettingValueList(FM_BAND_LIST, FM_BAND_LIST[tmpfmband])
         rs = RadioSetting("fm_band", "Band", val)
@@ -4226,7 +4257,8 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
             rs_fw.set_doc("Effective speed of the copy practice drills: characters "
                           "play at the keyer speed with the gaps between them "
                           "stretched to this speed (Farnsworth). Off, or at or above "
-                          "the keyer speed, keeps normal spacing.")
+                          "the keyer speed, keeps normal spacing. Spacng in the "
+                          "practice menu.")
             cw.append(rs_fw)
         except Exception as e:
             LOG.error("CW Farnsworth speed: %s", e)
@@ -4238,10 +4270,72 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
                                                        auto_opts[self._get_cw_farnsworth_auto()]))
             rs_fa.set_doc("Narrow the copy practice spacing a step after 5 calls in a "
                           "row copied on the first listen, and widen it a step when a "
-                          "call has to be revealed.")
+                          "call has to be revealed. AutoSp in the practice menu.")
             cw.append(rs_fa)
         except Exception as e:
             LOG.error("CW Farnsworth auto: %s", e)
+
+        # Code practice band noise
+        try:
+            noise_opts = ["OFF", "ON"]
+            rs_pn = RadioSetting("cw_practice_noise", "Code Practice Band Noise",
+                                 RadioSettingValueList(noise_opts,
+                                                       noise_opts[self._get_cw_practice_noise()]))
+            rs_pn.set_doc("Play live receive audio from the VFO's frequency under the "
+                          "code practice sidetone and drills, as band noise. Tune a "
+                          "quiet frequency first. Noise in the practice menu.")
+            cw.append(rs_pn)
+        except Exception as e:
+            LOG.error("CW practice noise: %s", e)
+
+        try:
+            rs_pl = RadioSetting("cw_practice_noise_level", "Code Practice Noise Level",
+                                 RadioSettingValueInteger(
+                                     1, _NR7Y_CW_NOISE_LEVEL_MAX + 1,
+                                     self._get_cw_practice_noise_level() + 1))
+            rs_pl.set_doc("How loud the band noise plays, 1-16, about 2 dB a step "
+                          "(NLevel in the practice menu)")
+            cw.append(rs_pl)
+        except Exception as e:
+            LOG.error("CW practice noise level: %s", e)
+
+        try:
+            rs_qd = RadioSetting("cw_qso_difficulty", "QSO Drill Difficulty",
+                                 RadioSettingValueList(
+                                     _NR7Y_CW_QSO_DIFFICULTIES,
+                                     _NR7Y_CW_QSO_DIFFICULTIES[self._get_cw_qso_difficulty()]))
+            rs_qd.set_doc("How the QSO drill's stations come on: Easy is strong, at "
+                          "your speed, on a paddle; Medium and Hard bring other "
+                          "speeds, weak and fading signals, bugs and straight keys, "
+                          "chirp, and impatient tail-enders (Diffic in the practice "
+                          "menu)")
+            cw.append(rs_qd)
+        except Exception as e:
+            LOG.error("CW QSO difficulty: %s", e)
+
+        try:
+            rs_qp = RadioSetting("cw_qso_pile", "QSO Drill Pile-up",
+                                 RadioSettingValueInteger(1, _NR7Y_CW_QSO_PILE_MAX,
+                                                          self._get_cw_qso_pile()))
+            rs_qp.set_doc("The most stations that call you at once in the QSO drill, "
+                          "1-4; how many come depends on how active you are (Pileup "
+                          "in the practice menu)")
+            cw.append(rs_qp)
+        except Exception as e:
+            LOG.error("CW QSO pile-up: %s", e)
+
+        try:
+            rs_cl = RadioSetting("cw_call_len", "Practice Callsign Length",
+                                 RadioSettingValueInteger(_NR7Y_CW_CALL_LEN_MIN,
+                                                          _NR7Y_CW_CALL_LEN_MAX,
+                                                          self._get_cw_call_len()))
+            rs_cl.set_doc("The longest callsign the send, copy and QSO drills use, "
+                          "4-7. They run 4-6 characters, so 6 is no limit; 7 adds "
+                          "portable calls such as K7ABC/P and W1AB/7 (CallLn in the "
+                          "practice menu)")
+            cw.append(rs_cl)
+        except Exception as e:
+            LOG.error("CW practice call length: %s", e)
 
         # CW Macros (4 messages)
         macros = RadioSettingGroup("cw_macros", "CW Macros")
@@ -4355,6 +4449,17 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
                     _NR7Y_CW_FARNSWORTH_OPTS.index(str(element.value)))
             elif name == "cw_farnsworth_auto":
                 self._set_cw_farnsworth_auto(["OFF", "ON"].index(str(element.value)))
+            elif name == "cw_practice_noise":
+                self._set_cw_practice_noise(["OFF", "ON"].index(str(element.value)))
+            elif name == "cw_practice_noise_level":
+                self._set_cw_practice_noise_level(int(element.value) - 1)
+            elif name == "cw_qso_difficulty":
+                self._set_cw_qso_difficulty(
+                    _NR7Y_CW_QSO_DIFFICULTIES.index(str(element.value)))
+            elif name == "cw_qso_pile":
+                self._set_cw_qso_pile(int(element.value))
+            elif name == "cw_call_len":
+                self._set_cw_call_len(int(element.value))
             elif name.startswith("cw_msg"):
                 # "cw_msg1" → idx 1 … "cw_msg4" → idx 4
                 self._set_cw_msg(int(name[6:]), str(element.value))
@@ -4447,28 +4552,32 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
         mode = self._get_cw_keyer_mode()
         self._mmap_set(_NR7Y_CW_SETTINGS_ADDR + 4, mode | (eff << 2))
 
-    # -- Keyer speed (bits 0-6 of CW byte 1; mode no longer shares this byte) --
+    # -- Keyer speed (bits 0-5 of CW byte 1; bit 6 is the practice call length's
+    #    low bit; mode no longer shares this byte) --
+
+    def _cw_byte1_valid(self, b):
+        return 10 <= (b & 0x3F) <= 45
 
     def _get_cw_wpm(self):
         """Return WPM (10-45)."""
         b = self._mmap_byte(_NR7Y_CW_SETTINGS_ADDR + 1)
-        if b == 0xFF:
-            return 18  # Default 18 WPM
-        wpm = b & 0x7F
-        return wpm if 10 <= wpm <= 45 else 18
+        return b & 0x3F if self._cw_byte1_valid(b) else _NR7Y_CW_WPM_DEFAULT
 
     def _set_cw_wpm(self, wpm):
         wpm = max(10, min(45, int(wpm)))
-        self._mmap_set(_NR7Y_CW_SETTINGS_ADDR + 1, wpm & 0x7F)
+        b = self._mmap_byte(_NR7Y_CW_SETTINGS_ADDR + 1)
+        keep = (b & 0x40) if self._cw_byte1_valid(b) else 0   # call length's low bit
+        self._mmap_set(_NR7Y_CW_SETTINGS_ADDR + 1, wpm | keep)
 
-    # -- Key input mode (bits 0-4 of CW byte 2) --
+    # -- Key input mode (bits 0-3 of CW byte 2; bit 4 is the practice call length's
+    #    high bit) --
 
     def _get_cw_key_input_idx(self):
         """Return key input menu index 0-10."""
         b = self._mmap_byte(_NR7Y_CW_SETTINGS_ADDR + 2)
         if b == 0xFF or b >= 0x80:
             return 0   # Default HandKey
-        idx = b & 0x1F
+        idx = b & 0x0F
         return idx if idx < len(_NR7Y_CW_KEY_INPUT_MODES) else 0
 
     def _set_cw_key_input_idx(self, idx):
@@ -4476,9 +4585,10 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
             idx = 0
         b = self._mmap_byte(_NR7Y_CW_SETTINGS_ADDR + 2)
         break_in = (b >> 6) & 0x01
-        auto = (b & 0x20) if b < 0x80 else 0   # bit 5: copy practice auto spacing
+        # bit 4: call length's high bit, bit 5: copy practice auto spacing
+        keep = (b & 0x30) if b < 0x80 else 0
         self._mmap_set(_NR7Y_CW_SETTINGS_ADDR + 2,
-                       (int(idx) & 0x1F) | auto | (break_in << 6))
+                       (int(idx) & 0x0F) | keep | (break_in << 6))
 
     # -- Break-in enable (bit 6 of CW byte 2) --
 
@@ -4492,6 +4602,8 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
     def _set_cw_breakin(self, enable):
         enable = 1 if enable else 0
         b = self._mmap_byte(_NR7Y_CW_SETTINGS_ADDR + 2)
+        if b >= 0x80:
+            b = 0x00   # blank byte: HandKey, the call length's default
         auto = (b & 0x20) if b < 0x80 else 0   # bit 5: copy practice auto spacing
         self._mmap_set(_NR7Y_CW_SETTINGS_ADDR + 2,
                        (b & 0x1F) | auto | (enable << 6))
@@ -4525,18 +4637,65 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
     def _set_cw_repeat_delay(self, delay):
         self._mmap_set(_NR7Y_CW_SETTINGS_ADDR + 3, max(0, min(127, int(delay))) & 0x7F)
 
-    # -- Proper roger dah length (full byte at CW byte 5) --
+    # -- Proper roger dah length (CW byte 5 bits 0-4) and the QSO drill's
+    #    pile-up size (bits 5-6) --
 
     def _get_cw_roger_dits(self):
         """Return proper roger dah length in dits (3-20)."""
         b = self._mmap_byte(_NR7Y_CW_SETTINGS_ADDR + 5)
-        if not _NR7Y_CW_ROGER_DITS_MIN <= b <= _NR7Y_CW_ROGER_DITS_MAX:
+        if b >= 0x80 or not _NR7Y_CW_ROGER_DITS_MIN <= (b & 0x1F) <= _NR7Y_CW_ROGER_DITS_MAX:
             return _NR7Y_CW_ROGER_DITS_DEFAULT  # blank/invalid EEPROM
-        return b
+        return b & 0x1F
+
+    def _cw_byte5_pile_bits(self):
+        """Return CW byte 5's pile-up bits in place, 0 while the byte is unset."""
+        b = self._mmap_byte(_NR7Y_CW_SETTINGS_ADDR + 5)
+        return 0 if b >= 0x80 else b & 0x60
 
     def _set_cw_roger_dits(self, dits):
         dits = max(_NR7Y_CW_ROGER_DITS_MIN, min(_NR7Y_CW_ROGER_DITS_MAX, int(dits)))
-        self._mmap_set(_NR7Y_CW_SETTINGS_ADDR + 5, dits)
+        self._mmap_set(_NR7Y_CW_SETTINGS_ADDR + 5, dits | self._cw_byte5_pile_bits())
+
+    def _get_cw_qso_pile(self):
+        """Return the most callers at once in the QSO drill (1-4)."""
+        code = self._cw_byte5_pile_bits() >> 5
+        return ((code ^ (_NR7Y_CW_QSO_PILE_DEFAULT - 1)) & 0x03) + 1
+
+    def _set_cw_qso_pile(self, size):
+        size = max(1, min(_NR7Y_CW_QSO_PILE_MAX, int(size)))
+        b = self._mmap_byte(_NR7Y_CW_SETTINGS_ADDR + 5)
+        if b >= 0x80:
+            if size == _NR7Y_CW_QSO_PILE_DEFAULT:
+                return  # an unset byte left at the defaults stays unset
+            b = _NR7Y_CW_ROGER_DITS_DEFAULT
+        code = ((size - 1) ^ (_NR7Y_CW_QSO_PILE_DEFAULT - 1)) & 0x03
+        self._mmap_set(_NR7Y_CW_SETTINGS_ADDR + 5, (b & 0x1F) | (code << 5))
+
+    # -- Practice callsign length (CW byte 1 bit 6, byte 2 bit 4) --
+
+    def _get_cw_call_len(self):
+        """Return the longest practice callsign (4-7; 7 adds portable calls)."""
+        b1 = self._mmap_byte(_NR7Y_CW_SETTINGS_ADDR + 1)
+        b2 = self._mmap_byte(_NR7Y_CW_SETTINGS_ADDR + 2)
+        code = (((b1 >> 6) & 0x01) if self._cw_byte1_valid(b1) else 0) | \
+            (((b2 >> 3) & 0x02) if b2 < 0x80 else 0)
+        return _NR7Y_CW_CALL_LEN_MIN + \
+            (code ^ (_NR7Y_CW_CALL_LEN_DEFAULT - _NR7Y_CW_CALL_LEN_MIN))
+
+    def _set_cw_call_len(self, length):
+        length = max(_NR7Y_CW_CALL_LEN_MIN, min(_NR7Y_CW_CALL_LEN_MAX, int(length)))
+        if length == self._get_cw_call_len():
+            return  # unchanged: an unset byte stays unset
+        code = (length - _NR7Y_CW_CALL_LEN_MIN) ^ \
+            (_NR7Y_CW_CALL_LEN_DEFAULT - _NR7Y_CW_CALL_LEN_MIN)
+        b1 = self._mmap_byte(_NR7Y_CW_SETTINGS_ADDR + 1)
+        if not self._cw_byte1_valid(b1):
+            b1 = _NR7Y_CW_WPM_DEFAULT   # blank byte: the firmware's default speed
+        self._mmap_set(_NR7Y_CW_SETTINGS_ADDR + 1, (b1 & 0x3F) | (code & 0x01) << 6)
+        b2 = self._mmap_byte(_NR7Y_CW_SETTINGS_ADDR + 2)
+        if b2 >= 0x80:
+            b2 = 0x40   # blank byte: the firmware's defaults (HandKey, break-in on)
+        self._mmap_set(_NR7Y_CW_SETTINGS_ADDR + 2, (b2 & ~0x10 & 0x7F) | (code & 0x02) << 3)
 
     # -- Break-in hang time (full byte at CW byte 7, 10 ms units) --
 
@@ -4550,6 +4709,60 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
     def _set_cw_hang_ms(self, ms):
         units = max(_NR7Y_CW_HANG_10MS_MIN, min(_NR7Y_CW_HANG_10MS_MAX, int(ms) // 10))
         self._mmap_set(_NR7Y_CW_SETTINGS_ADDR + 7, units)
+
+    # -- Code practice (CW byte 6: noise level bits 0-3, noise on bit 4,
+    #    QSO difficulty bits 5-6) --
+    # An unset byte left at the defaults stays unset, as the firmware reads it the
+    # same way.
+
+    def _cw_byte6(self):
+        """Return CW byte 6, or None while it is unset or invalid."""
+        b = self._mmap_byte(_NR7Y_CW_SETTINGS_ADDR + 6)
+        if b >= 0x80 or ((b >> 5) & 0x03) >= len(_NR7Y_CW_QSO_DIFFICULTIES):
+            return None
+        return b
+
+    def _get_cw_practice_noise(self):
+        """Return 1=ON, 0=OFF."""
+        b = self._cw_byte6()
+        return 0 if b is None else (b >> 4) & 0x01
+
+    def _get_cw_practice_noise_level(self):
+        """Return the level 0-15, which CHIRP shows as 1-16."""
+        b = self._cw_byte6()
+        return _NR7Y_CW_NOISE_LEVEL_DEFAULT if b is None else b & 0x0F
+
+    def _set_cw_practice_noise(self, enable):
+        b = self._cw_byte6()
+        if b is None:
+            if not enable:
+                return
+            b = _NR7Y_CW_NOISE_LEVEL_DEFAULT
+        self._mmap_set(_NR7Y_CW_SETTINGS_ADDR + 6,
+                       (b & 0x6F) | ((1 if enable else 0) << 4))
+
+    def _set_cw_practice_noise_level(self, level):
+        level = max(0, min(_NR7Y_CW_NOISE_LEVEL_MAX, int(level)))
+        b = self._cw_byte6()
+        if b is None:
+            if level == _NR7Y_CW_NOISE_LEVEL_DEFAULT:
+                return
+            b = 0
+        self._mmap_set(_NR7Y_CW_SETTINGS_ADDR + 6, (b & 0x70) | level)
+
+    def _get_cw_qso_difficulty(self):
+        """Return 0=Easy, 1=Medium, 2=Hard."""
+        b = self._cw_byte6()
+        return 0 if b is None else (b >> 5) & 0x03
+
+    def _set_cw_qso_difficulty(self, difficulty):
+        difficulty = max(0, min(len(_NR7Y_CW_QSO_DIFFICULTIES) - 1, int(difficulty)))
+        b = self._cw_byte6()
+        if b is None:
+            if difficulty == 0:
+                return
+            b = _NR7Y_CW_NOISE_LEVEL_DEFAULT
+        self._mmap_set(_NR7Y_CW_SETTINGS_ADDR + 6, (b & 0x1F) | (difficulty << 5))
 
     # ------------------------------------------------------------------ CW macro read/write
 

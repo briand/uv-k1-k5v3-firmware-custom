@@ -480,7 +480,7 @@ void CW_EncoderProcessElement(CW_ElementType_t element)
 					CW_AddToTxDisplay(ch, s_encoder_space_pending);
 				}
 #ifdef ENABLE_CODE_PRACTICE
-				CPO_Call_OnChar(ch);   // no-op unless the callsign drill is running
+				CPO_OnChar(ch, s_encoder_space_pending);   // no-op unless a drill is running
 #endif
 			}
 #ifdef ENABLE_CODE_PRACTICE
@@ -489,7 +489,7 @@ void CW_EncoderProcessElement(CW_ElementType_t element)
 				// elements (a held paddle), is dropped everywhere else. Practice shows it so a
 				// fumble can't pass unseen, and the callsign drill scores it as a miss.
 				CW_AddToTxDisplay(CW_CHAR_UNKNOWN, s_encoder_space_pending);
-				CPO_Call_OnChar(CW_CHAR_UNKNOWN);
+				CPO_OnChar(CW_CHAR_UNKNOWN, s_encoder_space_pending);
 			}
 #endif
 			

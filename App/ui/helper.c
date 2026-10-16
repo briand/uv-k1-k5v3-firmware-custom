@@ -16,6 +16,7 @@
 
 #include <string.h>
 
+#include "bitmaps.h"
 #include "driver/st7565.h"
 #include "external/printf/printf.h"
 #include "font.h"
@@ -353,6 +354,57 @@ void UI_DrawPixelBuffer(uint8_t (*buffer)[128], uint8_t x, uint8_t y, bool black
     else
         buffer[y/8][x] &= ~pattern;
 }
+
+// Arrowhead 4 px deep and 7 px across with its tip at (x, y), pointing along (dx, dy)
+void UI_DrawArrow(uint8_t x, uint8_t y, int8_t dx, int8_t dy)
+{
+	for (int8_t depth = 0; depth < 4; depth++)
+		for (int8_t side = -depth; side <= depth; side++)
+			UI_DrawPixelBuffer(gFrameBuffer, x - depth * dx + side * dy, y - depth * dy + side * dx, true);
+}
+
+#ifdef ENABLE_CW_MODULATOR
+// Lift the popup's title row (line 2, inside the box) n pixels into line 1, under the
+// box's top border at row 9, to open a gap above the value
+static void RaiseCWPopupTitle(uint8_t n)
+{
+	for (uint8_t x = 9; x < 119; x++) {
+		const uint16_t column = (uint16_t)gFrameBuffer[2][x] << (8 - n);
+		gFrameBuffer[1][x] |= column & 0xFF;
+		gFrameBuffer[2][x]  = column >> 8;
+	}
+}
+
+void UI_DrawCWPopupBox(const char *title, bool confirm)
+{
+	for (uint8_t line = 1; line <= 5; line++)
+		memset(gFrameBuffer[line] + 7, 0, 114);
+
+	UI_DrawRectangleBuffer(gFrameBuffer, 8, 9, 119, 46, true);
+	UI_PrintStringSmallBold(title, 9, 118, 2);
+
+	// A choice that only happens on MENU carries an M and the confirm mark at the
+	// title's left end, over the MENU key on both radios
+	if (confirm) {
+		UI_PrintStringSmallNormal("M", 11, 0, 2);  // drawn at x 12-17
+		memcpy(gFrameBuffer[2] + 20, BITMAP_Confirm, sizeof(BITMAP_Confirm));
+	}
+
+	RaiseCWPopupTitle(3);
+}
+
+void UI_DrawCWPopupArrows(void)
+{
+	if (gEeprom.SET_NAV) {
+		UI_DrawArrow(17, 34, 0, -1);  // rows 34-37
+		UI_DrawArrow(17, 44, 0, 1);   // rows 41-44
+	}
+	else {
+		UI_DrawArrow(15,  41, -1, 0);  // rows 38-44
+		UI_DrawArrow(112, 41, 1, 0);
+	}
+}
+#endif
 
 static void sort(int16_t *a, int16_t *b)
 {

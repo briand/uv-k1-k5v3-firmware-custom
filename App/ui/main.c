@@ -952,25 +952,6 @@ static void DrawCWPopupKeyInput(uint8_t index)
 		UI_PrintStringSmallNormal(last + 1, 9, 118, 4);
 }
 
-// Arrowhead 4 px deep and 7 px across with its tip at (x, y), pointing along (dx, dy)
-static void DrawCWPopupArrow(uint8_t x, uint8_t y, int8_t dx, int8_t dy)
-{
-	for (int8_t depth = 0; depth < 4; depth++)
-		for (int8_t side = -depth; side <= depth; side++)
-			UI_DrawPixelBuffer(gFrameBuffer, x - depth * dx + side * dy, y - depth * dy + side * dx, true);
-}
-
-// Lift the popup's title row (line 2, inside the box) n pixels into line 1, under the
-// box's top border at row 9, to open a gap above the value
-static void RaiseCWPopupTitle(uint8_t n)
-{
-	for (uint8_t x = 9; x < 119; x++) {
-		const uint16_t column = (uint16_t)gFrameBuffer[2][x] << (8 - n);
-		gFrameBuffer[1][x] |= column & 0xFF;
-		gFrameBuffer[2][x]  = column >> 8;
-	}
-}
-
 // Boxed popup over the middle of the main screen for the CW setting a key action opened.
 // Covers lines 1-5 between x=7 and x=120, clear of the RX blink marker at x=0-6.
 static void DrawCWPopup(void)
@@ -1009,20 +990,8 @@ static void DrawCWPopup(void)
 			return;
 	}
 
-	for (uint8_t line = 1; line <= 5; line++)
-		memset(gFrameBuffer[line] + 7, 0, 114);
-
-	UI_DrawRectangleBuffer(gFrameBuffer, 8, 9, 119, 46, true);
-	UI_PrintStringSmallBold(title, 9, 118, 2);
-
-	// A keyer mode or key input change only happens on MENU, so the title carries an M
-	// and the confirm mark at the left end, over the MENU key on both radios
-	if (kind == CW_POPUP_KEYER_MODE || kind == CW_POPUP_KEY_INPUT) {
-		UI_PrintStringSmallNormal("M", 11, 0, 2);  // drawn at x 12-17
-		memcpy(gFrameBuffer[2] + 20, BITMAP_Confirm, sizeof(BITMAP_Confirm));
-	}
-
-	RaiseCWPopupTitle(3);
+	// A keyer mode or key input change only happens on MENU
+	UI_DrawCWPopupBox(title, kind == CW_POPUP_KEYER_MODE || kind == CW_POPUP_KEY_INPUT);
 
 	if (text)
 		UI_PrintString(text, 9, 118, 3, 8);
@@ -1033,16 +1002,8 @@ static void DrawCWPopup(void)
 	// that steps, low in the box and clear of the border at row 46. With UP/DOWN the up
 	// arrow (KEY_UP) steps up (faster, or the next mode or key input) and the down arrow
 	// sits under it; with the UV-K1's LEFT/RIGHT the left key steps down.
-	if (kind == CW_POPUP_KEYER_MODE || kind == CW_POPUP_SPEED || kind == CW_POPUP_KEY_INPUT) {
-		if (gEeprom.SET_NAV) {
-			DrawCWPopupArrow(17, 34, 0, -1);  // rows 34-37
-			DrawCWPopupArrow(17, 44, 0, 1);   // rows 41-44
-		}
-		else {
-			DrawCWPopupArrow(15,  41, -1, 0);  // rows 38-44
-			DrawCWPopupArrow(112, 41, 1, 0);
-		}
-	}
+	if (kind == CW_POPUP_KEYER_MODE || kind == CW_POPUP_SPEED || kind == CW_POPUP_KEY_INPUT)
+		UI_DrawCWPopupArrows();
 }
 
 // Full-panel modal while RIT/XIT adjust mode is open. It covers the S-meter, so the

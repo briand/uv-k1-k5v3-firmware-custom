@@ -68,6 +68,35 @@ bool CW_LocalSidetoneHeld(void)
 	return s_local_sidetone_held;
 }
 
+// The local sidetone's tone, on the BK4819's tone generator, or on the DAC when code
+// practice plays its tones there: the BK4819 then stays on receive audio for the band
+// noise, since switching it to the tone generator and back clicks
+static void LocalToneOn(bool cue)
+{
+#ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
+	if (CPO_SynthOn()) {
+		CPO_Sidetone(true, cue);
+		return;
+	}
+#endif
+	// gain before ALAM, so the tone path never opens at RX's DAC gain
+	CW_ApplySidetoneGain();
+	BK4819_SetAF(BK4819_AF_ALAM);
+	BK4819_SetScrambleFrequencyControlWord(cue ? CW_ERROR_TONE_HZ : gEeprom.CW_TONE_FREQUENCY * 10);
+}
+
+static void LocalToneOff(void)
+{
+#ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
+	if (CPO_SynthOn()) {
+		CPO_Sidetone(false, false);
+		return;
+	}
+#endif
+	// ALAM and the sidetone gain stay until the hang time passes (CPO keeps them)
+	BK4819_SetScrambleFrequencyControlWord(0);
+}
+
 // ---------------------------------------------------------------------------
 // CW_EndTxNow  –  end CW transmission immediately and return to monitor
 // ---------------------------------------------------------------------------
@@ -147,6 +176,11 @@ void CW_AppUpdate(void)
 	if (action == CW_ACTION_CARRIER_ON && !cue) {
 		CW_Popup_OnKeying();
 		CW_RIT_OnKeying();
+#ifdef ENABLE_CODE_PRACTICE
+		// a practice popup closes for your keying, not the copy drill playing its call
+		if (!fromPlayback)
+			CPO_OnKeying();
+#endif
 	}
 
 	// Playback started timing this element before the TX/sidetone setup below ran;
@@ -175,10 +209,7 @@ void CW_AppUpdate(void)
 					SYSTEM_DelayMs(10);
 				}
 				BACKLIGHT_TurnOn();
-				// gain before ALAM, so the tone path never opens at RX's DAC gain
-				CW_ApplySidetoneGain();
-				BK4819_SetAF(BK4819_AF_ALAM);
-				BK4819_SetScrambleFrequencyControlWord(cue ? CW_ERROR_TONE_HZ : gEeprom.CW_TONE_FREQUENCY * 10);
+				LocalToneOn(cue);
 				#ifdef ENABLE_FLASHLIGHT
 				if (gCW_FlashlightSending) {
 					GPIO_SetOutputPin(GPIO_PIN_FLASHLIGHT);
@@ -195,8 +226,7 @@ void CW_AppUpdate(void)
 					break;
 				// fall through
 			case CW_ACTION_CARRIER_OFF:
-				// ALAM and the sidetone gain stay until the hang time passes (CPO keeps them)
-				BK4819_SetScrambleFrequencyControlWord(0);
+				LocalToneOff();
 				#ifdef ENABLE_FLASHLIGHT
 				if (gCW_FlashlightSending) {
 					GPIO_ResetOutputPin(GPIO_PIN_FLASHLIGHT);
