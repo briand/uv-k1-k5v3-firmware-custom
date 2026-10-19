@@ -383,10 +383,15 @@ struct {
     char version[16];
 } version;
 
-// EEPROM layout schema marker. Pre-v1.4 firmware never wrote this byte, so it
-// reads back as erased 0xFF. See NR7Y_SCHEMA_* above.
-#seekto 0x00A170;
-u8 schema;
+// NR7Y CW block header (settings.h CW_BLOCK_*). The CW settings follow at
+// 0x00A208 and are read byte by byte (_NR7Y_CW_SETTINGS_ADDR).
+#seekto 0x00A200;
+struct {
+    char sig[3];
+    u8 version;
+    u8 schema;
+    u8 reserved[3];
+} cw_block;
 
 // --------------------
 
@@ -572,9 +577,43 @@ SET_NFM_LIST = ["NARROW", "NARROWER"]
 # Schema 1 is read-only: an image is upgraded in memory on load and only ever
 # written back as schema 2. Pre-v1.4 firmware never wrote the marker, so it
 # reads back as erased 0xFF.
-NR7Y_SCHEMA_ADDR = 0x00A170
+#
+# v2.0 keeps the marker in the NR7Y CW block header at 0xA200 (settings.h
+# CW_BLOCK_*). v1.4-v1.x kept it at 0xA170, where upstream armel keeps a
+# scan-list mask followed by 'M','I','X',0x01; images without a CW block header
+# are read from there and converted on load.
+NR7Y_SCHEMA_LEGACY_ADDR = 0x00A170
 NR7Y_SCHEMA_LEGACY = 1
 NR7Y_SCHEMA_CURRENT = 2
+NR7Y_ARMEL_MIX_SIG = b"MIX\x01"        # at NR7Y_SCHEMA_LEGACY_ADDR + 3
+
+NR7Y_CW_BLOCK_ADDR = 0x00A200           # 'C','W','X', version, schema, 3 x 0xFF
+NR7Y_CW_BLOCK_SIG = b"CWX"
+NR7Y_CW_BLOCK_VERSION = 1
+NR7Y_SCHEMA_ADDR = NR7Y_CW_BLOCK_ADDR + 4
+
+
+def _nr7y_cw_block_version(data):
+    """Layout version from a CW block header (bytes at NR7Y_CW_BLOCK_ADDR), or
+    0 if there is no valid header."""
+    if len(data) < 8 or bytes(data[0:3]) != NR7Y_CW_BLOCK_SIG:
+        return 0
+    return 0 if data[3] in (0x00, 0xFF) else data[3]
+
+
+def _nr7y_schema_from_image(img):
+    """EEPROM schema recorded in raw image bytes, normalised (0xFF = legacy)."""
+    hdr = bytes(img[NR7Y_CW_BLOCK_ADDR:NR7Y_CW_BLOCK_ADDR + 8])
+    if _nr7y_cw_block_version(hdr):
+        schema = hdr[4]
+    else:
+        legacy = bytes(img[NR7Y_SCHEMA_LEGACY_ADDR:NR7Y_SCHEMA_LEGACY_ADDR + 8])
+        if len(legacy) < 8:
+            return NR7Y_SCHEMA_LEGACY
+        if legacy[3:7] == NR7Y_ARMEL_MIX_SIG:
+            return NR7Y_SCHEMA_CURRENT  # armel scan-list mask, schema 2 layout
+        schema = legacy[0]
+    return NR7Y_SCHEMA_LEGACY if schema == 0xFF else schema
 
 # modulation -> (wide name, narrow name). CW and USB have a single filter, so both
 # entries are the same name.
@@ -725,10 +764,16 @@ RTE_LIST = ["OFF", "100ms", "200ms", "300ms", "400ms",
             "500ms", "600ms", "700ms", "800ms", "900ms", "1000ms"]
 VOX_LIST = ["OFF", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]
 
-MEM_SIZE =      0x00B190    # size of all memory
-PROG_SIZE =     0x00A171    # size of the memory that we will write (LAST ADDRESS + 1 !!!)
-MEM_BLOCK =     0x80        # largest block of memory that we can reliably write
-CAL_START =     0x00B000    # calibration memory start address
+# The image is flat: offset = radio logical (EEPROM) address. Holes the
+# download skips (boot logo 0xC000-0xCFFF and unmapped space) are 0xFF.
+MAIN_END =       0x00B190   # end of the linear download: config, CW block, calibration
+PROG_SIZE =      0x00A240   # config upload end, through the CW block (LAST ADDRESS + 1 !!!)
+MEM_BLOCK =      0x80       # largest block of memory that we can reliably write
+CAL_START =      0x00B000   # calibration memory start address
+CAL_END =        0x00B190   # calibration upload end
+CW_MACRO_START = 0x00D000   # NR7Y CW macros (header + 4 blocks + spare)
+CW_MACRO_END =   0x00D100
+MEM_SIZE =       CW_MACRO_END   # size of the image (MAIN_END before v2.0)
 F4HWN_START =   0x00A158    # calibration F4HWN memory start address
 
 # FM broadcast receiver.
@@ -829,8 +874,10 @@ MIC_GAIN_LIST = ["+1.5dB", "+4.0dB", "+8.0dB", "+12.0dB", "+16.0dB", "+20.0dB", 
 # NR7Y CW extension – module-level constants
 # ============================================================
 
-# CW settings base address in fusion firmware (PY25Q16 direct address)
-_NR7Y_CW_SETTINGS_ADDR = 0x00A140
+# CW settings, inside the CW block (settings.h CW_SETTINGS_ADDR). Before v2.0
+# they were at 0xA140, the second half of the AES key field.
+_NR7Y_CW_SETTINGS_ADDR = 0x00A208
+_NR7Y_CW_SETTINGS_LEGACY_ADDR = 0x00A140
 # Sidetone frequency: 50 Hz steps from 450 Hz in bits 0-3 of CW byte 0, as far
 # as the firmware's CWfreq menu goes (800 Hz)
 _NR7Y_CW_FREQ_OPTS = ["%d Hz" % (450 + i * 50) for i in range(8)]
@@ -841,11 +888,33 @@ _NR7Y_CW_FREQ_OPTS = ["%d Hz" % (450 + i * 50) for i in range(8)]
 _NR7Y_CW_SIDETONE_CODE_TO_LEVEL = [0, 6, 11, 12, 13, 14, 15,
                                    1, 2, 3, 4, 5, 7, 8, 9, 10]
 
-# CW macro EEPROM addresses (cwmacro.h: reuses DTMF contacts region 0x1C00-0x1CFF)
-_NR7Y_CW_MACRO_ADDRS = [0x1C00, 0x1C30, 0x1C60, 0x1C90]
+# CW macros (cwmacro.h). A 16-byte header at CW_MACRO_START, then the blocks.
+# Before v2.0 the blocks sat at 0x1C00, over channel records 448-459.
 _NR7Y_CW_MACRO_SIZE = 48       # Block layout: [0]=len|SIG, [1..46]=payload, [47]=checksum
+_NR7Y_CW_MACRO_COUNT = 4
+_NR7Y_CW_MACRO_HDR = (b"CWM" + bytes([1, _NR7Y_CW_MACRO_COUNT, _NR7Y_CW_MACRO_SIZE])
+                      + b"\xFF" * 10)
+_NR7Y_CW_MACRO_ADDRS = [CW_MACRO_START + 0x10 + n * _NR7Y_CW_MACRO_SIZE
+                        for n in range(_NR7Y_CW_MACRO_COUNT)]
+_NR7Y_CW_MACRO_LEGACY_ADDRS = [0x1C00 + n * _NR7Y_CW_MACRO_SIZE
+                               for n in range(_NR7Y_CW_MACRO_COUNT)]
 _NR7Y_CW_MACRO_MAX_LEN = 46   # Payload bytes
 _NR7Y_CW_MACRO_SIG = 0x80     # Signature stored in high bit of length byte
+
+
+def _nr7y_macro_length(block):
+    """Payload length of a raw macro block, or 0 if it is empty or invalid
+    (cwmacro.c CW_MacroBlockLength)."""
+    length_byte = block[0]
+    if length_byte == 0xFF or not length_byte & _NR7Y_CW_MACRO_SIG:
+        return 0
+    length = length_byte & ~_NR7Y_CW_MACRO_SIG
+    if length == 0 or length > _NR7Y_CW_MACRO_MAX_LEN:
+        return 0
+    if block[_NR7Y_CW_MACRO_SIZE - 1] != sum(block[1:length + 1]) & 0xFF:
+        return 0
+    return length
+
 # Characters a macro holds besides A-Z and 0-9 (cwmacro.c CW_ValidateChar)
 _NR7Y_CW_MACRO_PUNCT = "+,-./=?(&"
 # Prosigns, one byte each in a macro (cwmacro.h CW_PROSIGN_*), written <SK> here
@@ -1190,27 +1259,41 @@ def _check_upload_target(serport, firmware):
             "This module only programs NR7Y CW firmware.\n"
             "Radio reports: %s" % (firmware or "(no version string)"))
 
-    # 2. Right EEPROM schema? Block on anything but an exact match. Reading it
-    #    from the radio depends on eeprom_compat.c mapping through 0xA171 -
-    #    without that the address is unmapped and reads back 0xFF.
+    # 2. Right storage layout? v2.0 firmware writes the CW block header at
+    #    0xA200 on every boot. Older firmware does not map 0xA200 at all, so it
+    #    reads back 0xFF and would silently drop the CW block and macro writes.
     # Read 8 bytes, not 1. do_download proves hello-then-readmem is safe at the
     # 0x80 block size it uses, but a 1-byte read is an unusual size this
     # protocol is never otherwise asked for, and a 1-byte probe is what the
     # removed detect_from_serial() was doing when downloads stopped working.
     # Stay on a size the firmware handles routinely.
-    rep = _readmem(serport, NR7Y_SCHEMA_ADDR, 8)
+    rep = _readmem(serport, NR7Y_CW_BLOCK_ADDR, 8)
     if not rep:
-        raise errors.RadioError("Could not read the EEPROM schema marker.")
+        raise errors.RadioError("Could not read the NR7Y CW block header.")
 
-    schema = rep[0]
+    version = _nr7y_cw_block_version(rep)
+    if version == 0:
+        raise errors.RadioError(
+            "This radio runs NR7Y firmware older than v2.0, which keeps CW "
+            "settings and macros elsewhere.\nUpdate the firmware first, or use "
+            "the CHIRP module that shipped with the radio's firmware release.")
+
+    if version > NR7Y_CW_BLOCK_VERSION:
+        raise errors.RadioError(
+            "This radio uses NR7Y CW block layout %d, newer than this module "
+            "understands (%d).\nUse the CHIRP module that shipped with the "
+            "radio's firmware release." % (version, NR7Y_CW_BLOCK_VERSION))
+
+    # 3. Right EEPROM schema? Block on anything but an exact match.
+    schema = rep[4]
     if schema == 0xFF:          # never written = pre-v1.4. Must come first:
         schema = NR7Y_SCHEMA_LEGACY   # 0xFF > CURRENT would take the wrong branch.
 
     if schema < NR7Y_SCHEMA_CURRENT:
         raise errors.RadioError(
-            "This radio runs firmware older than v1.4 (EEPROM schema %d).\n"
-            "Update the firmware first - uploading now would corrupt CW and "
-            "SSB channel settings." % schema)
+            "This radio reports EEPROM schema %d, older than this module "
+            "writes (%d).\nPower-cycle the radio so its firmware finishes "
+            "migrating, then download again." % (schema, NR7Y_SCHEMA_CURRENT))
 
     if schema > NR7Y_SCHEMA_CURRENT:
         raise errors.RadioError(
@@ -1225,7 +1308,7 @@ def do_download(radio):
     serport.timeout = 4.0
     status = chirp_common.Status()
     status.cur = 0
-    status.max = MEM_SIZE
+    status.max = MAIN_END + (CW_MACRO_END - CW_MACRO_START)
     status.msg = "Downloading from radio"
     radio.status_fn(status)
 
@@ -1237,25 +1320,31 @@ def do_download(radio):
         raise errors.RadioError("Failed to initialize radio")
 
 
-    addr = 0
-    while addr < MEM_SIZE:
-        data = _readmem(serport, addr, MEM_BLOCK)
-        status.cur = addr
-        radio.status_fn(status)
+    # Config, CW block and calibration, then the CW macros. The boot logo and
+    # the unmapped space between are not read; they stay 0xFF in the image.
+    done = 0
+    for start, stop in ((0, MAIN_END), (CW_MACRO_START, CW_MACRO_END)):
+        eeprom += b"\xFF" * (start - len(eeprom))
+        addr = start
+        while addr < stop:
+            # Always whole blocks, as before v2.0; trim the last one instead
+            data = _readmem(serport, addr, MEM_BLOCK)
+            status.cur = done
+            radio.status_fn(status)
 
-        if data and len(data) == MEM_BLOCK:
-            eeprom += data
-            addr += MEM_BLOCK
-        else:
-            raise errors.RadioError("Memory download incomplete")
+            if data and len(data) == MEM_BLOCK:
+                chunk = min(MEM_BLOCK, stop - addr)
+                eeprom += data[:chunk]
+                addr += chunk
+                done += chunk
+            else:
+                raise errors.RadioError("Memory download incomplete")
 
     # Provenance travels with the image, so a saved .img can be checked with no
     # radio attached. Mirrors what mainline uvk5.py stores for firmware. Read
     # the schema from the bytes we just fetched rather than asking the radio
-    # again - on pre-v1.4 firmware the address is unmapped and reads 0xFF.
-    schema = eeprom[NR7Y_SCHEMA_ADDR] if len(eeprom) > NR7Y_SCHEMA_ADDR else 0xFF
-    if schema == 0xFF:
-        schema = NR7Y_SCHEMA_LEGACY
+    # again.
+    schema = _nr7y_schema_from_image(eeprom)
 
     radio.metadata = {'nr7y_firmware': f, 'nr7y_schema': schema}
 
@@ -1272,8 +1361,9 @@ def do_upload(radio):
     status.cur = 0
     status.msg = "Uploading to radio"
 
-    # Step 0: always write program/config region
-    # Step 1: optionally write calibration region
+    # Step 0: always write program/config region, through the CW block
+    # Step 1: always write the CW macros
+    # Step 2: optionally write calibration region
     step = 0
 
     radio.status_fn(status)
@@ -1297,10 +1387,19 @@ def do_upload(radio):
             status.msg = "Uploading to radio"
             radio.status_fn(status)
 
-        elif step == 1 and radio.upload_calibration:
-            # Then write calibration area (separate region)
+        elif step == 1:
+            start_addr = CW_MACRO_START
+            stop_addr  = CW_MACRO_END
+            status.max = stop_addr - start_addr
+            status.cur = 0
+            status.msg = "Uploading CW macros"
+            radio.status_fn(status)
+
+        elif step == 2 and radio.upload_calibration:
+            # Then write calibration area (separate region). Stops at CAL_END:
+            # the boot logo and the CW macros come after it in the image.
             start_addr = CAL_START
-            stop_addr  = MEM_SIZE
+            stop_addr  = CAL_END
             status.max = stop_addr - start_addr
             status.cur = 0
             status.msg = "Uploading calibration"
@@ -1484,6 +1583,11 @@ class UVK5RadioEgzumer(chirp_common.CloneModeRadio):
 
     # Convert the raw byte array into a memory object structure
     def process_mmap(self):
+        # Images saved before v2.0 end at the calibration block; the upload
+        # reads the CW macros past it, so pad with erased flash.
+        if len(self._mmap) < MEM_SIZE:
+            self._mmap = memmap.MemoryMapBytes(
+                self._mmap.get_packed() + b"\xFF" * (MEM_SIZE - len(self._mmap)))
         self._memobj = bitwise.parse(MEM_FORMAT, self._mmap)
 
     # Return a raw representation of the memory object, which
@@ -3958,15 +4062,10 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
     def _nr7y_read_schema(self):
         """Schema of the loaded image, normalised. 0xFF means pre-v1.4."""
         try:
-            schema = int(self._memobj.schema)
+            return _nr7y_schema_from_image(self._mmap)
         except Exception as exc:
             LOG.warning("Cannot read EEPROM schema marker: %s", exc)
             return NR7Y_SCHEMA_LEGACY
-        # Normalise erased flash first: 0xFF is 255, so comparing it before
-        # this would take the "newer schema" branch.
-        if schema == 0xFF:
-            return NR7Y_SCHEMA_LEGACY
-        return schema
 
     def _nr7y_upgrade_schema(self):
         """Bring a schema 1 image up to schema 2, in memory.
@@ -3992,7 +4091,7 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
             record.txLock = 1
             migrated += 1
 
-        self._memobj.schema = NR7Y_SCHEMA_CURRENT
+        self._memobj.cw_block.schema = NR7Y_SCHEMA_CURRENT
         self.metadata = {'nr7y_schema': NR7Y_SCHEMA_CURRENT}
 
         LOG.warning(
@@ -4025,7 +4124,67 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
                 'Image uses EEPROM schema %d, which is not supported by this '
                 'module' % schema)
 
+    # ------------------------------------------------------------------ v2.0 layout
+
+    def _nr7y_convert_legacy_layout(self):
+        """Bring an image without a CW block header into the v2.0 layout, in memory.
+
+        Same moves the firmware makes on its first v2.0 boot (app/cwmigrate.c):
+        valid macros from 0x1C00 to the macro area, CW settings from 0xA140 to
+        the CW block, the schema from 0xA170 into the header. The channel
+        records that held macros are emptied, so an upload doesn't write macro
+        bytes back into channels 449-460.
+        """
+        raw = bytearray(self._mmap.get_packed())
+        hdr = raw[NR7Y_CW_BLOCK_ADDR:NR7Y_CW_BLOCK_ADDR + 8]
+        if _nr7y_cw_block_version(hdr):
+            return
+        raw += b"\xFF" * (MEM_SIZE - len(raw))
+
+        schema = _nr7y_schema_from_image(raw)
+        have_macros = (raw[CW_MACRO_START:CW_MACRO_START + 3] ==
+                       _NR7Y_CW_MACRO_HDR[:3])
+        moved = []
+        for n, old in enumerate(_NR7Y_CW_MACRO_LEGACY_ADDRS):
+            block = bytes(raw[old:old + _NR7Y_CW_MACRO_SIZE])
+            valid = _nr7y_macro_length(block) > 0
+            if not have_macros:
+                new = _NR7Y_CW_MACRO_ADDRS[n]
+                raw[new:new + _NR7Y_CW_MACRO_SIZE] = (
+                    block if valid else b"\xFF" * _NR7Y_CW_MACRO_SIZE)
+            if valid:
+                moved.append(n + 1)
+                # Empty the three channels the block covered, as set_memory does
+                first = old // 16
+                for ch in range(first, first + _NR7Y_CW_MACRO_SIZE // 16):
+                    raw[ch * 16:ch * 16 + 16] = b"\xFF" * 16
+                    raw[0x4000 + ch * 16:0x4000 + ch * 16 + 16] = b"\x20" * 16
+                    raw[0x8000 + ch * 2:0x8000 + ch * 2 + 2] = b"\xFF\xFF"
+        if not have_macros:
+            raw[CW_MACRO_START:CW_MACRO_START + 16] = _NR7Y_CW_MACRO_HDR
+
+        new_cw = _NR7Y_CW_SETTINGS_ADDR
+        old_cw = _NR7Y_CW_SETTINGS_LEGACY_ADDR
+        if raw[new_cw:new_cw + 8] == b"\xFF" * 8:
+            raw[new_cw:new_cw + 8] = raw[old_cw:old_cw + 8]
+        raw[old_cw:old_cw + 8] = b"\xFF" * 8
+
+        raw[NR7Y_CW_BLOCK_ADDR:NR7Y_CW_BLOCK_ADDR + 8] = (
+            NR7Y_CW_BLOCK_SIG + bytes([NR7Y_CW_BLOCK_VERSION, schema,
+                                       0xFF, 0xFF, 0xFF]))
+
+        self._mmap = memmap.MemoryMapBytes(bytes(raw))
+        LOG.warning('Image predates the v2.0 CW storage layout and has been '
+                    'converted (macros moved: %s). Upload it only to v2.0 or '
+                    'later firmware.', moved or 'none')
+
+    def _nr7y_macro_header_valid(self):
+        hdr = bytes(self._mmap[CW_MACRO_START:CW_MACRO_START + 6])
+        return (hdr[0:3] == _NR7Y_CW_MACRO_HDR[0:3] and hdr[3] not in (0, 0xFF)
+                and hdr[5] == _NR7Y_CW_MACRO_SIZE)
+
     def process_mmap(self):
+        self._nr7y_convert_legacy_layout()
         super().process_mmap()
         self._check_schema_at_load()
         if self._nr7y_read_schema() < NR7Y_SCHEMA_CURRENT:
@@ -4557,6 +4716,8 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
         """Read and decode CW macro. idx is 1-4.  Returns plain-text string."""
         if idx < 1 or idx > 4:
             return ""
+        if not self._nr7y_macro_header_valid():
+            return ""   # No macro area header: no macros, as on the radio
         addr = _NR7Y_CW_MACRO_ADDRS[idx - 1]
         try:
             raw = bytes(self._mmap[addr:addr + _NR7Y_CW_MACRO_SIZE])
@@ -4603,6 +4764,10 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
             return
         addr = _NR7Y_CW_MACRO_ADDRS[idx - 1]
         raw = bytearray([0xFF] * _NR7Y_CW_MACRO_SIZE)
+
+        if not self._nr7y_macro_header_valid():
+            for i, b in enumerate(_NR7Y_CW_MACRO_HDR):
+                self._mmap[CW_MACRO_START + i] = b
 
         if not text or not text.strip():
             for i in range(_NR7Y_CW_MACRO_SIZE):

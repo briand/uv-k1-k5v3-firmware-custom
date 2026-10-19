@@ -17,6 +17,10 @@
 
 #include <string.h>
 
+#ifdef ENABLE_CW_MODULATOR
+    #include "app/cwmacro.h"
+    #include "app/cwmigrate.h"
+#endif
 #include "app/dtmf.h"
 #ifdef ENABLE_FMRADIO
     #include "app/fm.h"
@@ -68,38 +72,75 @@ static uint8_t CWSidetoneLevelToCode(uint8_t level)
 }
 #endif
 
+#ifdef ENABLE_CW_MODULATOR
+// Bring an EEPROM schema value up to date, running the channel migration if
+// it is behind. Returns the schema the radio is now in.
+//
+// Deliberately separate from the version-string check in SETTINGS_InitEEPROM:
+// that one fires on any version change and resets locks, inversion and logo
+// lines. This must fire exactly once per upgrade, because the migration it
+// guards is not idempotent - the caller writes the result straight back.
+uint8_t SETTINGS_UpgradeSchema(uint8_t schema)
+{
+    // Erased flash means pre-v1.4, which never wrote a marker. Normalize
+    // first: 0xFF is 255, so an unnormalized value compares as "newer".
+    if (schema == 0xFF)
+        schema = EEPROM_SCHEMA_LEGACY;
+
+    if (schema < EEPROM_SCHEMA_CURRENT)
+    {
+        SETTINGS_MigrateFilterSchema();
+        schema = EEPROM_SCHEMA_CURRENT;
+    }
+    // schema > EEPROM_SCHEMA_CURRENT: written by a newer firmware whose
+    // layout we do not know. Leave the channel data alone rather than
+    // migrating it onto an older meaning.
+    return schema;
+}
+
+// Validate the CW block header (CW_BLOCK_* in settings.h) and keep the EEPROM
+// schema current. Runs before the CW settings are loaded.
+static void SETTINGS_InitCwBlock(void)
+{
+    uint8_t hdr[CW_BLOCK_HDR_SIZE];
+    PY25Q16_ReadBuffer(CW_BLOCK_ADDR, hdr, sizeof(hdr));
+
+    const uint8_t version = hdr[CW_BLOCK_OFF_VERSION];
+
+    if (memcmp(hdr, CW_BLOCK_SIG, 3) != 0 || version == 0 || version == 0xFF)
+    {
+        // No header: first boot after upgrading from pre-v2.0, a fresh radio,
+        // or a full factory reset. The legacy copy is safe to repeat, so it
+        // goes first. The schema upgrade is not, so the header goes straight
+        // after it as the commit. See app/cwmigrate.h for what this becomes
+        // once the legacy migration is removed.
+        if (!CW_MigrateLegacyStorage())
+            return;  // copied macros did not verify; retry next boot
+
+        const uint8_t schema = SETTINGS_UpgradeSchema(CW_MigrateLegacySchema());
+
+        memset(hdr, 0xFF, sizeof(hdr));
+        memcpy(hdr, CW_BLOCK_SIG, 3);
+        hdr[CW_BLOCK_OFF_VERSION] = CW_BLOCK_VERSION;
+        hdr[CW_BLOCK_OFF_SCHEMA]  = schema;
+        PY25Q16_WriteBuffer(CW_BLOCK_ADDR, hdr, sizeof(hdr), false);
+    }
+    else if (version == CW_BLOCK_VERSION)
+    {
+        const uint8_t schema = SETTINGS_UpgradeSchema(hdr[CW_BLOCK_OFF_SCHEMA]);
+        if (schema != hdr[CW_BLOCK_OFF_SCHEMA])
+            PY25Q16_WriteBuffer(CW_BLOCK_SCHEMA_ADDR, &schema, 1, false);
+    }
+    // Newer layout: read what we understand, rewrite nothing.
+}
+#endif
+
 void SETTINGS_InitEEPROM(void)
 {
     uint8_t Data[16] = {0};
 
 #ifdef ENABLE_CW_MODULATOR
-    //
-    // EEPROM schema check. Deliberately separate from the version-string check
-    // below: that one fires on any version change and resets locks, inversion
-    // and logo lines, which is a different question with a different trigger.
-    // This one must fire exactly once per upgrade, because the migration it
-    // guards is not idempotent.
-    //
-    {
-        uint8_t schema = 0;
-        PY25Q16_ReadBuffer(EEPROM_SCHEMA_ADDR, &schema, 1);
-
-        // Erased flash means pre-v1.4, which never wrote this byte. Normalise
-        // first: 0xFF is 255, so an unnormalised value compares as "newer".
-        if (schema == 0xFF)
-            schema = EEPROM_SCHEMA_LEGACY;
-
-        if (schema < EEPROM_SCHEMA_CURRENT)
-        {
-            SETTINGS_MigrateFilterSchema();
-
-            schema = EEPROM_SCHEMA_CURRENT;
-            PY25Q16_WriteBuffer(EEPROM_SCHEMA_ADDR, &schema, 1, false);
-        }
-        // schema > EEPROM_SCHEMA_CURRENT: written by a newer firmware whose
-        // layout we do not know. Leave the channel data alone rather than
-        // migrating it onto an older meaning.
-    }
+    SETTINGS_InitCwBlock();
 #endif
 
     //
@@ -412,8 +453,7 @@ gEeprom.FreqChannel[1]   = IS_FREQ_CHANNEL(Data16[5]) ? Data16[5] : (FREQ_CHANNE
             ((uint16_t)Data[6] << 8);
 
 #ifdef ENABLE_CW_MODULATOR
-	// 0F20..0F27
-	PY25Q16_ReadBuffer(0x00A140, Data, 8);
+	PY25Q16_ReadBuffer(CW_SETTINGS_ADDR, Data, 8);
 	gEeprom.CW_TONE_FREQUENCY = Data[0] == 0xff ? 60 : 45 + (Data[0] & 0xf) * 5;  // Same as gMenuSelection: 50 Hz steps from 450, default 600
 	gEeprom.CW_SIDETONE_LEVEL = Data[0] == 0xff ? CW_SIDETONE_LEVEL_DEFAULT : s_cw_sidetone_code_to_level[Data[0] >> 4];  // menu level 0-15 (0=off), stored as a code in bits 4-7; see CW_ApplySidetoneGain for the applied gain curve
 	gEeprom.CW_KEY_WPM        = ((Data[1] & 0x7f) <= 45 && (Data[1] & 0x7f) >= 10) ? Data[1] & 0x7f : 18;  // bits 0-6, valid range 10-45, default 18 WPM
@@ -845,6 +885,9 @@ void SETTINGS_FactoryReset(bool bIsAll)
     if (bIsAll)
     {
         PY25Q16_SectorErase(0x00A000);
+#ifdef ENABLE_CW_MODULATOR
+        PY25Q16_SectorErase(CW_MACRO_FLASH_SECTOR);
+#endif
     }
 
     // Prevent reset to restart in RO mode...
@@ -1158,7 +1201,7 @@ void SETTINGS_SaveSettings(void)
 	State[5] = gEeprom.CW_ROGER_DAH_DITS;  // proper roger dah length in dits
 	// State[6] stays 0xFF: unused (was CW_ADC_CABLE_20K low)
 	State[7] = gEeprom.CW_HANG_10MS;  // break-in hang time in 10 ms units
-    PY25Q16_WriteBuffer(0x00A140, SecBuf, 0x08, false);
+    PY25Q16_WriteBuffer(CW_SETTINGS_ADDR, SecBuf, 0x08, false);
 #endif
     // ---------------------
     // 0f40 - 0f48

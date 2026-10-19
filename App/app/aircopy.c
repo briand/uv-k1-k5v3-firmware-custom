@@ -92,13 +92,23 @@ static const AIRCOPY_Segment_t AIRCOPY_Segments_Settings[] = {
     { 0x880E, 0x886E, AIRCOPY_WRITE_BYTES },
     { 0x9000, 0x90E5, AIRCOPY_WRITE_BYTES }, // VFO area (full 14 VFOs 0x9000..0x90E0) +
                                              // Fox Hunt settings tail 0x90E0..0x90E5
+#ifdef ENABLE_CW_MODULATOR
+    // Last, so a pre-v2.0 receiver gets its 12 blocks in the usual order first
+    { 0xA200, 0xA240, AIRCOPY_WRITE_BYTES }, // NR7Y CW block (header + CW settings)
+    { 0xD000, 0xD0D0, AIRCOPY_WRITE_BYTES }, // NR7Y CW macros (header + 4 macros)
+#endif
 };
 
 // total_blocks = ceil(0x170/64) + ceil(0x60/64) + ceil(0xE5/64) = 6 + 2 + 4 = 12
+//   with CW:   + ceil(0x40/64) + ceil(0xD0/64)                  = 12 + 1 + 4 = 17
 static const AIRCOPY_TransferMap_t AIRCOPY_Map_Settings = {
     .segments = AIRCOPY_Segments_Settings,
-    .num_segments = 3,
+    .num_segments = sizeof(AIRCOPY_Segments_Settings) / sizeof(AIRCOPY_Segments_Settings[0]),
+#ifdef ENABLE_CW_MODULATOR
+    .total_blocks = 17
+#else
     .total_blocks = 12
+#endif
 };
 
 // Finally

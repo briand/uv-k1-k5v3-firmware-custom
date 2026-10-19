@@ -496,15 +496,42 @@ void SETTINGS_WriteBuildOptions(void);
 // channels and F Lock could not gate them. Schema 2 gives bit 6 back to
 // TX_LOCK and keeps the filter in bit 1 as a plain wide/narrow flag.
 //
-// The marker lives at the end of the settings block, in the same 4K sector as
-// the version string, so it costs no extra erase cycle. Pre-v1.4 firmware never
-// wrote it, so an un-migrated radio reads back erased 0xFF.
-#define EEPROM_SCHEMA_ADDR     0x00A170
+// v2.0 keeps the marker in the CW block header (CW_BLOCK_SCHEMA_ADDR). v1.4-v1.x
+// kept it at 0xA170, which upstream armel uses for its scan-list mask. Nothing
+// writes it any more; the legacy storage migration (app/cwmigrate.c) reads it
+// once. Pre-v1.4 firmware wrote neither, so an un-migrated radio reads 0xFF.
+#define EEPROM_SCHEMA_LEGACY_ADDR 0x00A170
 #define EEPROM_SCHEMA_LEGACY   1   // pre-v1.4; stored as 0x00 or erased 0xFF
 #define EEPROM_SCHEMA_CURRENT  2   // v1.4: bit 6 is TX_LOCK, bit 1 is the filter
 
+// ---- NR7Y CW block (v2.0) ----
+//
+// 64 bytes in the settings sector, clear of the upstream settings that end at
+// 0xA177. Flash and logical (CHIRP) addresses are the same. The header is
+// written last, in one write, so a valid one means everything it describes is
+// in place; a future layout change does the same with the new version.
+//
+//   +0  'C','W','X'  signature
+//   +3  layout version
+//   +4  EEPROM schema (EEPROM_SCHEMA_*)
+//   +5  reserved (3)
+//   +8  CW settings, 8 bytes (moved from 0xA140)
+//   +16 reserved for new gEeprom values (48)
+#define CW_BLOCK_ADDR          0x00A200
+#define CW_BLOCK_SIZE          0x40
+#define CW_BLOCK_HDR_SIZE      8
+#define CW_BLOCK_VERSION       1
+#define CW_BLOCK_OFF_VERSION   3
+#define CW_BLOCK_OFF_SCHEMA    4
+#define CW_BLOCK_SCHEMA_ADDR   (CW_BLOCK_ADDR + CW_BLOCK_OFF_SCHEMA)
+#define CW_SETTINGS_ADDR       (CW_BLOCK_ADDR + 0x08)
+#define CW_SETTINGS_LEGACY_ADDR 0x00A140   // pre-v2.0, second half of the AES key field
+
+#define CW_BLOCK_SIG           "CWX"   // first 3 bytes, no terminator stored
+
 #ifdef ENABLE_CW_MODULATOR
     void SETTINGS_MigrateFilterSchema(void);
+    uint8_t SETTINGS_UpgradeSchema(uint8_t schema);
 #endif
 
 #endif
