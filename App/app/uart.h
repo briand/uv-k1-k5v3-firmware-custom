@@ -38,5 +38,8 @@ void UART_ResetRxParser(void);
 bool UART_IsCommandAvailable(uint32_t Port);
 void UART_HandleCommand(uint32_t Port);
 void UART_ServiceCommands(void);
+#ifdef ENABLE_AIRCOPY_UART
+void UART_SendAircopy(const uint16_t *data, uint8_t words);
+#endif
 
 #endif

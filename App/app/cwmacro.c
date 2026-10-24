@@ -216,7 +216,7 @@ void CW_WriteMacroHeader(void)
 	hdr[5] = CW_MACRO_BLOCK_SIZE;
 
 	for (uint8_t i = 0; i < CW_MACRO_HDR_SIZE; i += 8)
-		EEPROM_WriteBuffer(CW_MACRO_HDR_EEPROM_ADDR + i, hdr + i);
+		EEPROM_WriteBuffer(CW_MACRO_HDR_EEPROM_ADDR + i, hdr + i, 8);
 }
 
 uint8_t CW_GetMacroLength(uint8_t macroIndex)
@@ -234,7 +234,7 @@ uint8_t CW_GetMacroLength(uint8_t macroIndex)
 #if CW_MACRO_DEBUG
 	{
 		char buf[64];
-		sprintf_(buf, "CW_GetMacroLength: idx=%u raw_len=0x%02x\r\n", macroIndex, block[0]);
+		sprintf_(buf, "CW_GetMacroLength: idx=%u raw_len=%u\r\n", macroIndex, block[0]);
 		UART_Send(buf, strlen(buf));
 	}
 #endif
@@ -263,7 +263,7 @@ uint8_t CW_LoadMacro(uint8_t macroIndex, char *buffer, uint8_t bufferSize)
 		sprintf_(buf, "CW_LoadMacro: read %u bytes from EEPROM (payload length=%u)\r\n", CW_MACRO_BLOCK_SIZE, length);
 		UART_Send(buf, strlen(buf));
 		for (uint8_t i = 0; i < length && i < 10; i++) {
-			sprintf_(buf, "  [%u]=0x%02x '%c'%s\r\n", i, block[i+1], 
+			sprintf_(buf, "  [%u]=%u '%c'%s\r\n", i, block[i+1], 
 				CW_MACRO_GET_CHAR(block[i+1]), CW_MACRO_HAS_SPACE(block[i+1]) ? " +SPC" : "");
 			UART_Send(buf, strlen(buf));
 		}
@@ -307,7 +307,7 @@ void CW_SaveMacro(uint8_t macroIndex, const char *buffer, uint8_t length)
 		UART_Send(buf, strlen(buf));
 		// Show all bytes being saved
 		for (uint8_t i = 0; i < length && i < 20; i++) {
-			sprintf_(buf, "  [%u]=0x%02x (%c%s)\r\n", i, (uint8_t)buffer[i], 
+			sprintf_(buf, "  [%u]=%u (%c%s)\r\n", i, (uint8_t)buffer[i], 
 				CW_MACRO_GET_CHAR(buffer[i]), CW_MACRO_HAS_SPACE(buffer[i]) ? " +SPC" : "");
 			UART_Send(buf, strlen(buf));
 		}
@@ -338,10 +338,10 @@ void CW_SaveMacro(uint8_t macroIndex, const char *buffer, uint8_t length)
 		char buf[64];
 		sprintf_(buf, "CW_SaveMacro: prepared %u-byte EEPROM block\r\n", (uint8_t)sizeof(data));
 		UART_Send(buf, strlen(buf));
-		sprintf_(buf, "  data[0]=0x%02x (length byte)\r\n", data[0]);
+		sprintf_(buf, "  data[0]=%u (length byte)\r\n", data[0]);
 		UART_Send(buf, strlen(buf));
 		for (uint8_t i = 1; i <= length && i <= 20; i++) {
-			sprintf_(buf, "  data[%u]=0x%02x\r\n", i, data[i]);
+			sprintf_(buf, "  data[%u]=%u\r\n", i, data[i]);
 			UART_Send(buf, strlen(buf));
 		}
 	}
@@ -353,7 +353,7 @@ void CW_SaveMacro(uint8_t macroIndex, const char *buffer, uint8_t length)
 	// Write block to EEPROM in 8-byte chunks (aligned)
 	// EEPROM_WriteBuffer only writes 8 bytes at a time
 	for (uint8_t i = 0; i < CW_MACRO_BLOCK_SIZE; i += 8) {
-		EEPROM_WriteBuffer(MACRO_ADDRS[macroIndex] + i, data + i);
+		EEPROM_WriteBuffer(MACRO_ADDRS[macroIndex] + i, data + i, 8);
 	}
 }
 
@@ -473,7 +473,7 @@ void CW_EncoderProcessElement(CW_ElementType_t element)
 #if CW_ENCODER_DEBUG
 		{
 			char buf[64];
-			sprintf_(buf, "DECODE: pattern=0x%02x len=%d\r\n", s_encoder_pattern, s_encoder_length);
+			sprintf_(buf, "DECODE: pattern=%u len=%d\r\n", s_encoder_pattern, s_encoder_length);
 			UART_Send(buf, strlen(buf));
 		}
 #endif

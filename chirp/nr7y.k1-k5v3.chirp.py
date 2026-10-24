@@ -334,24 +334,9 @@ u8  backlight_on_TX_RX:2,
 // --------------------
 
 #seekto 0x00A158;
-struct {
-u8 ENABLE_DTMF_CALLING:1,
-   ENABLE_PWRON_PASSWORD:1,
-   ENABLE_TX1750:1,
-   ENABLE_ALARM:1,
-   ENABLE_VOX:1,
-   ENABLE_VOICE:1,
-   ENABLE_NOAA:1,
-   ENABLE_FMRADIO:1;
-u8 ENABLE_CW_MODULATOR:1,
-   ENABLE_FEAT_F4HWN_RESCUE_OPS:1,
-   ENABLE_BANDSCOPE:1,
-   ENABLE_AM_FIX:1,
-   ENABLE_FEAT_F4HWN_GAME:1,
-   ENABLE_RAW_DEMODULATORS:1,
-   ENABLE_WIDE_RX:1,
-   ENABLE_FLASHLIGHT:1;
-} BUILD_OPTIONS;
+// Build options until F4HWN v6.2, which stopped writing them: unused, and may
+// still hold whatever an older firmware left there. See _NR7Y_BUILD.
+u8 __UNUSED_BUILD_OPTIONS[2];
 
 // State[2]: keypad lock scope, full byte (0..SET_LCK_LEN-1).
 // Firmware >= v5.6 moved set_lck here and widened it to 4 values
@@ -842,31 +827,73 @@ DTMF_CODE_CHARS = "ABCD*# "
 DTMF_DECODE_RESPONSE_LIST = ["DO NOTHING", "Local ringing (RING)", "Replay response (REPLY)",
                              "Local ringing + reply response (BOTH)"]
 
-KEYACTIONS_LIST = ["NONE",
-                   "FLASHLIGHT",
-                   "POWER",
-                   "MONITOR",
-                   "SCAN",
-                   "VOX",
-                   "ALARM",
-                   "FM RADIO",
-                   "1750Hz",
-                   "LOCK KEYPAD",
-                   "VFO A / VFO B",
-                   "VFO / MEM",
-                   "MODE",
-                   "BL_MIN_TMP_OFF",
-                   "RX MODE",
-                   "MAIN ONLY", 
-                   "PTT",                  
-                   "FILTER WIDTH",
-                   "BACKLIGHT",
-                   "MUTE",
-                   "RxA",
-                   "POWER HIGH",
-                   "REMOVE OFFSET",
-                   "BEAM"
-                  ]
+# Key actions by stored ID, mirroring ACTION_OPT_t in App/settings.h. Since the
+# F4HWN v6.2 merge every ID is fixed, whatever the build: upstream's at 0-24,
+# NR7Y's CW actions in a block of their own from 32 so upstream can keep adding
+# at 25 and up. 25-31 are not actions. Listed in the radio's menu order.
+_NR7Y_ACTIONS = {
+    0:  "NONE",
+    1:  "FLASHLIGHT",
+    2:  "POWER",
+    3:  "MONITOR",
+    4:  "SCAN",
+    5:  "VOX",
+    6:  "FM RADIO",
+    7:  "1750Hz",
+    8:  "LOCK KEYPAD",
+    9:  "VFO A / VFO B",
+    10: "VFO / MEM",
+    11: "MODE",
+    12: "RX MODE",
+    13: "MAIN ONLY",
+    14: "PTT",
+    15: "FILTER WIDTH",
+    16: "MUTE",
+    17: "RxA",
+    18: "RF LOG",
+    19: "BEAM",
+    20: "POWER HIGH",
+    21: "REMOVE OFFSET",
+    22: "FOX HUNT",
+    23: "BEACON",
+    24: "TONE CALL",
+}
+_NR7Y_ACTION_CW_FIRST = 32
+_NR7Y_ACTIONS_CW = {
+    32: "CW KEY INPUT",
+    33: "CW KEYER MODE",
+    34: "CW SPEED",
+    35: "CW BREAK-IN",
+    36: "CODE PRACTICE",
+    37: "PLAY CW MSG 1",
+    38: "PLAY CW MSG 2",
+    39: "PLAY CW MSG 3",
+    40: "PLAY CW MSG 4",
+    41: "REPEAT CW MSG 1",
+    42: "REPEAT CW MSG 2",
+    43: "REPEAT CW MSG 3",
+    44: "REPEAT CW MSG 4",
+    45: "PROPER ROGER",
+}
+
+# The action number v1.4 and older stored -> its fixed ID, applied with the
+# v2.0 layout conversion. Every NR7Y release built the CW preset with the same
+# options, so one table covers them all; it matches MigrateActionIds in
+# App/app/cwmigrate.c. ALARM,
+# BL_MIN_TMP_OFF and BACKLIGHT are gone upstream and become NONE.
+_NR7Y_LEGACY_ACTION_IDS = [
+    0, 1, 2, 3, 4, 5,
+    0,                      # ALARM
+    6, 7, 8, 9, 10, 11,
+    0,                      # BL_MIN_TMP_OFF
+    12, 13, 14, 15,
+    0,                      # BACKLIGHT
+    16, 17,
+    37, 38, 39, 40,         # PLAY CW MSG 1-4
+    41, 42, 43, 44,         # REPEAT CW MSG 1-4
+    36,                     # CODE PRACTICE
+    33, 45, 34, 32, 35,     # KEYER MODE, PROPER ROGER, SPEED, KEY INPUT, BREAK-IN
+]
 
 MIC_GAIN_LIST = ["+1.5dB", "+4.0dB", "+8.0dB", "+12.0dB", "+16.0dB", "+20.0dB", "+24.0dB", "+28.0dB", "+31.5dB"]
 
@@ -967,83 +994,61 @@ _NR7Y_CW_HANG_10MS_MIN = 1
 _NR7Y_CW_HANG_10MS_MAX = 200
 _NR7Y_CW_HANG_10MS_DEFAULT = 30
 
-# Extended key actions for NR7Y firmware with CW modulator, mirroring
-# App/settings.h enum ACTION_OPT_t.
-#
-# The firmware enum is conditionally compiled, so a stored key-action number only
-# means something relative to the features that build has.  Slots 0-13 are
-# unconditional -- the enum keeps a value for ALARM/FM/1750/FLASHLIGHT even when
-# the feature is compiled out, which is why those only need filtering out of the
-# displayed choices -- but the RESCUE_OPS block shifts everything after it, so the
-# index mapping has to be assembled per build instead of hardcoded.  With
-# RESCUE_OPS off the CW actions sit at 21-28, CODE PRACTICE at 29, then CW KEYER
-# MODE, PROPER ROGER, CW SPEED, CW KEY INPUT and CW BREAK-IN at 30-34; with it on
-# everything from the CW actions moves up by 2.  Those last five came after FOX
-# HUNT shipped, so the firmware appends them past it, but the CW preset builds
-# without FOX HUNT, so they follow CODE PRACTICE directly.
-_NR7Y_ACTIONS_COMMON = [
-    "NONE",            # 0:  ACTION_OPT_NONE
-    "FLASHLIGHT",      # 1:  ACTION_OPT_FLASHLIGHT
-    "POWER",           # 2:  ACTION_OPT_POWER
-    "MONITOR",         # 3:  ACTION_OPT_MONITOR
-    "SCAN",            # 4:  ACTION_OPT_SCAN
-    "VOX",             # 5:  ACTION_OPT_VOX
-    "ALARM",           # 6:  ACTION_OPT_ALARM
-    "FM RADIO",        # 7:  ACTION_OPT_FM
-    "1750Hz",          # 8:  ACTION_OPT_1750
-    "LOCK KEYPAD",     # 9:  ACTION_OPT_KEYLOCK
-    "VFO A / VFO B",   # 10: ACTION_OPT_A_B
-    "VFO / MEM",       # 11: ACTION_OPT_VFO_MR
-    "MODE",            # 12: ACTION_OPT_SWITCH_DEMODUL
-    "BL_MIN_TMP_OFF",  # 13: ACTION_OPT_BLMIN_TMP_OFF
-    # ENABLE_FEAT_F4HWN
-    "RX MODE",         # 14: ACTION_OPT_RXMODE
-    "MAIN ONLY",       # 15: ACTION_OPT_MAINONLY
-    "PTT",             # 16: ACTION_OPT_PTT
-    "FILTER WIDTH",    # 17: ACTION_OPT_WN
-    "BACKLIGHT",       # 18: ACTION_OPT_BACKLIGHT
-    "MUTE",            # 19: ACTION_OPT_MUTE
-    "RxA",             # 20: ACTION_OPT_RXA
-]
+# The NR7Y CW firmware is one build, the "CW" preset in CMakePresets.json, so
+# the module assumes its features rather than reading build options (F4HWN v6.2
+# stopped writing them). Change these with the preset.
+_NR7Y_BUILD = {
+    "fm_radio": True,
+    "noaa": False,
+    "voice": False,
+    "vox": True,
+    "rescue_ops": False,
+    "wide_rx": True,
+}
 
-# ENABLE_FEAT_F4HWN_RESCUE_OPS
-_NR7Y_ACTIONS_RESCUE_OPS = ["POWER HIGH", "REMOVE OFFSET"]
+# Upstream actions the CW preset does not compile. The radio lists them as N/A,
+# so the module leaves them out of the choices.
+_NR7Y_ACTIONS_NOT_BUILT = {"RF LOG", "BEAM", "POWER HIGH", "REMOVE OFFSET",
+                           "FOX HUNT", "BEACON", "TONE CALL"}
 
-# ENABLE_CW_MODULATOR
-_NR7Y_ACTIONS_CW = [
-    "PLAY CW MSG 1",
-    "PLAY CW MSG 2",
-    "PLAY CW MSG 3",
-    "PLAY CW MSG 4",
-    "REPEAT CW MSG 1",
-    "REPEAT CW MSG 2",
-    "REPEAT CW MSG 3",
-    "REPEAT CW MSG 4",
-    # ACTION_OPT_CPO is guarded on ENABLE_CW_MODULATOR *and*
-    # ENABLE_CODE_PRACTICE, but BUILD_OPTIONS has no spare bit to report code
-    # practice separately and every CW preset enables both, so it rides along
-    # with the CW block.
-    "CODE PRACTICE",
-]
 
-# ENABLE_FEAT_F4HWN_BEAM, then ENABLE_FEAT_F4HWN_RXTX_LOG, then (since F4HWN
-# v5.9.0) ENABLE_FEAT_F4HWN_FOXHUNT, in that order.  None of them has a
-# BUILD_OPTIONS bit.  The stock F4HWN editions carry all three and nothing comes
-# after them.  On CW builds the CW quick actions are appended after them
-# (ENABLE_CW_MODULATOR again), so they shift with whatever is built; this list
-# follows the NR7Y CW preset, which leaves all three out.
-_NR7Y_ACTIONS_TAIL_CW = [
-    "CW KEYER MODE",
-    "PROPER ROGER",
-    "CW SPEED",
-    "CW KEY INPUT",
-    "CW BREAK-IN",
-]
-_NR7Y_ACTIONS_TAIL = ["BEAM", "RF LOG", "FOX HUNT"]
+def _nr7y_action_names(has_cw):
+    """ID -> name for the actions a key can hold."""
+    names = dict(_NR7Y_ACTIONS)
+    if has_cw:
+        names.update(_NR7Y_ACTIONS_CW)
+    return names
+
+
+def _nr7y_action_choices(has_cw):
+    """Action names to offer for a key, in the radio's menu order."""
+    names = _nr7y_action_names(has_cw)
+    return [names[i] for i in sorted(names)
+            if not (has_cw and names[i] in _NR7Y_ACTIONS_NOT_BUILT)]
+
+
+def _nr7y_action_id(name, has_cw):
+    """Stored ID for an action name (NONE if unknown)."""
+    for i, n in _nr7y_action_names(has_cw).items():
+        if n == name:
+            return i
+    return 0
+
+
+def _nr7y_action_setting(action_num, has_cw, default):
+    """(choices, current) for a key action. An ID that is not an action (unset
+    0xFF, 25-31) shows default, the action the firmware runs for it; one this
+    build lacks shows NONE."""
+    choices = _nr7y_action_choices(has_cw)
+    name = _nr7y_action_names(has_cw).get(int(action_num))
+    if name is None:
+        return choices, default if default in choices else "NONE"
+    return choices, name if name in choices else "NONE"
+
 
 # Side key and M long actions the firmware uses while the stored one is unset
-# (0xFF, or anything past the end of the build's action list); mirrors
-# KEY_*_DEFAULT in App/settings.h. A stored action always wins.
+# (0xFF, or any other ID that is not an action); mirrors KEY_*_DEFAULT in
+# App/settings.h. A stored action always wins.
 _NR7Y_KEY_DEFAULTS_CW = {
     "key1_shortpress_action": "PROPER ROGER",
     "key1_longpress_action":  "PLAY CW MSG 1",
@@ -1059,16 +1064,6 @@ _NR7Y_KEY_DEFAULTS = {
     "keyM_longpress_action":  "NONE",
 }
 
-
-def _nr7y_keyactions_list(has_rescue_ops, has_cw):
-    """Return the index -> action-name map for the running firmware build."""
-    lst = list(_NR7Y_ACTIONS_COMMON)
-    if has_rescue_ops:
-        lst += _NR7Y_ACTIONS_RESCUE_OPS
-    if has_cw:
-        lst += _NR7Y_ACTIONS_CW
-        return lst + _NR7Y_ACTIONS_TAIL_CW
-    return lst + _NR7Y_ACTIONS_TAIL
 
 
 def xorarr(data: bytes):
@@ -1472,10 +1467,17 @@ class UVK5RadioEgzumer(chirp_common.CloneModeRadio):
     upload_advanced = False
 
     def _get_bands(self):
-        is_wide = self._memobj.BUILD_OPTIONS.ENABLE_WIDE_RX \
-            if self._memobj is not None else True
-        bands = BANDS_WIDE if is_wide else BANDS_STANDARD
-        return bands
+        return BANDS_WIDE if _NR7Y_BUILD["wide_rx"] else BANDS_STANDARD
+
+    def _is_nr7y_cw_firmware(self):
+        """True if the image holds a valid CW block header, which NR7Y CW
+        firmware writes on every boot."""
+        try:
+            return _nr7y_cw_block_version(bytes(
+                self._mmap[NR7Y_CW_BLOCK_ADDR:NR7Y_CW_BLOCK_ADDR + 8])) != 0
+        except Exception as exc:
+            LOG.warning("Cannot read the CW block header: %s", exc)
+            return False
 
     def _find_band(self, hz):
         mhz = hz/1000000.0
@@ -2393,19 +2395,24 @@ class UVK5RadioEgzumer(chirp_common.CloneModeRadio):
             # Shortcuts
 
             if elname == "key1_shortpress_action":
-                _mem.key1_shortpress_action = KEYACTIONS_LIST.index(element.value)
+                _mem.key1_shortpress_action = _nr7y_action_id(
+                    str(element.value), self._is_nr7y_cw_firmware())
 
             elif elname == "key1_longpress_action":
-                _mem.key1_longpress_action = KEYACTIONS_LIST.index(element.value)
+                _mem.key1_longpress_action = _nr7y_action_id(
+                    str(element.value), self._is_nr7y_cw_firmware())
 
             elif elname == "key2_shortpress_action":
-                _mem.key2_shortpress_action = KEYACTIONS_LIST.index(element.value)
+                _mem.key2_shortpress_action = _nr7y_action_id(
+                    str(element.value), self._is_nr7y_cw_firmware())
 
             elif elname == "key2_longpress_action":
-                _mem.key2_longpress_action = KEYACTIONS_LIST.index(element.value)
+                _mem.key2_longpress_action = _nr7y_action_id(
+                    str(element.value), self._is_nr7y_cw_firmware())
 
             elif elname == "keyM_longpress_action":
-                _mem.keyM_longpress_action = KEYACTIONS_LIST.index(element.value)
+                _mem.keyM_longpress_action = _nr7y_action_id(
+                    str(element.value), self._is_nr7y_cw_firmware())
 
 # this change to send power level chan in the calibration but under macos it give error
 # bugfix calibration : remove the comment on next 2 line:
@@ -2481,7 +2488,7 @@ class UVK5RadioEgzumer(chirp_common.CloneModeRadio):
 #            top.append(dtmfc)
         top.append(scanl)
         top.append(unlock)
-        if _mem.BUILD_OPTIONS.ENABLE_FMRADIO:
+        if _NR7Y_BUILD["fm_radio"]:
             top.append(fmradio)
         top.append(roinfo)
         top.append(calibration)
@@ -2501,37 +2508,8 @@ class UVK5RadioEgzumer(chirp_common.CloneModeRadio):
         # Programmable keys
         def get_action(action_num):
             """"get actual key action"""
-            has_alarm = self._memobj.BUILD_OPTIONS.ENABLE_ALARM
-            has_1750 = self._memobj.BUILD_OPTIONS.ENABLE_TX1750
-            has_flashlight = self._memobj.BUILD_OPTIONS.ENABLE_FLASHLIGHT
-            has_fm_radio = self._memobj.BUILD_OPTIONS.ENABLE_FMRADIO
-            has_rescue_ops = self._memobj.BUILD_OPTIONS.ENABLE_FEAT_F4HWN_RESCUE_OPS
-            has_game = self._memobj.BUILD_OPTIONS.ENABLE_FEAT_F4HWN_GAME
-            has_vox = self._memobj.BUILD_OPTIONS.ENABLE_VOX
-            
-            lst = KEYACTIONS_LIST.copy()
-            lst.remove("BACKLIGHT") # Only for key press on TX
-            lst.remove("BL_MIN_TMP_OFF")
-
-            if not has_alarm:
-                lst.remove("ALARM")
-            if not has_1750:
-                lst.remove("1750Hz")
-            if not has_flashlight:
-                lst.remove("FLASHLIGHT")
-            if not has_fm_radio:
-                lst.remove("FM RADIO")
-            if not has_rescue_ops:
-                lst.remove("POWER HIGH")
-                lst.remove("REMOVE OFFSET")
-            if not has_vox:
-                lst.remove("MUTE")
-
-            action_num = int(action_num)
-            if action_num >= len(KEYACTIONS_LIST) or \
-               KEYACTIONS_LIST[action_num] not in lst:
-                action_num = 0
-            return lst, KEYACTIONS_LIST[action_num]
+            return _nr7y_action_setting(action_num,
+                                        self._is_nr7y_cw_firmware(), "NONE")
 
         val1s = RadioSettingValueList(*get_action(_mem.key1_shortpress_action))
         rs = RadioSetting("key1_shortpress_action",
@@ -2802,7 +2780,7 @@ class UVK5RadioEgzumer(chirp_common.CloneModeRadio):
             ch_list.append("Channel M" + str(ch))
         for bnd in range(1, 8):
             ch_list.append("Band F" + str(bnd))
-        if _mem.BUILD_OPTIONS.ENABLE_NOAA:
+        if _NR7Y_BUILD["noaa"]:
             for bnd in range(1, 11):
                 ch_list.append("NOAA N" + str(bnd))
 
@@ -3788,10 +3766,10 @@ class UVK5RadioEgzumer(chirp_common.CloneModeRadio):
         basic.append(SetNFMSetting)
         basic.append(SetRxAFMSetting)
         basic.append(SetRxAAMSetting)
-        if _mem.BUILD_OPTIONS.ENABLE_FEAT_F4HWN_RESCUE_OPS:
+        if _NR7Y_BUILD["rescue_ops"]:
             basic.append(SetKEYSetting)
         basic.append(SetScnSetting)
-        if _mem.BUILD_OPTIONS.ENABLE_FEAT_F4HWN_RESCUE_OPS:
+        if _NR7Y_BUILD["rescue_ops"]:
             basic.append(SetMenuLockSetting)
 
         append_label(basic,
@@ -3808,10 +3786,9 @@ class UVK5RadioEgzumer(chirp_common.CloneModeRadio):
         basic.append(bat_save_setting)
         basic.append(scn_rev_setting)
         
-        if _mem.BUILD_OPTIONS.ENABLE_NOAA:
+        if _NR7Y_BUILD["noaa"]:
             basic.append(noaa_auto_scan_setting)
-        if _mem.BUILD_OPTIONS.ENABLE_AM_FIX:
-            basic.append(am_fix_setting)
+        # AM Fix is gone from F4HWN v6.2, so am_fix_setting is not offered
 
         append_label(basic,
                      "=" * 6 + " Display settings " + "=" * 300, "=" * 300)
@@ -3834,17 +3811,16 @@ class UVK5RadioEgzumer(chirp_common.CloneModeRadio):
         append_label(basic, "=" * 6 + " Audio related settings "
                      + "=" * 300, "=" * 300)
 
-        if _mem.BUILD_OPTIONS.ENABLE_VOX:
+        if _NR7Y_BUILD["vox"]:
             basic.append(vox_setting)
         basic.append(mic_gain_setting)
         basic.append(beep_setting)
         basic.append(roger_setting)
         basic.append(ste_setting)
         basic.append(rp_ste_setting)
-        if _mem.BUILD_OPTIONS.ENABLE_VOICE:
+        if _NR7Y_BUILD["voice"]:
             basic.append(voice_setting)
-        if _mem.BUILD_OPTIONS.ENABLE_ALARM:
-            basic.append(alarm_setting)
+        # ALARM is gone from F4HWN v6.2, so alarm_setting is not offered
 
         append_label(basic, "=" * 6 + " Radio state " + "=" * 300, "=" * 300)
 
@@ -4008,16 +3984,6 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
     MODEL = "UV-K1 & UV-K5 V3 (F4HWN Fusion)"
     VARIANT = "NR7Y"
 
-    # ------------------------------------------------------------------ CW detection
-
-    def _is_nr7y_cw_firmware(self):
-        """Return True if firmware was compiled with ENABLE_CW_MODULATOR."""
-        try:
-            return bool(self._memobj.BUILD_OPTIONS.ENABLE_CW_MODULATOR)
-        except Exception as exc:
-            LOG.warning("Cannot read ENABLE_CW_MODULATOR: %s", exc)
-            return False
-
     # ------------------------------------------------------------------ features
 
     def get_features(self):
@@ -4131,9 +4097,10 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
 
         Same moves the firmware makes on its first v2.0 boot (app/cwmigrate.c):
         valid macros from 0x1C00 to the macro area, CW settings from 0xA140 to
-        the CW block, the schema from 0xA170 into the header. The channel
-        records that held macros are emptied, so an upload doesn't write macro
-        bytes back into channels 449-460.
+        the CW block, key actions renumbered to fixed IDs, the schema from
+        0xA170 into the header. The channel records that held macros are
+        emptied, so an upload doesn't write macro bytes back into channels
+        449-460.
         """
         raw = bytearray(self._mmap.get_packed())
         hdr = raw[NR7Y_CW_BLOCK_ADDR:NR7Y_CW_BLOCK_ADDR + 8]
@@ -4169,6 +4136,20 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
             raw[new_cw:new_cw + 8] = raw[old_cw:old_cw + 8]
         raw[old_cw:old_cw + 8] = b"\xFF" * 8
 
+        # Key actions, unless the image came from armel (v6.2 stores the fixed
+        # IDs already): 0xA0A8 holds M long (bits 1-7, beep in bit 0), then
+        # SIDE1 short/long, SIDE2 short/long. Anything past the table (unset)
+        # stays.
+        legacy = raw[NR7Y_SCHEMA_LEGACY_ADDR:NR7Y_SCHEMA_LEGACY_ADDR + 8]
+        if legacy[3:7] != NR7Y_ARMEL_MIX_SIG:
+            m_long = raw[0xA0A8] >> 1
+            if m_long < len(_NR7Y_LEGACY_ACTION_IDS):
+                raw[0xA0A8] = ((_NR7Y_LEGACY_ACTION_IDS[m_long] << 1) |
+                               (raw[0xA0A8] & 1))
+            for a in range(0xA0A9, 0xA0AD):
+                if raw[a] < len(_NR7Y_LEGACY_ACTION_IDS):
+                    raw[a] = _NR7Y_LEGACY_ACTION_IDS[raw[a]]
+
         raw[NR7Y_CW_BLOCK_ADDR:NR7Y_CW_BLOCK_ADDR + 8] = (
             NR7Y_CW_BLOCK_SIG + bytes([NR7Y_CW_BLOCK_VERSION, schema,
                                        0xFF, 0xFF, 0xFF]))
@@ -4192,72 +4173,11 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
 
     # ------------------------------------------------------------------ key actions helper
 
-    def _nr7y_action_map(self):
-        """Return the index -> action-name map for the firmware on the radio.
-
-        Mirrors the conditionally-compiled ACTION_OPT_t enum so the numbers we
-        read and write line up with the actions that build actually has.
-        """
-        try:
-            has_rescue_ops = bool(
-                self._memobj.BUILD_OPTIONS.ENABLE_FEAT_F4HWN_RESCUE_OPS)
-        except Exception as exc:
-            LOG.warning("Cannot read ENABLE_FEAT_F4HWN_RESCUE_OPS: %s", exc)
-            has_rescue_ops = False
-        return _nr7y_keyactions_list(has_rescue_ops,
-                                     self._is_nr7y_cw_firmware())
-
     def _nr7y_key_default(self, name):
         """The action the firmware runs for this key while its slot is unset."""
         defaults = (_NR7Y_KEY_DEFAULTS_CW if self._is_nr7y_cw_firmware()
                     else _NR7Y_KEY_DEFAULTS)
         return defaults[name]
-
-    def _get_nr7y_action(self, action_num, default):
-        """Return (choices_list, current_str) for a programmable key.
-
-        The map from _nr7y_action_map only contains actions the build compiled,
-        so the filtering here is purely about which of those to offer. An unset
-        slot shows default, the action the firmware runs for it.
-        """
-        base_list = self._nr7y_action_map()
-
-        has_alarm       = self._memobj.BUILD_OPTIONS.ENABLE_ALARM
-        has_1750        = self._memobj.BUILD_OPTIONS.ENABLE_TX1750
-        has_flashlight  = self._memobj.BUILD_OPTIONS.ENABLE_FLASHLIGHT
-        has_fm_radio    = self._memobj.BUILD_OPTIONS.ENABLE_FMRADIO
-        has_vox         = self._memobj.BUILD_OPTIONS.ENABLE_VOX
-
-        lst = base_list.copy()
-        # Remove TX-only actions that must not appear in key-press menus
-        for a in ("BACKLIGHT", "BL_MIN_TMP_OFF"):
-            if a in lst:
-                lst.remove(a)
-
-        # These keep an enum slot even when compiled out, so they are always in
-        # the map and only ever need hiding from the choices.
-        if not has_alarm:
-            if "ALARM" in lst:
-                lst.remove("ALARM")
-        if not has_1750:
-            if "1750Hz" in lst:
-                lst.remove("1750Hz")
-        if not has_flashlight:
-            if "FLASHLIGHT" in lst:
-                lst.remove("FLASHLIGHT")
-        if not has_fm_radio:
-            if "FM RADIO" in lst:
-                lst.remove("FM RADIO")
-        if not has_vox:
-            if "MUTE" in lst:
-                lst.remove("MUTE")
-
-        action_num = int(action_num)
-        if action_num >= len(base_list):
-            return lst, default if default in lst else "NONE"
-        if base_list[action_num] not in lst:
-            action_num = 0
-        return lst, base_list[action_num]
 
     def _build_nr7y_keya_group(self):
         """Rebuild the Programmable Keys group using the NR7Y extended actions list."""
@@ -4271,8 +4191,8 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
             ("keyM_longpress_action",  "Menu Key Long Press (M Long)"),
         ):
             default = self._nr7y_key_default(name)
-            choices, current = self._get_nr7y_action(int(getattr(_mem, name)),
-                                                     default)
+            choices, current = _nr7y_action_setting(
+                int(getattr(_mem, name)), self._is_nr7y_cw_firmware(), default)
             rs = RadioSetting(name, label, RadioSettingValueList(choices, current))
             rs.set_doc("Default on a new radio or after Reset ALL: %s. Any "
                        "action set here or from the radio's menu replaces it."
@@ -4448,9 +4368,7 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
     def set_settings(self, settings):
         _mem = self._memobj
         has_cw = self._is_nr7y_cw_firmware()
-        # Same map the settings were built from, so a name round-trips to the
-        # number this firmware build means by it.
-        action_list = self._nr7y_action_map()
+        action_names = _nr7y_action_names(has_cw)
 
         for element in settings:
             if not isinstance(element, RadioSetting):
@@ -4466,14 +4384,10 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
                         "keyM_longpress_action"):
                 # Left at the default on an unset slot: keep it unset, so CHIRP
                 # doesn't turn "never configured" into a stored bind
-                if (int(getattr(_mem, name)) >= len(action_list)
+                if (int(getattr(_mem, name)) not in action_names
                         and str(element.value) == self._nr7y_key_default(name)):
                     continue
-                try:
-                    idx = action_list.index(str(element.value))
-                except ValueError:
-                    idx = 0
-                setattr(_mem, name, idx)
+                setattr(_mem, name, _nr7y_action_id(str(element.value), has_cw))
                 continue
 
             # CW settings (only present when CW firmware is active)

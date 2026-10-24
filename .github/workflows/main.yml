@@ -21,8 +21,8 @@ jobs:
 
     - name: Build CW firmware
       run: |
-        chmod +x compile-with-docker.sh
-        ./compile-with-docker.sh CW -DVERSION_STRING_2=${{ github.ref_name }}
+        chmod +x compile-firmware.sh
+        ./compile-firmware.sh CW -DVERSION_STRING_2=${{ github.ref_name }}
 
     - name: Rename release artifacts
       run: |

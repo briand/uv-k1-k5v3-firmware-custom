@@ -16,6 +16,7 @@
 
 // One-time migration of CW storage from the pre-v2.0 locations:
 //   macros       0x1C00 (over MR channel records 448-459) -> 0xD010 (flash 0x00B010)
+//   key actions  build-dependent numbers -> fixed ACTION_OPT_t IDs (F4HWN v6.2)
 //   CW settings  0xA140 (second half of the AES key)      -> 0xA208
 //   EEPROM schema 0xA170                                   -> 0xA204
 //
@@ -30,10 +31,12 @@
 //   - delete SETTINGS_UpgradeSchema, SETTINGS_MigrateFilterSchema and
 //     MigrateFlagsRegion (settings.c), and EEPROM_SCHEMA_LEGACY_ADDR,
 //     CW_SETTINGS_LEGACY_ADDR and CW_MACRO_LEGACY_ADDR
-//   - CHIRP: _nr7y_convert_legacy_layout and _nr7y_upgrade_schema can go once
-//     pre-v2.0 images no longer need to load
+//   - CHIRP: _nr7y_convert_legacy_layout (which also renumbers key actions)
+//     and _nr7y_upgrade_schema can go once pre-v2.0 images no longer need to
+//     load
 // A radio that skips every release carrying this loses its macros and CW
-// settings, and a pre-v1.4 radio also misses the schema 2 filter migration.
+// settings, its key binds point at the wrong actions, and a pre-v1.4 radio
+// also misses the schema 2 filter migration.
 
 #ifndef APP_CWMIGRATE_H
 #define APP_CWMIGRATE_H
@@ -41,14 +44,18 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-// Both are called while the CW block header is missing, in this order, and
-// the caller writes the header right after the second.
+// All three are called while the CW block header is missing, in this order,
+// and the caller writes the header right after the last.
 
 // Copies macros and CW settings to their new homes without overwriting
 // anything already there, then deletes the channels that held valid legacy
 // macros and clears the old macro and CW settings bytes. Returns false,
 // having cleared nothing, if the copied macros did not read back correctly.
 bool CW_MigrateLegacyStorage(void);
+
+// Renumbers the stored key actions to the fixed ACTION_OPT_t IDs, unless the
+// data came from armel firmware. Not idempotent: runs once, before the header.
+void CW_MigrateLegacyActions(void);
 
 // The schema byte left at 0xA170 by v1.4-v1.x, as is (0xFF before v1.4).
 // Read, never written.
