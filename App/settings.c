@@ -19,7 +19,6 @@
 
 #ifdef ENABLE_CW_MODULATOR
     #include "app/cwmacro.h"
-    #include "app/cwmigrate.h"
 #endif
 #include "app/dtmf.h"
 #ifdef ENABLE_FMRADIO
@@ -75,33 +74,43 @@ static uint8_t CWSidetoneLevelToCode(uint8_t level)
 #endif
 
 #ifdef ENABLE_CW_MODULATOR
-// Bring an EEPROM schema value up to date, running the channel migration if
-// it is behind. Returns the schema the radio is now in.
-//
-// Deliberately separate from the version-string check in SETTINGS_InitEEPROM:
-// that one fires on any version change and resets locks, inversion and logo
-// lines. This must fire exactly once per upgrade, because the migration it
-// guards is not idempotent - the caller writes the result straight back.
-uint8_t SETTINGS_UpgradeSchema(uint8_t schema)
+// Key actions on a bank without a CW block header. Upstream F4HWN v6.2 stores
+// the same fixed IDs we do (ACTION_OPT_t), and its settings save always writes
+// the 'MIX' signature at SETTINGS_SCAN_MIX_ADDR, so a signed bank keeps its
+// keys. Anything else - NR7Y v1.x, whose numbering depended on build options,
+// or older upstream - would bind keys to the wrong actions, so the five key
+// bytes go back to unset and load as the defaults. The beep bit stays.
+static void ResetUnsignedKeyActions(void)
 {
-    // Erased flash means pre-v1.4, which never wrote a marker. Normalize
-    // first: 0xFF is 255, so an unnormalized value compares as "newer".
-    if (schema == 0xFF)
-        schema = EEPROM_SCHEMA_LEGACY;
+    uint8_t Data[8];
 
-    if (schema < EEPROM_SCHEMA_CURRENT)
-    {
-        SETTINGS_MigrateFilterSchema();
-        schema = EEPROM_SCHEMA_CURRENT;
-    }
-    // schema > EEPROM_SCHEMA_CURRENT: written by a newer firmware whose
-    // layout we do not know. Leave the channel data alone rather than
-    // migrating it onto an older meaning.
-    return schema;
+    PY25Q16_ReadBuffer(SETTINGS_SCAN_MIX_ADDR, Data, sizeof(Data));
+    if (Data[3] == 'M' && Data[4] == 'I' && Data[5] == 'X' && Data[6] == 1)
+        return;
+
+    // 0xA0A8: bit 0 beep, bits 1-7 M long press; then SIDE1/SIDE2 short/long
+    PY25Q16_ReadBuffer(0x00A0A8, Data, sizeof(Data));
+    Data[0] |= 0xFE;
+    memset(&Data[1], 0xFF, 4);
+    PY25Q16_WriteBuffer(0x00A0A8, Data, sizeof(Data), false);
 }
 
-// Validate the CW block header (CW_BLOCK_* in settings.h) and keep the EEPROM
-// schema current. Runs before the CW settings are loaded.
+// Validate the CW block header (CW_BLOCK_* in settings.h). Runs before the
+// settings are loaded.
+//
+// No header means this bank has never run v2.0 or later: a fresh radio, a full
+// factory reset, an upgrade from v1.x, or (multiboot) a bank another F4HWN
+// firmware has been using. Nothing is migrated: the v1.x layout is converted by
+// the CHIRP module, from an image saved before the upgrade (see README). This
+// only resets what we would misread and writes the header. It is safe to
+// repeat, so a power cut before the header write just runs it again.
+//
+// It leaves alone everything a v6.2 bank holds: channels, the settings sector,
+// 0xA140 (the AES key field, where v1.x kept the CW settings) and 0xA170.
+// v1.x leftovers need no cleanup either. Macros at 0x1C00 sit in channel
+// records 448-459 as they always did, the CW settings and macros start at
+// their defaults (no 'CWM' header, no macros), and pre-v1.4 CW/USB channels
+// keep their old filter bits (EEPROM_SCHEMA_* in settings.h).
 static void SETTINGS_InitCwBlock(void)
 {
     uint8_t hdr[CW_BLOCK_HDR_SIZE];
@@ -109,33 +118,17 @@ static void SETTINGS_InitCwBlock(void)
 
     const uint8_t version = hdr[CW_BLOCK_OFF_VERSION];
 
-    if (memcmp(hdr, CW_BLOCK_SIG, 3) != 0 || version == 0 || version == 0xFF)
-    {
-        // No header: first boot after upgrading from pre-v2.0, a fresh radio,
-        // or a full factory reset. The legacy copy is safe to repeat, so it
-        // goes first. The key action renumbering and the schema upgrade are
-        // not, so the header goes straight after them as the commit. See
-        // app/cwmigrate.h for what this becomes once the legacy migration is
-        // removed.
-        if (!CW_MigrateLegacyStorage())
-            return;  // copied macros did not verify; retry next boot
+    // Ours, or a newer layout: read what we understand, rewrite nothing
+    if (memcmp(hdr, CW_BLOCK_SIG, 3) == 0 && version != 0 && version != 0xFF)
+        return;
 
-        CW_MigrateLegacyActions();
-        const uint8_t schema = SETTINGS_UpgradeSchema(CW_MigrateLegacySchema());
+    ResetUnsignedKeyActions();
 
-        memset(hdr, 0xFF, sizeof(hdr));
-        memcpy(hdr, CW_BLOCK_SIG, 3);
-        hdr[CW_BLOCK_OFF_VERSION] = CW_BLOCK_VERSION;
-        hdr[CW_BLOCK_OFF_SCHEMA]  = schema;
-        PY25Q16_WriteBuffer(CW_BLOCK_ADDR, hdr, sizeof(hdr), false);
-    }
-    else if (version == CW_BLOCK_VERSION)
-    {
-        const uint8_t schema = SETTINGS_UpgradeSchema(hdr[CW_BLOCK_OFF_SCHEMA]);
-        if (schema != hdr[CW_BLOCK_OFF_SCHEMA])
-            PY25Q16_WriteBuffer(CW_BLOCK_SCHEMA_ADDR, &schema, 1, false);
-    }
-    // Newer layout: read what we understand, rewrite nothing.
+    memset(hdr, 0xFF, sizeof(hdr));
+    memcpy(hdr, CW_BLOCK_SIG, 3);
+    hdr[CW_BLOCK_OFF_VERSION] = CW_BLOCK_VERSION;
+    hdr[CW_BLOCK_OFF_SCHEMA]  = EEPROM_SCHEMA_CURRENT;
+    PY25Q16_WriteBuffer(CW_BLOCK_ADDR, hdr, sizeof(hdr), false);
 }
 #endif
 
@@ -347,7 +340,8 @@ gEeprom.FreqChannel[1]   = IS_FREQ_CHANNEL(Data16[5]) ? Data16[5] : (FREQ_CHANNE
         } __attribute__((packed)) fmCfg;
         PY25Q16_ReadBuffer(0x00A020, &fmCfg, 4);
 
-        gEeprom.FM_Band = fmCfg.band;
+        // Blank flash reads as all 0xFF (band 3, 64-76M); default to 87.5-108M instead.
+        gEeprom.FM_Band = (fmCfg.selFreq == 0xFFFF) ? 0 : fmCfg.band;
         //gEeprom.FM_Space = fmCfg.space;
 
         uint16_t freqLoLimit = BK1080_GetFreqLoLimit(gEeprom.FM_Band);
@@ -1531,82 +1525,6 @@ void SETTINGS_UpdateChannel(uint16_t channel, const VFO_Info_t *pVFO, bool keep)
 #endif
 
 #ifdef ENABLE_FEAT_F4HWN
-
-#ifdef ENABLE_CW_MODULATOR
-// ---- Schema 1 -> 2 migration ----
-//
-// Schema 1 packed the CW/USB filter across two bits, because bit 6 was borrowed
-// from TX_LOCK to mean NARROWEST:
-//
-//     WIDE       bit1 0  bit6 0
-//     NARROW     bit1 1  bit6 0
-//     NARROWEST  bit1 1  bit6 1
-//
-// Schema 2 keeps the filter in bit 1 alone (0 = 6.25k, 1 = 2.0k) and gives bit 6
-// back to TX_LOCK. Mapping new_bit1 = old_bit6 preserves every distinction that
-// mattered: an explicit 2k stays 2k, and WIDE and NARROW - both 12.5k or wider,
-// neither offered any more - fold together onto 6.25k. Setting bit 6 on the way
-// through gives these records the safe TX_LOCK default they could never hold.
-//
-// NOT idempotent: run twice, every record ends at bit1 = 1. The schema byte is
-// what guarantees it runs once. See EEPROM_SCHEMA_* in settings.h.
-static void MigrateFlagsRegion(uint32_t base, uint32_t bytes)
-{
-    #define CHANNEL_SIZE  16
-    #define MOD_OFFSET    11   // modulation << 4 | offset direction
-    #define FLAGS_OFFSET  12
-    #define MIGRATE_BATCH 512
-
-    uint8_t Buf[MIGRATE_BATCH];
-
-    for (uint32_t off = 0; off < bytes; off += MIGRATE_BATCH)
-    {
-        const uint32_t span = (bytes - off < MIGRATE_BATCH) ? (bytes - off) : MIGRATE_BATCH;
-        bool dirty = false;
-
-        PY25Q16_ReadBuffer(base + off, Buf, span);
-
-        for (uint32_t ch = 0; ch + CHANNEL_SIZE <= span; ch += CHANNEL_SIZE)
-        {
-            // An erased record is all 0xFF, so its modulation nibble is 0xF and
-            // matches neither - erased channels need no special case.
-            const uint8_t mod = Buf[ch + MOD_OFFSET] >> 4;
-            if (mod != MODULATION_CW && mod != MODULATION_USB)
-                continue;
-
-            const uint8_t old_flags     = Buf[ch + FLAGS_OFFSET];
-            const uint8_t was_narrowest = (old_flags >> 6) & 1u;
-            uint8_t       flags         = old_flags;
-
-            flags &= (uint8_t)~(1u << 1);              // clear the filter bit
-            flags |= (uint8_t)(was_narrowest << 1);    // 2k survives, else 6.25k
-            flags |= (uint8_t)(1u << 6);               // TX_LOCK back on
-
-            if (flags != old_flags)
-            {
-                Buf[ch + FLAGS_OFFSET] = flags;
-                dirty = true;
-            }
-        }
-
-        // Most radios have far fewer than 1024 CW channels; skipping untouched
-        // batches turns a guaranteed 32 sector programs into a handful.
-        if (dirty)
-            PY25Q16_WriteBuffer(base + off, Buf, span, false);
-    }
-
-    #undef CHANNEL_SIZE
-    #undef MOD_OFFSET
-    #undef FLAGS_OFFSET
-    #undef MIGRATE_BATCH
-}
-
-void SETTINGS_MigrateFilterSchema(void)
-{
-    MigrateFlagsRegion(0x000000, MR_CHANNELS_MAX * 16);  // 0x0000 - 0x3FFF
-    MigrateFlagsRegion(0x009000, 14 * 16);               // 0x9000 - 0x90DF, 7 bands x 2 VFOs
-}
-#endif // ENABLE_CW_MODULATOR
 
 void SETTINGS_ResetTxLock(void)
 {

@@ -878,9 +878,10 @@ _NR7Y_ACTIONS_CW = {
 
 # The action number v1.4 and older stored -> its fixed ID, applied with the
 # v2.0 layout conversion. Every NR7Y release built the CW preset with the same
-# options, so one table covers them all; it matches MigrateActionIds in
-# App/app/cwmigrate.c. ALARM,
-# BL_MIN_TMP_OFF and BACKLIGHT are gone upstream and become NONE.
+# options, so one table covers them all. The firmware does no conversion of its
+# own: a v1.x radio upgraded without this module boots with its keys reset to
+# the defaults. ALARM, BL_MIN_TMP_OFF and BACKLIGHT are gone upstream and
+# become NONE.
 _NR7Y_LEGACY_ACTION_IDS = [
     0, 1, 2, 3, 4, 5,
     0,                      # ALARM
@@ -1287,8 +1288,9 @@ def _check_upload_target(serport, firmware):
     if schema < NR7Y_SCHEMA_CURRENT:
         raise errors.RadioError(
             "This radio reports EEPROM schema %d, older than this module "
-            "writes (%d).\nPower-cycle the radio so its firmware finishes "
-            "migrating, then download again." % (schema, NR7Y_SCHEMA_CURRENT))
+            "writes (%d). v2.0 firmware never writes it, so the CW block "
+            "header is damaged.\nReset the radio's settings, then upload again."
+            % (schema, NR7Y_SCHEMA_CURRENT))
 
     if schema > NR7Y_SCHEMA_CURRENT:
         raise errors.RadioError(
@@ -4036,7 +4038,7 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
     def _nr7y_upgrade_schema(self):
         """Bring a schema 1 image up to schema 2, in memory.
 
-        Same mapping the firmware applies on first boot: on CW and USB records
+        The firmware does not migrate this itself. On CW and USB records
         the old NARROWEST flag in bit 6 becomes the filter bit, and bit 6 goes
         back to being TX_LOCK, set on. Schema 1 is read-only - this module
         never writes it back.
@@ -4095,12 +4097,12 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
     def _nr7y_convert_legacy_layout(self):
         """Bring an image without a CW block header into the v2.0 layout, in memory.
 
-        Same moves the firmware makes on its first v2.0 boot (app/cwmigrate.c):
-        valid macros from 0x1C00 to the macro area, CW settings from 0xA140 to
-        the CW block, key actions renumbered to fixed IDs, the schema from
-        0xA170 into the header. The channel records that held macros are
-        emptied, so an upload doesn't write macro bytes back into channels
-        449-460.
+        This is the only migration path from v1.x: the firmware resets what it
+        would misread and moves nothing. Valid macros go from 0x1C00 to the
+        macro area, CW settings from 0xA140 to the CW block, key actions are
+        renumbered to fixed IDs, and the schema moves from 0xA170 into the
+        header. The channel records that held macros are emptied, so an upload
+        doesn't write macro bytes back into channels 449-460.
         """
         raw = bytearray(self._mmap.get_packed())
         hdr = raw[NR7Y_CW_BLOCK_ADDR:NR7Y_CW_BLOCK_ADDR + 8]

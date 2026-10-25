@@ -210,7 +210,7 @@ enum ACTION_OPT_t {
      * can keep adding actions at 25 and up without renumbering these. 25-31
      * are left unused. Ordered as the menu lists them. The CHIRP driver carries
      * the same numbers; v1.4 and older numbered them by build options (see
-     * CW_MigrateLegacyActions). */
+     * _NR7Y_LEGACY_ACTION_IDS in the CHIRP driver). */
     ACTION_OPT_CW_FIRST          = 32,
     ACTION_OPT_CW_KEY_INPUT      = 32,
     ACTION_OPT_CW_KEYER_MODE     = 33,
@@ -498,12 +498,11 @@ void SETTINGS_UpdateChannel(uint16_t channel, const VFO_Info_t *pVFO, bool keep)
 // channels and F Lock could not gate them. Schema 2 gives bit 6 back to
 // TX_LOCK and keeps the filter in bit 1 as a plain wide/narrow flag.
 //
-// v2.0 keeps the marker in the CW block header (CW_BLOCK_SCHEMA_ADDR). v1.4-v1.x
-// kept it at 0xA170, which upstream armel uses for its scan-list mask. Nothing
-// writes it any more; the legacy storage migration (app/cwmigrate.c) reads it
-// once. Pre-v1.4 firmware wrote neither, so an un-migrated radio reads 0xFF.
-#define EEPROM_SCHEMA_LEGACY_ADDR 0x00A170
-#define EEPROM_SCHEMA_LEGACY   1   // pre-v1.4; stored as 0x00 or erased 0xFF
+// v2.0 keeps the marker in the CW block header (CW_BLOCK_SCHEMA_ADDR) and only
+// ever writes schema 2. v1.4-v1.x kept it at 0xA170, which upstream armel uses
+// for its scan-list mask. The firmware no longer migrates anything: the CHIRP
+// module converts schema 1 images, and a radio upgraded without that keeps
+// the old filter bits on its pre-v1.4 CW/USB channels.
 #define EEPROM_SCHEMA_CURRENT  2   // v1.4: bit 6 is TX_LOCK, bit 1 is the filter
 
 // ---- NR7Y CW block (v2.0) ----
@@ -527,13 +526,7 @@ void SETTINGS_UpdateChannel(uint16_t channel, const VFO_Info_t *pVFO, bool keep)
 #define CW_BLOCK_OFF_SCHEMA    4
 #define CW_BLOCK_SCHEMA_ADDR   (CW_BLOCK_ADDR + CW_BLOCK_OFF_SCHEMA)
 #define CW_SETTINGS_ADDR       (CW_BLOCK_ADDR + 0x08)
-#define CW_SETTINGS_LEGACY_ADDR 0x00A140   // pre-v2.0, second half of the AES key field
 
 #define CW_BLOCK_SIG           "CWX"   // first 3 bytes, no terminator stored
-
-#ifdef ENABLE_CW_MODULATOR
-    void SETTINGS_MigrateFilterSchema(void);
-    uint8_t SETTINGS_UpgradeSchema(uint8_t schema);
-#endif
 
 #endif

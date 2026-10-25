@@ -6,6 +6,25 @@ Pre-built `.uf2`/`.bin` files ready to flash are published every release, you do
 ## 📖 [**Documentation site →**](https://briand.github.io/cw-firmware-docs/)
 Full menu reference, rework guides now live here.
 
+## ⚠️ Upgrading from v1.x to v2.0: back up with CHIRP first
+
+> [!IMPORTANT]
+> v2.0 moves to the F4HWN v6.x codebase and restructures where settings are stored: CW settings and macros move to new locations, and key assignments are numbered differently. **The firmware does not migrate your old settings.** The v2.0 CHIRP module does that conversion. If you skip these steps, your channels stay but your CW settings, macros and key assignments go back to their defaults.
+
+To carry your channels and settings over:
+
+1. **Before flashing v2.x**, while the radio still runs v1.x, open CHIRP with the CHIRP module from your current v1.x release (for example `nr7y.k1-k5v3.chirp.v1.4.py`), download from the radio and **save the image** (`.img`). This file is your backup; keep it.
+2. Flash v2.0 (see [Flashing the Firmware with UV Studio](#flashing-the-firmware-with-uv-studio)).
+3. On the radio, run **Reset → ALL** and let it restart. This clears the old layout so nothing left over from v1. Calibration is not affected.
+4. In CHIRP, load the CHIRP module attached to the [v2.0 release](https://github.com/briand/uv-k1-k5v3-firmware-custom/releases), then **open the image you saved in step 1**. The module converts it to the v2.x layout as it loads: channels, settings, CW settings, macros and key assignments. Images from before v1.4 also get their CW/USB filter settings converted.
+5. Upload to the radio.
+
+Notes:
+
+- After upgrading, use only the v2.0 CHIRP module with the radio. It refuses to upload to v1.x firmware, and a v1.x module would write CW settings and macros where v2.0 no longer reads them.
+- Without the CHIRP step, a radio that had macros recorded can show up to 12 garbage entries in CHIRP at channels 449-460, where v1.x stored the macros. Delete them, or do the steps above.
+- Multiboot: when v2.0 opens a configuration bank where stock F4HWN v6.2 has saved settings, it keeps that bank's channels, settings and key assignments.
+
 This repository builds on the [F4HWN codebase](https://github.com/armel/uv-k1-k5v3-firmware-custom) by Armel F4HWN, adding a set of features specifically for CW operators.
 
 - High-speed RX/TX switching for realtime Morse code sending in true CW modulation

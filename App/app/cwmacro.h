@@ -52,10 +52,6 @@
 #define CW_MACRO3_EEPROM_ADDR (CW_MACRO2_EEPROM_ADDR + CW_MACRO_BLOCK_SIZE)  /* 0xD070 */
 #define CW_MACRO4_EEPROM_ADDR (CW_MACRO3_EEPROM_ADDR + CW_MACRO_BLOCK_SIZE)  /* 0xD0A0 */
 
-// Pre-v2.0 location, over MR channel records 448-459. Read only by the
-// legacy storage migration (app/cwmigrate.c).
-#define CW_MACRO_LEGACY_ADDR  0x1C00
-
 // Encoding/Decoding helper macros
 #define CW_MACRO_ENCODE(ch, hasSpace) ((hasSpace) ? ((ch) | 0x80) : (ch))
 #define CW_MACRO_HAS_SPACE(byte) (((byte) & 0x80) != 0)
