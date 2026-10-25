@@ -6,7 +6,7 @@ Pre-built `.uf2`/`.bin` files ready to flash are published every release, you do
 ## 📖 [**Documentation site →**](https://briand.github.io/cw-firmware-docs/)
 Full menu reference, rework guides now live here.
 
-This repository builds on the F4HWN codebase by adding a set of features specifically for CW operators.
+This repository builds on the [F4HWN codebase](https://github.com/armel/uv-k1-k5v3-firmware-custom) by Armel F4HWN, adding a set of features specifically for CW operators.
 
 - High-speed RX/TX switching for realtime Morse code sending in true CW modulation
 - Automatic iambic keyer with A/B/Ultimatic/Bug modes
@@ -22,6 +22,13 @@ This repository builds on the F4HWN codebase by adding a set of features specifi
 This firmware only supports the UVK5v3 or UVK1 Quansheng hardware. It does not work with the original UVK5 model; use the V1 mod firmware [here](https://github.com/briand/uv-k5-firmware-custom-cw) instead for v1 radios.
 
 This code is available under the Apache 2.0 License as is the work of giants that it builds upon.
+
+## ❤️ Support the original author
+
+The bulk of this firmware is the work of Armel F4HWN and the projects he built on; this fork adds the CW features on top. If you find it useful, please consider supporting him directly:
+
+- GitHub Sponsors: [github.com/sponsors/armel](https://github.com/sponsors/armel)
+- PayPal: [paypal.me/F4HWN](https://www.paypal.com/paypalme/F4HWN)
 
 --- The F4HWN README contents follow ---
 
