@@ -229,6 +229,10 @@ void CW_AppUpdate(void)
 					SYSTEM_DelayMs(20);
 				}
 				RADIO_PrepareTX();
+				// refused (TX DISABLE, BAT LOW, ...): nothing will clear PTT later, and
+				// a held PTT stops the VFO state from timing back to the frequency
+				if (gCW_State == CW_INACTIVE)
+					gPttIsPressed = false;
 			}
 			else if (gCW_State == CW_SUSPENDED) {
 				RADIO_CW_BeginResume();
