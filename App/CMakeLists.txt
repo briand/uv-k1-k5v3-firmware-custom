@@ -193,7 +193,6 @@ enable_feature(ENABLE_FEAT_NR7Y_CW
     app/cwrit.c
     app/cwpopup.c
     app/cwguard.c
-    app/cwmigrate.c   # temporary: pre-v2.0 CW storage migration
 )
 
 # Code practice (requires CW)
