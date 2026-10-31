@@ -26,11 +26,12 @@
  * SysTick, from the moment RSSI shows a burst. Samples go straight into dec406
  * (see README.md); the last five decoded messages stay in RAM.
  *
+ * A decoded message plays three beeps, whatever the speaker setting.
  * Keys (UV-K5 and UV-K1): UP/DOWN scroll, then select the newer / older message
  *   at an end · * normal / compact view · 4/6 tune -/+5 kHz (up to +/-50 kHz)
  *   · 5 back to the VFO frequency · 1 speaker on/off · MENU clear · EXIT quit.
- * The loader re-runs RADIO_SetupRegisters on exit; the app restores the ADC,
- * PA4, the DAC and its clock itself.
+ * The loader re-runs RADIO_SetupRegisters on exit (amplifier off); the resident capture
+ * (af_capture_close) restores the ADC, PA4, the DAC and its clock.
  * Screen texts and protocol names are read-only assets (gen_assets.py, API
  * level 2), kept out of the 4 KiB overlay.
  */
@@ -43,35 +44,14 @@
 #define DEC406_LEAN            /* no idData / stdLoc: not displayed */
 #include "dec406.c"
 
-/* ---- MCU registers (PY32F071, core and SysTick at 48 MHz, 10 ms period) ---- */
-#define SYST_LOAD   (*(volatile uint32_t *)0xE000E014u)
-#define SYST_VAL    (*(volatile uint32_t *)0xE000E018u)
-#define ADC_SR      (*(volatile uint32_t *)0x40012400u)
-#define ADC_CR2     (*(volatile uint32_t *)0x40012408u)
-#define ADC_SMPR3   (*(volatile uint32_t *)0x40012414u)
-#define ADC_SQR3    (*(volatile uint32_t *)0x40012438u)
-#define ADC_DR      (*(volatile uint32_t *)0x40012450u)
-#define GPIOA_MODER (*(volatile uint32_t *)0x50000000u)
-#define DAC_CR      (*(volatile uint32_t *)0x40007400u)
-#define DAC_SWTRIGR (*(volatile uint32_t *)0x40007404u)
-#define DAC_DHR12R1 (*(volatile uint32_t *)0x40007408u)
-#define RCC_APBENR1 (*(volatile uint32_t *)0x4002103Cu)
-#define RCC_DACEN   (1u << 29)
-/* DAC channel 1 on, output buffer off, software trigger (TSEL1 = 111) */
-#define DAC_CR_BIAS ((1u << 0) | (1u << 1) | (1u << 2) | (7u << 3))
-#define BIAS_CODE   2048u
-#define ADC_SR_EOC     (1u << 1)
-#define ADC_CR2_START  ((1u << 22) | (1u << 20))   /* SWSTART | EXTTRIG */
-#define SMP8_POS       24u
-#define SMP4_POS       12u
-#define ADC_CH_PA4     4u
+/* ---- sampling: the PA4 capture and the 48 MHz cycle clock are resident
+ * (API level 3); the capture holds PA4 at mid-scale ---- */
 #define CYC_PER_SAMPLE (48000000u / DEC406_FS)     /* 5000 */
 #define CAP_MAX_CYC    (48000000u / 1000u * 900u)  /* 900 ms after trigger */
 
 /* ---- BK4829 RAW receive ---- */
 #define REG_2B      0x2B
 #define REG_73      0x73
-#define REG_30      0x30   /* 0 then back: VCO recalibration, relock on the new frequency */
 #define REG_38      0x38   /* RX frequency, 10 Hz units, low 16 bits  */
 #define REG_39      0x39   /* RX frequency, high 16 bits              */
 #define STEP_10HZ   500    /* 5 kHz                                   */
@@ -89,16 +69,15 @@
 #define SPK_X       59u
 #define VIEW_COMPACT 1u
 #define BODY_BOTTOM 39u
+#define BEEP_HZ     1536u   /* 3 << 9: a cheap Thumb constant */
+#define BEEP_MS     150u
+#define SETTLE_MS   50u     /* tune(): REG_30 cycle to amplifier on (5 ms clicked) */
 
 typedef struct {
     dec406_info_t info;
     int16_t rssi;
     uint16_t seq;
 } frame_t;
-
-typedef struct {
-    uint32_t sqr3, smpr3, moder, dac, rcc, dhr;
-} saved_hw_t;
 
 typedef struct {
     uint8_t spk, view;                  /* persistent byte order */
@@ -129,17 +108,10 @@ static char *put(char *o,const char *s){ while(*s)*o++=*s++; return o; }
 /* Formatting by repeated subtraction: no division, so no __udivsi3 in the
  * 4 KiB overlay. Values printed stay below 100000. */
 static unsigned sub(uint32_t *v,uint32_t d){ unsigned q=0; while(*v>=d){ *v-=d; q++; } return q; }
-static char *puti(char *o,int32_t v){
-    static const uint16_t P10[]={10000u,1000u,100u,10u,1u};
-    uint32_t u;
-    if(v<0){*o++='-';u=(uint32_t)(-v);} else u=(uint32_t)v;
-    bool lead=false;
-    for(unsigned i=0;i<5;i++){
-        unsigned c=sub(&u,P10[i]);
-        if(c||lead||i==4u){ *o++=(char)('0'+c); lead=true; }
-    }
-    return o;
-}
+/* The resident formatter (API level 3). One local stub keeps every call a
+ * plain bl: the service lies past the ldr immediate range of the table. */
+__attribute__((noinline))
+static char *puti(char *o,int32_t v){ return g.A->append_i32(o,v); }
 /* Arc seconds to truncated decimal degrees followed by the hemisphere. */
 static char *putPos(char *o,int32_t s,char pos,char neg){
     uint32_t a=(uint32_t)(s<0?-s:s);
@@ -160,14 +132,22 @@ static char *putFlags(char *o,const dec406_info_t *in,const char *s){
 }
 static void tiny(char *buf,uint8_t x,uint8_t y,char *end){ *end='\0'; g.A->print_tiny(buf,x,y,false,true); }
 
+/* RX audio as the decoder needs it: AF in FM (PA4 follows the AF DAC), speaker
+ * amplifier as configured. */
+static void rxAudio(void){ g.A->set_af(APP_AF_FM); g.A->audio_path(g.cfg.spk); }
+
 /* ---- tuning: offset the RX frequency from the VFO (restored by the loader on exit) ---- */
 static void tune(void){
+    /* Amplifier off first, as AUDIO_PlayBeep does: the REG_30 cycle below steps
+     * the AF DAC output, a loud click if amplified. The two frequency writes
+     * give it a head start; rxAudio() turns it back on if the speaker is on. */
+    g.A->audio_path(false);
     uint32_t f=(uint32_t)((int32_t)g.vfoFreq+(int32_t)g.offSteps*STEP_10HZ);
     g.A->bk_write(REG_38,(uint16_t)(f&0xFFFFu));
     g.A->bk_write(REG_39,(uint16_t)(f>>16));
-    uint16_t r30=g.A->bk_read(REG_30);
-    g.A->bk_write(REG_30,0);
-    g.A->bk_write(REG_30,r30);
+    g.A->tones_off_rx();         /* REG_30 to 0 then RX: VCO recalibration, relock */
+    g.A->delay_ms(SETTLE_MS);    /* the AF output re-centres on the PA4 bias: amplifier still off */
+    rxAudio();
 }
 /* "433.645" from 10 Hz units, rounded to the kHz, without division */
 static char *putFreq(char *o,uint32_t f){
@@ -177,56 +157,30 @@ static char *putFreq(char *o,uint32_t f){
     return o;
 }
 
-/* ---- PA4 bias: the pin has no DC reference of its own (AC-coupled audio), so
- * 9.6 kHz sampling dragged it to 0 V and clipped half the message (406 Lab scope).
- * The MCU DAC on PA4, output buffer off, at mid-scale, holds it at ~VDD/2.
- * Set for the whole run, restored on exit. ---- */
-static void biasOn(const saved_hw_t *saved){
-    GPIOA_MODER=saved->moder|(3u<<8);           /* PA4 analog                     */
-    RCC_APBENR1=saved->rcc|RCC_DACEN;
-    DAC_CR=DAC_CR_BIAS;
-    DAC_DHR12R1=BIAS_CODE;
-    DAC_SWTRIGR=1u;                           /* DHR -> DOR                     */
-}
-static void biasOff(const saved_hw_t *saved){ DAC_CR=saved->dac; DAC_DHR12R1=saved->dhr; RCC_APBENR1=saved->rcc; GPIOA_MODER=saved->moder; }
-
-/* ---- ADC on PA4 (channel 4); channel 8 (battery) restored afterwards ---- */
-static void adcSelPA4(const saved_hw_t *saved){
-    ADC_SMPR3=(saved->smpr3&~(7u<<SMP4_POS))|(((saved->smpr3>>SMP8_POS)&7u)<<SMP4_POS);
-    ADC_SQR3=(saved->sqr3&~0x1Fu)|ADC_CH_PA4;
-}
-static void adcRestore(const saved_hw_t *saved){ ADC_SQR3=saved->sqr3; ADC_SMPR3=saved->smpr3; }
-static uint16_t adcRead(void){
-    ADC_CR2|=ADC_CR2_START;
-    for(uint16_t n=0; !(ADC_SR&ADC_SR_EOC) && n<2000u; n++){}
-    return (uint16_t)(ADC_DR&0x0FFFu);
-}
-
 /* ---- one burst: sample PA4 at 9.6 kHz into the decoder ---- */
-static uint8_t capture(const saved_hw_t *saved){
+/* Not inlined into app_main: smaller that way (4 KiB overlay). */
+__attribute__((noinline)) static uint8_t capture(void){
     dec406_t d;
     dec406_init(&d,true);        /* INT: integrate the discriminator pulses */
-    adcSelPA4(saved);
-    uint32_t prev=SYST_VAL, cyc=0;
+    /* The two per-sample services, held in registers: their table slots lie
+     * past the ldr immediate range. Time counts from the trigger. */
+    uint32_t (*const clk)(void)=g.A->cycles_48mhz;
+    uint16_t (*const sample)(void)=g.A->af_capture_sample;
+    const uint32_t t0=clk();
     uint32_t next=0;
     uint32_t nextKey=KEY_POLL_START_CYC;
     bool done=false;
     while(next<CAP_MAX_CYC){
-        uint32_t v;
-        do {
-            v=SYST_VAL;
-            cyc+=(v<=prev)?prev-v:prev+(SYST_LOAD+1u-v);
-            prev=v;
-        } while(cyc<next);
-        if(dec406_push(&d,adcRead())){ done=true; break; }
+        uint32_t cyc;
+        while((cyc=clk()-t0)<next){}
+        if(dec406_push(&d,sample())){ done=true; break; }
         if(d.state==DEC406_SEARCH && cyc>=nextKey){
             nextKey+=KEY_POLL_CYC;
             uint8_t key=g.A->get_key();
-            if(key<APP_KEY_INVALID){ adcRestore(saved); return key; }
+            if(key<APP_KEY_INVALID) return key;
         }
         next+=CYC_PER_SAMPLE;
     }
-    adcRestore(saved);
 
     if(!done){ g.nFail++; g.lastErr=d.state==DEC406_DATA?2u:1u; return APP_KEY_INVALID; }
     g.nSync++; g.lastErr=0;
@@ -239,6 +193,14 @@ static uint8_t capture(const saved_hw_t *saved){
     if(g.count<HISTORY) g.count++;
     g.cur=0;
     g.top=0;
+    /* Decode alert, even with the speaker off: three 150 ms beeps, 150 ms apart.
+     * The gaps are 0 Hz "tones" (REG_71 = 0, no output): the same call as a beep,
+     * cheaper than a delay. The burst is over and the next one is ~50 s away.
+     * tune() then cuts the amplifier and brings RX, the AF and the speaker back. */
+    g.A->prepare_tone();
+    g.A->audio_path(true);
+    for(unsigned hz=BEEP_HZ, n=5u; n; n--, hz^=BEEP_HZ) g.A->play_tone_raw((uint16_t)hz,BEEP_MS);
+    tune();
     return APP_KEY_INVALID;
 }
 
@@ -372,7 +334,7 @@ static void handleKey(uint8_t key){
     g.prevKey=key;
     switch(key){
         case APP_KEY_EXIT: g.running=false; break;
-        case APP_KEY_1:    g.cfg.spk^=1u; g.A->audio_path(g.cfg.spk); break;
+        case APP_KEY_1:    g.cfg.spk^=1u; rxAudio(); break;
         case APP_KEY_STAR: g.cfg.view^=VIEW_COMPACT; g.top=0; break;
         case APP_KEY_5:    g.offSteps=0; tune(); break;
         case APP_KEY_MENU: g.count=g.cur=0; g.top=g.lim=0; g.nSync=g.nFail=0; g.lastErr=0; break;
@@ -389,15 +351,12 @@ __attribute__((section(".text.entry"),used))
 void app_main(const app_api_t *api){
     frame_t frames[HISTORY];    /* on the stack: the 4 KiB overlay also holds .bss */
     frame_t *history[HISTORY];
-    saved_hw_t saved;
     for(unsigned k=0;k<HISTORY;k++) history[k]=&frames[k];
     g.A=api;
     g.history=history;
     g.prevKey=APP_KEY_INVALID;   /* the rest of g starts at 0 (overlay zeroed by the loader) */
 
-    saved.sqr3=ADC_SQR3; saved.smpr3=ADC_SMPR3; saved.moder=GPIOA_MODER; saved.dac=DAC_CR;
-    saved.rcc=RCC_APBENR1; saved.dhr=DAC_DHR12R1;
-    biasOn(&saved);
+    g.A->af_capture_open();      /* PA4 bias and ADC channel 4, restored by close */
     g.A->backlight_on();
     g.vfoFreq=g.A->rx_freq();
     g.A->bk_write(REG_2B,(uint16_t)((g.A->bk_read(REG_2B)|0x0700u)&~0x0007u));
@@ -405,8 +364,7 @@ void app_main(const app_api_t *api){
     g.A->cfg_load(&g.cfg.spk,sizeof g.cfg);
     g.cfg.spk=(uint8_t)(g.cfg.spk==1u);         /* erased flash or junk: speaker off */
     if(g.cfg.view!=VIEW_COMPACT) g.cfg.view=0;  /* normal view by default */
-    g.A->audio_path(g.cfg.spk);                 /* PA4 is before the speaker amplifier */
-    g.A->set_af(APP_AF_FM);
+    rxAudio();                                  /* PA4 is before the speaker amplifier */
     g.A->delay_ms(50);
 
     int32_t f=0;
@@ -426,7 +384,7 @@ void app_main(const app_api_t *api){
                 else { g.A->delay_ms(1); continue; }
             }
             if(g.rssi>=fl+TRIG_DB){
-                key=capture(&saved);
+                key=capture();
                 g.coolUntil=g.A->ticks_ms()+COOL_MS;
                 if(!g.coolUntil) g.coolUntil=1u;
                 break;
@@ -444,8 +402,7 @@ void app_main(const app_api_t *api){
         g.A->backlight_on();         /* keep the screen lit while waiting for bursts (and after a key) */
     }
 
-    biasOff(&saved);             /* the ADC is already restored after each capture */
-    g.A->set_af(APP_AF_MUTE);
-    g.A->audio_path(false);
+    g.A->af_capture_close();
+    g.A->set_af(APP_AF_MUTE);    /* the loader's RADIO_SetupRegisters turns the amplifier off */
     g.A->cfg_save(&g.cfg.spk,sizeof g.cfg);
 }

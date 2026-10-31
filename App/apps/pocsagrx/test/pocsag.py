@@ -151,6 +151,10 @@ TEST_PAGES = {
     "two":     [(2504, 3, "DAPNET time 2026-10-13 21:07"), (165856, 3, "Second page, same transmission.")],
     "long":    [(1000001, 3, "The quick brown fox jumps over the lazy dog 0123456789 times, then again.")],
     "same":    [(4520, 3, "First page to this address"), (4520, 3, "Second one, same address")],
+    # tone-only pages (address alone), shown with key 4 on; RIC 8 and up, as
+    # RIC 0 to 7 with function 0 is the all-zero codeword the app refuses
+    "tone":    [(1234567, 1, "")],
+    "tonemix": [(1234560, 0, ""), (1045677, 3, "After a tone-only page")],
 }
 
 if __name__ == "__main__":

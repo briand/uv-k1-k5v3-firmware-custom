@@ -10,8 +10,8 @@ waterways (RAINWAT); it is sent on the working channel itself, not on channel 70
 | Part | State |
 |---|---|
 | Signal format (`test/atis.py`) | Built from ETSI EN 300 698 V2.3.1 annex B; reproduces the example of annex C (`PC8075` -> `9244038075`, error check 110) |
-| Receive model (`test/model_rx.py`) | Decodes the Flipper files and a sine FSK with -6 to +8 dB of twist, +-4 kHz offset, +-1 % clock, in both audio paths; nothing out of 2 x 60 s of noise |
-| Radio app (`atisrx_app.c`) | v0.1, **decodes the Flipper files on the radio** (2026-10-13): `pc8075`, `fm1234`, `dc5513` and `mmsi` shown, `badecc` rejected as expected |
+| Receive model (`test/model_rx.py`) | Decodes the Flipper files and a sine FSK with -6 to +4.2 dB of twist, +-4 kHz offset, +-1 % clock, in the standard FM audio path the app reads; nothing out of 60 s of noise |
+| Radio app (`atisrx_app.c`) | v0.1 decoded the Flipper files on the radio (2026-10-13), but only 7 sequences in 40 from a sine FSK source at 1.5 to 4.8 kHz of deviation (#705). **v0.2** (slicer weights 5:4, 4:3, 7:5) decodes 39 in 40 on 433.650 MHz, and on 144.950 MHz 30/30 in narrow mode, 26/30 in wide mode, 10/10 at 5 kHz of deviation |
 | On air | Not tested yet with a real boat (the Flipper sends square-wave tones, not a type-approved radio's signal) |
 
 ## Use
@@ -84,6 +84,21 @@ gives the symbol phase and the position; it then reads the 34 symbols. Each
 information symbol is taken from its DX copy, or from its RX copy sent 5
 symbols later when the DX one fails its check bits; the format specifier (121),
 the end of sequence (127), the digits and the error check must all hold.
+
+The three slicers decide sign(wa * My * Pb - wb * Mb * Py), each tone magnitude
+over the other tone's peak, with weights 5:4, 4:3 and 7:5. The former 2:3, 1:1
+and 3:2 suit the model, but not a UV-K1's audio: on ADC samples captured on the
+radio during real calls (ATIS DSC RX shares this front end; about 0.16 LSB per
+Hz of deviation, the 2100 Hz tone 1.3 to 3 dB down), only 3:2 gave the right
+bits, at the edge of the good range (84 to 99 %), 1:1 about 70 % and 2:3 about
+60 %, and v0.1 decoded 7 sequences in 40 from a LimeSDR. Around 4:3 every
+capture keeps 99.5 to 100 % of the bits right, and v0.2 decodes 39 in 40. The
+model cannot tell the two sets apart in the standard audio path; with the new
+weights its flat RAW path no longer decodes, which the app does not use.
+
+The Flipper's `2FSKDev238` preset deviates about +-4.8 kHz (measured with an
+SDR), more than a marine radio usually does: v0.1 still decoded 6 sequences in
+10 there, which is why the bench files passed.
 
 The clock recovery pulls 1/8 of the error per transition (1/4 in APRS RX):
 with 1/4 the model lost half the noisy sequences, the symbols having few

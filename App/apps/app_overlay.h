@@ -98,7 +98,6 @@
 #define APP_SCREEN_SAVE_LEN  1024u
 #define APP_FLAG_SHORTCUT_SHIFT 8u
 #define APP_FLAG_SHORTCUT_MASK  0x0F00u
-#define APP_NAME_LEN      16
 #define APP_VERSION_LEN   16
 
 /* Shortcut IDs: the value of the header's shortcut field, one per app (the
@@ -125,6 +124,9 @@
  * the editor and by its target, whose settings cannot be changed without it;
  * earlier firmware refuses both with APP_ERR_CAP. */
 #define APP_CAP_CFG_PROXY     0x00000020u
+/* Serial ports (serial_read / serial_write / serial_ctl, API level 3): the
+ * USB-C port; serial_ctl tells which ports this firmware has (APP_SERIAL_OK). */
+#define APP_CAP_SERIAL        0x00000040u
 
 /* Aligned RAM objects; app_overlay.c pins every serialized field offset. */
 typedef struct {
@@ -155,14 +157,36 @@ enum {
     APP_ERR_VMA,            /* overlay buffer not at the link VMA     */
     APP_ERR_AUTH,           /* host write refused: timestamp mismatch */
     APP_ERR_CAP,            /* required firmware capability missing   */
+    APP_CHAIN_ABORTED,      /* runaway hand-off chain stopped safely  */
 };
 
 /* Read + validate a slot header (no CRC of the code). */
 uint8_t APP_ValidateSlot(uint8_t slot, app_header_t *out_header);
 
-/* Validate, load into the overlay, verify the code CRC, and run the app.
- * Returns when the app exits; the internal flash is never touched. */
+/* Validate, load into the overlay, verify the code CRC, and run the app, then
+ * each app it hands off to.  Returns when the last one exits, with its result;
+ * APP_CHAIN_ABORTED means a runaway-chain guard stopped the sequence.  The
+ * internal flash is never touched while an overlay is executing. */
 uint8_t APP_LaunchOverlay(uint8_t slot);
+
+/* Set when an app staged a VFO (vfo_stage): the Apps menu then hands back to
+ * the main screen, and clears it. */
+extern bool gAppVfoExit;
+
+/* An open RX audio capture (af_capture_open) holds the ADC on PA4: Yield puts
+ * the battery channel back for one conversion and returns whether it did, Resume
+ * takes PA4 back. Used by BOARD_ADC_GetBatteryInfo(). */
+bool    APP_AfCaptureYieldAdc(void);
+void    APP_AfCaptureResumeAdc(void);
+
+/* The slot of the last app APP_LaunchOverlay ran or tried to launch: the app
+ * that ended a hand-off chain, or the target that failed.  Its header names
+ * the app in an error and holds the APP_FLAG_EXIT_TO_MAIN that applies. */
+extern uint8_t gAppLastSlot;
+
+/* Block until no key and no PTT has been down for 100 ms.  Returns true on a
+ * long EXIT press meanwhile (the loader then ends a hand-off chain). */
+bool    APP_WaitKeyRelease(void);
 
 /* Launch the first installed app advertising this shortcut bit. */
 uint8_t APP_LaunchOverlayShortcut(uint8_t shortcut);

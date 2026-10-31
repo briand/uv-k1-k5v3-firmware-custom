@@ -16,7 +16,7 @@ a.text("T_CALL", "CALL")
 a.text("T_CARR", "CARR")
 a.text("T_TONE", "TONE")
 a.text("T_TX_OFF", "TX OFF")
-# Fox identifiers by foxFox (0..FOX_MO); FOX_CALL sends "<call> " + entry 0.
+# Fox identifiers by foxFox (0..FOX_MO); FOX_CALL_MOE appends entry 0 to the callsign.
 a.table("FOX_ID", ["MOE", "MOI", "MOS", "MOH", "MO5", "MO"])
 # Sentinel-prefixed Morse (leading 1, then elements MSB-first: 0 dit, 1 dah):
 # A..Z, then 0..9, then '/'.
@@ -27,7 +27,4 @@ a.u8("MORSE", [0x05,0x18,0x1A,0x0C,0x02,0x12,0x0E,0x10,0x04,0x17,0x0D,0x14,0x07,
 a.u8("BMP_TX",   [0x1c,0x22,0x41,0x1c,0x22,0x00,0x08,0x1c,0x1c,0x08,0x00,0x22,0x1c,0x41,0x22,0x1c])
 a.u8("BMP_LOCK", [0x7c,0x46,0x45,0x45,0x45,0x45,0x45,0x46,0x7c])
 a.u8("BMP_F",    [0x3e,0x7f,0x41,0x75,0x75,0x75,0x7d,0x7f,0x3e])
-# Powers of ten, 10^8 down to 1: numbers (the frequency too) are printed by
-# subtraction, so the app links no division.
-a.u32("PLACE", [10 ** k for k in range(8, -1, -1)])
 a.main()

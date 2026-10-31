@@ -36,7 +36,7 @@ UI = [
     ("T_RXABORT","RX aborted"),
     ("T_DITHER", "dither"),
     ("T_1BIT",   "1-bit"),
-    ("T_HELP",   "PTT send 1/F1mode 2bw 3spk 4view"),   # 32 tiny characters
+    ("T_HELP",   "MENU tx 1/F1mode 2bw 3spk 4view"),    # 31 tiny characters
 ]
 
 # The status line of the info screen, by ST_* (sstv_app.c): its text's offset

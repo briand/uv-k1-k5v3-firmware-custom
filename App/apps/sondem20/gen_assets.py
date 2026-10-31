@@ -13,14 +13,13 @@ UI = [
     ("T_M",      "m"),
     ("T_TEMP",   "T "),
     ("T_C",      "C "),
-    ("T_HPA",    "hPa"),
+    ("T_RH",     "RH "),
     ("T_FRAME",  "FRAME "),
+    ("T_VS", " VS"),
+    ("T_HS", "HS "),
+    ("T_HDG", "m/s HDG "),
     ("T_DBM",    "dBm"),
     ("T_KHZ",    "kHz"),
-    ("T_ATT",    "ATT "),
-    ("T_DB",     "dB"),
-    ("T_BYP",    "BYP"),
-    ("T_BYP_PLUS","BYP+"),
 ]
 a = Assets("SONDE_M20")
 ui_size = 0
@@ -30,14 +29,19 @@ for name, s in UI:
     ui_size += len(s) + 1 + pad
 a.const("UI_SIZE", ui_size)
 a.const("T_TITLE_CHARS", len(TITLE))
+SIGNAL = [0x08, 0x1c, 0x1c, 0x08, 0x00, 0x22, 0x1c, 0x41, 0x22, 0x1c]
 SPK = [0x1c, 0x1c, 0x3e, 0x7f, 0x00, 0x22, 0x1c, 0x41, 0x22, 0x1c]
+a.u8("BMP_SIGNAL", SIGNAL)
 a.u8("BMP_SPK", SPK)
-a.const("SPK_W", len(SPK))
-a.u8("BMP_F", [0x3e, 0x7f, 0x41, 0x75, 0x75, 0x75, 0x7d, 0x7f, 0x3e])
+a.u8("BMP_F", [0x3e, 0x7f, 0x41, 0x75, 0x75, 0x75, 0x7d, 0x7f, 0x3e, 0x00])
+a.const("ICON_W", 10)        # every status icon: F and speaker share one read
 a.u16("ATT_REG13", [0x03DF, 0x03DD, 0x03DB, 0x03D9, 0x0379, 0x0139])
-a.u8("ATT_DB", [0, 6, 15, 27])
 a.const("ATT_COUNT", 6)
-a.const("ATT_BYP0", 4)
+# Footer labels, one NUL-padded record per attenuation step (ATT_REG13 order).
+ATT_REC = 16
+ATT_LBL = ["ATT 0dB", "ATT 6dB", "ATT 15dB", "ATT 27dB", "ATT BYP", "ATT BYP+"]
+a.raw("ATT_LBL", b"".join(s.encode().ljust(ATT_REC, b"\0") for s in ATT_LBL))
+a.const("ATT_REC", ATT_REC)
 
 # M20 main thermistor (auto_rx m20mod get_Temp): ADC12 of a divider per range,
 # Steinhart-Hart in ln(R).  Tabulate ADC(T) every 5 C; decreasing with T.
@@ -69,6 +73,11 @@ for sc in range(3):
         r = r_of_t(T_MIN + T_STEP * k)
         x = RS[sc] / r + RS[sc] / RP[sc]
         tab.append(max(0, min(4095, int(round(4095.0 / (x + 1.0))))))
+# Row 3: the RH sensor NTC (m20mod get_Tntc2): beta 3650, 2.2 k at 25 C, read
+# through 22.1 k: ADC = 4095 R / (R + 22.1 k).
+for k in range(T_N):
+    r = 2.2e3 * math.exp(3650.0 * (1.0 / (T_MIN + T_STEP * k + 273.15) - 1.0 / 298.15))
+    tab.append(max(0, min(4095, int(round(4095.0 * r / (r + 22.1e3))))))
 a.u16("TEMP_TAB", tab)
 a.const("T_N", T_N)
 a.const("T_OFS10", -T_MIN * 10)

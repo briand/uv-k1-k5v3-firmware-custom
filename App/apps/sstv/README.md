@@ -11,10 +11,10 @@ boot logo in any of them (key 1).
 | Modes (`test/modes.py`, Dayton paper as MMSSTV / QSSTV / slowrx) | 14 modes; lengths = the published ones (PD120 126.1 s, Martin M1 114.3 s, ...) |
 | Model: TX schedule, radio channel, integer receiver (`test/model.py`) | **Done** (sweep below) |
 | TX sequence vs the PySSTV reference encoder (Robot36 class) | **Same** VIS and length (36.910 s); 0.8 % of the time differs, at pixel edges (128 vs 320 columns) |
-| Radio app (`sstv_app.c`) | v0.5, 3872 B of the 4 KiB overlay (224 B free; the sync re-acquisition cost 8 B) |
+| Radio app (`sstv_app.c`) | v0.7; progressive reception writes one LCD page with the resident `blit_page` (API level 3, no K5Viewer frame) so K5Viewer cannot block audio sampling; v0.6 used an app-local SPI1 page writer for the same reason |
 | Last picture kept across launches | v0.4, **works on the radio** (2026-10-13): needs a firmware with `APP_FLAG_SAVE_SCREEN` (older firmware runs the app without keeping the picture). The loader copies the screen left at exit over the `PIC` asset block (the last 1024 B) and updates the asset CRC; an update of the app erases it |
 | Sync re-acquisition | v0.5 (2026-10-13, issue #647): **not tested on the radio**, not run in `emu.py` yet. The reporter's QSSTV WAV (Robot 72) through the model, sender clock 0.5 % and 1 % fast: lost at line 20 before, whole picture after. Model, 25 ms of black between the VIS and the first line: Robot 36 lost at line 21 before, 0 px wrong after (14 modes: 0 px, 17 px in PD50 / PD90) |
-| The built app in Unicorn (`test/emu.py`) vs the model | REG_71 writes = the model's tones (Robot 36, Scottie S1, PD120); pictures identical pixel for pixel (Robot 36, Martin M1, Scottie S1, PD120), with the real LCD blit times |
+| The built app in Unicorn (`test/emu.py`) vs the model | v0.5: REG_71 writes = the model's tones (Robot 36, Scottie S1, PD120); pictures identical pixel for pixel (Robot 36, Martin M1, Scottie S1, PD120). v0.6 and v0.7 still need a run here and radio validation |
 | On the radios | v0.1 (2026-10-03): a picture starts, then nothing (see below); **v0.2 works** (Robot 36, 2026-10-03); v0.3 (all modes) not tested yet |
 
 v0.1 timed everything from differences of SysTick readings, which lose 10 ms
@@ -33,16 +33,19 @@ fails there (919 wrong pixels), v0.2 matches the model.
    For the ISS: 145.800 MHz, wide FM (Doppler ±3.5 kHz), during an announced
    ARISS SSTV event.
 2. Launch **SSTV**. It listens at once (the speaker as last left, off the first
-   time: the decoder does not need it, as in APRS RX). A known VIS starts a picture, drawn row by row over
-   the whole screen, status line included.
-3. PTT (or MENU) sends the boot logo in the TX mode (key 1). The logo is shown
-   while it goes out, each row inverted once sent. EXIT aborts. The long modes
-   keep the transmitter on for minutes (Scottie DX 269 s, PD290 289 s): low
-   power.
+   time: the decoder does not need it, as in APRS RX). A known VIS starts a
+   picture, drawn row by row over the whole screen, status line included.
+3. MENU sends the boot logo in the TX mode (key 1). The logo is shown
+   while it goes out, each row inverted once sent. EXIT aborts. PTT is
+   deliberately ignored by the SSTV app and never starts a transmission; this
+   also rejects spurious PTT events caused by cable/UART activity. The long
+   modes keep the transmitter on for minutes (Scottie DX 269 s, PD290 289 s):
+   low power.
 
 | Key | Action |
 |---|---|
-| PTT or MENU | Send the boot logo in the TX mode |
+| MENU | Send the boot logo in the TX mode |
+| PTT | Ignored; never starts an SSTV transmission |
 | 1 / F then 1 | Next / previous TX mode (Robot 36 -> ... -> PD290 -> Robot 36), shown in the left capsule; saved |
 | F | Arm the next key's backward direction (1), as APRS TX; F icon in the status bar (x = 70) while armed; F again disarms |
 | 2 | Rendering: **1-bit** (threshold, sharp for the logo; default) / **dither** (4x4 Bayer, for photos), from the next row on; right capsule; saved |
@@ -130,10 +133,13 @@ ADC channel 4, 9.6 kHz, continuously.
 
 The keys and the screen take sample time (key scan ~400 µs, one LCD page
 ~1.5 ms): in a picture they are served after each period's last scan, before
-its sync ends (5.4 ms in Martin), one page at most: the new row, else the next
-page of the screen not refreshed since the VIS (a full redraw, ~12 ms, could
-hide a sync). Out of a picture: every 50 ms unless a VIS may be on: a leader, a
-start bit begun right after one, or the VIS bits (3 s at most). Up to v0.3 a
+its sync ends (5.4 ms in Martin), one page at most. The app writes that page
+with `blit_page`, which sends no K5Viewer frame (an app-local SPI1 writer
+did it before the service existed). The resident `blit_line` also forces a
+complete K5Viewer frame; its blocking UART transfer at 38400 baud is much longer than a
+sync gap and previously produced black bands whenever the viewer was connected.
+Out of a picture, housekeeping runs every 50 ms unless a VIS may be on: a leader,
+a start bit begun right after one, or the VIS bits (3 s at most). Up to v0.3 a
 sync run alone held them off too: receiver noise, mostly low-pitched, reads as
 a sync half the time, so half the slots were skipped and a normal key press
 (60-120 ms) was often missed (`test/emu.py` key test). In a picture the keys are
@@ -176,10 +182,13 @@ the lead-in; with it, the seed of the "SNR 6 dB" case falls on a missed VIS.
    decode with the Robot36 app (Robot 36 only) or MMSSTV / QSSTV on a PC. Without
    a radio: `test/model.py wav logo.wav PD120 [dump.bin]` writes the same
    transmission as a WAV (any mode name of `test/modes.py`).
-2. **Radio to radio**: SSTV on both, PTT on one, each TX mode (key 1). The logo
+2. **Radio to radio**: SSTV on both, MENU on one, each TX mode (key 1). The logo
    should come back pixel for pixel in 1-bit.
 3. **RX from other software**: a PD120 WAV (above, or a recorded ISS pass)
    played into a radio (VOX, or acoustic coupling) to the app.
+4. **RX with K5Viewer**: repeat the same signal with the double-jack cable and
+   K5Viewer connected. The image must still draw progressively on the radio;
+   the viewer receives the completed image at the end, without black bands.
 
 If the RX picture is shifted left or right on the radio, Y_OFF (22) is the knob;
 if the VIS is missed, check the audio level at PA4 (the APRS RX `pp` reading,

@@ -6,7 +6,7 @@ set -euo pipefail
 APP="$(basename "$PWD")"
 APP_NAME="ACARS RX"
 APP_VER="0.1"
-APP_API_MIN=2
+APP_API_MIN=3
 APP_VMA=${APP_VMA:-0x20000280}
 OUT="${APP_NAME// /}"
 CC=/opt/toolchain/bin/arm-none-eabi-gcc

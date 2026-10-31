@@ -29,6 +29,7 @@
 #include "driver/bk1080.h"
 #include "app/fm.h"
 #endif
+#include "driver/gpio.h"
 #include "driver/keyboard.h"
 #include "driver/mb_flash.h"
 #include "driver/py25q16.h"
@@ -58,6 +59,11 @@
 #ifdef ENABLE_FEAT_F4HWN_OVERLAY_INFO
 #include "version.h"
 #include "stack_usage.h"
+#endif
+#ifdef ENABLE_USB
+#define APP_SERIAL 1
+#include "app/uart.h"
+#include "driver/vcp.h"
 #endif
 
 _Static_assert(sizeof(app_header_t) == 64u && _Alignof(app_header_t) == 4u,
@@ -98,6 +104,9 @@ enum {
 #ifdef ENABLE_FEAT_F4HWN_OVERLAY_INFO
                        | APP_CAP_SYSINFO
 #endif
+#ifdef APP_SERIAL
+                       | APP_CAP_SERIAL
+#endif
 };
 
 /* Keep the small zero-initialized state together so callbacks can address it
@@ -127,8 +136,28 @@ static struct {
     bool shortcuts_cached;
     uint8_t shortcut_slots[APP_SHORTCUT_COUNT];   /* per position, 0xFF = none */
     uint8_t slot_revision;
+    /* Hand-off mailbox (RAM only): the slot to launch next, plus one (0 =
+     * none); the message, its length and the sender's slot; whether the
+     * running app was launched by a hand-off it has not read yet. */
+    uint8_t handoff_next;
+    uint8_t handoff_from;
+    uint8_t handoff_len;   /* never above APP_HANDOFF_MAX */
+    bool    handoff_unread;
+#ifdef APP_SERIAL
+    /* USB serial port: the receive total at the app's read position, the
+     * events serial_ctl has not reported yet, the host configuration count it
+     * last saw, whether the app used the port. */
+    uint32_t serial_read_total;
+    uint8_t  serial_evt;
+    uint8_t  serial_enum;
+    bool     serial_used;
+#endif
     uint8_t cfg_buf[APP_CONFIG_PROXY_MAX];
+    uint8_t handoff_buf[APP_HANDOFF_MAX];
 } app_state;
+
+/* vfo_stage: the Apps menu hands back to the main screen (app_menu.c). */
+bool gAppVfoExit;
 
 /* ---- ABI wrappers: the few resident calls that are not a direct signature match ---- */
 
@@ -184,6 +213,131 @@ static void app_blit_full(void)
     /* The normal loop mirrors completed frames after drawing. Overlay apps
      * bypass that loop, so publish the frame from this ABI wrapper. */
     K5VIEWER_Update(false);
+}
+#endif
+
+/* API level 3: a K5Viewer frame without the LCD blit (lcd_feed's apps). */
+static void app_viewer_update(void)
+{
+#ifdef ENABLE_FEAT_F4HWN_K5VIEWER
+    K5VIEWER_Update(false);
+#endif
+}
+
+#ifdef APP_SERIAL
+/* ---- API level 3: serial ports ----
+ * USB only for now: APP_SERIAL_KPLUG reports no port (serial_ctl 0).  The
+ * first call drops what the main loop left unread, takes the current USB
+ * counters as the reference and holds the K5Viewer lock until the app returns
+ * (K5VIEWER_LOCK_HELD: the countdown CHIRP uses, frozen), so K5Viewer neither
+ * reads the app's bytes as viewer commands nor mixes screen frames into the
+ * app's stream, however rarely the app polls the port. */
+#define APP_SERIAL_WRITE_CYC (48000000u / 20u)   /* 50 ms for the host to take a write */
+
+_Static_assert(sizeof(VCP_RxBuf) == 256u, "the ring indexes wrap as uint8_t");
+
+static uint32_t app_cycles_raw(void);
+
+/* Drop the unread bytes and take the receive total at the new read position,
+ * with the USB interrupt held off: a packet stored in between would otherwise
+ * be counted on the wrong side.  The ISR may leave the write index at the ring
+ * size before wrapping it, hence uint8_t. */
+static void app_serial_flush(void)
+{
+    const uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+    VCP_ReadIndex = (uint8_t)VCP_RxBufPointer;
+    app_state.serial_read_total = cdc_acm_rx_total;
+    __set_PRIMASK(primask);
+}
+
+static bool app_serial_claim(uint8_t port)
+{
+    if (port != APP_SERIAL_USB)
+        return false;
+    if (!app_state.serial_used) {
+        app_state.serial_used = true;
+        app_serial_flush();
+        app_state.serial_enum = cdc_acm_config_count;
+#ifdef ENABLE_FEAT_F4HWN_K5VIEWER
+        gUART_LockK5Viewer = K5VIEWER_LOCK_HELD;
+#endif
+    }
+    return true;
+}
+
+static uint16_t app_serial_read(uint8_t port, void *buf, uint16_t len)
+{
+    if (!app_serial_claim(port))
+        return 0;
+    /* 256 bytes or more since the app's position: the ISR lapped it. */
+    const uint32_t total = cdc_acm_rx_total;
+    if (total - app_state.serial_read_total >= sizeof(VCP_RxBuf)) {
+        app_serial_flush();
+        app_state.serial_evt |= APP_SERIAL_LOST;
+    }
+    /* From the command parser's own read index, so the bytes an app consumed
+     * are never parsed as commands once the main loop resumes. */
+    const uint8_t w = (uint8_t)VCP_RxBufPointer;
+    uint8_t r = (uint8_t)VCP_ReadIndex;
+    uint8_t *p = buf;
+    uint16_t n = 0;
+    while (n < len && r != w)
+        p[n++] = VCP_RxBuf[r++];
+    VCP_ReadIndex = r;
+    app_state.serial_read_total += n;
+    return n;
+}
+
+static bool app_serial_write(uint8_t port, const void *buf, uint16_t len)
+{
+    if (!app_serial_claim(port) || !dtr_enable)
+        return false;
+    if (!len)
+        return true;
+    if (cdc_acm_start_send(buf, len)) {
+        const uint32_t t0 = app_cycles_raw();
+        while (ep_tx_busy_flag)
+            if (app_cycles_raw() - t0 >= APP_SERIAL_WRITE_CYC)
+                goto timeout;
+        return true;
+    }
+timeout:
+    cdc_acm_cancel_send();
+    app_state.serial_evt |= APP_SERIAL_TIMEOUT;
+    return false;
+}
+
+static uint8_t app_serial_ctl(uint8_t port, uint32_t baud)
+{
+    (void)baud;
+    if (!app_serial_claim(port))
+        return 0;
+    uint8_t st = APP_SERIAL_OK | app_state.serial_evt;
+    app_state.serial_evt = 0;
+    if (dtr_enable)
+        st |= APP_SERIAL_HOST;
+    const uint8_t c = cdc_acm_config_count;
+    if (c != app_state.serial_enum) {
+        app_state.serial_enum = c;
+        st |= APP_SERIAL_ENUM;
+    }
+    return st;
+}
+
+/* After the app: its half-read frames must not reach the command parser or
+ * K5Viewer once the main loop resumes. */
+static void app_serial_release(void)
+{
+    if (!app_state.serial_used)
+        return;
+    app_state.serial_used = false;
+    app_state.serial_evt  = 0;
+    app_serial_flush();
+#ifdef ENABLE_FEAT_F4HWN_K5VIEWER
+    VCP_K5ViewerSync();
+    gUART_LockK5Viewer = 0;
+#endif
 }
 #endif
 
@@ -338,6 +492,21 @@ static uint16_t app_beam_save(const app_beam_channel_t *in)
     return channel;
 }
 
+/* vfo_stage: the same staging as beam_save, aimed at the current VFO (its
+ * frequency channel) instead of the first free memory. */
+static bool app_vfo_stage(const app_beam_channel_t *in)
+{
+    if (in == NULL || app_state.beam_dirty)
+        return false;
+    if (RX_freq_check(in->rx_frequency))       /* the radio's RX range, as the keypad */
+        return false;
+    memcpy(&app_beam_pending, in, sizeof(app_beam_pending));
+    app_state.beam_pending_channel = FREQ_CHANNEL_FIRST + FREQUENCY_GetBand(in->rx_frequency);
+    app_state.beam_dirty = true;
+    gAppVfoExit = true;
+    return true;
+}
+
 /* Called only after the overlay has returned and its code no longer executes
  * from the PY25Q16 sector cache. */
 static void app_beam_commit(void)
@@ -365,11 +534,15 @@ static void app_beam_commit(void)
     app_beam_vfo.Name[sizeof(app_beam_vfo.Name) - 1u] = '\0';
 
     SETTINGS_SaveChannel(channel, gEeprom.TX_VFO, &app_beam_vfo, 3);
+    if (IS_MR_CHANNEL(channel)) {
 #ifndef ENABLE_KEEP_MEM_NAME
-    SETTINGS_SaveChannelName(channel, app_beam_vfo.Name);
+        SETTINGS_SaveChannelName(channel, app_beam_vfo.Name);
 #endif
-
-    gEeprom.MrChannel[gEeprom.TX_VFO] = channel;
+        gEeprom.MrChannel[gEeprom.TX_VFO] = channel;
+    } else {                              /* vfo_stage: the VFO, as a keypad entry */
+        gEeprom.FreqChannel[gEeprom.TX_VFO] = channel;
+        SETTINGS_SaveVfoIndices();
+    }
     gEeprom.ScreenChannel[gEeprom.TX_VFO] = channel;
     RADIO_ConfigureChannel(gEeprom.TX_VFO, VFO_CONFIGURE_RELOAD);
     RADIO_SelectVfos();
@@ -508,6 +681,172 @@ static uint16_t app_asset_read(uint16_t offset, void *buf, uint16_t len)
 extern uint64_t __aeabi_idivmod(int32_t n, int32_t d);
 extern uint64_t __aeabi_uidivmod(uint32_t n, uint32_t d);
 
+/* ---- API level 3: number formatting ----
+ * One resident copy of the decimal formatter nearly every app carried: the
+ * digits come out least significant first, one __aeabi_uidivmod each (GCC
+ * would call the divide twice for u % 10 and u / 10), then are copied back in
+ * order. Not NUL-terminated, returns the end. */
+static char *app_append_u32(char *dst, uint32_t u)
+{
+    char digits[10];
+    char *p = digits + sizeof(digits);
+    do {
+        const uint64_t qr = __aeabi_uidivmod(u, 10u);
+        *--p = (char)('0' + (uint32_t)(qr >> 32));
+        u = (uint32_t)qr;
+    } while (u);
+    do
+        *dst++ = *p++;
+    while (p < digits + sizeof(digits));
+    return dst;
+}
+
+static char *app_append_i32(char *dst, int32_t v)
+{
+    uint32_t u = (uint32_t)v;
+    if (v < 0) {
+        *dst++ = '-';
+        u = 0u - u;
+    }
+    return app_append_u32(dst, u);
+}
+
+/* ---- API level 3: the frequency as the main screen draws it ----
+ * ui/main.c with ENABLE_BIG_FREQ: below 1 GHz, "144.800" in the big digits,
+ * then the last two digits ("00") in the small font on the lower line, right
+ * after them (95 px in all); from 1 GHz, the whole string in the normal font
+ * (80 px). The drawing routines do not clip, so x is held where both fit. */
+#define APP_FREQ_X_MAX  (128u - 95u)
+
+static void app_draw_frequency(uint32_t f_10hz, uint8_t x, uint8_t line)
+{
+    char s[16];
+    const uint64_t mhz = __aeabi_uidivmod(f_10hz, 100000u);
+    uint32_t rest = (uint32_t)(mhz >> 32);
+    char *o = app_append_u32(s, (uint32_t)mhz);
+    *o++ = '.';
+    for (char *d = o + 5; d > o; ) {
+        const uint64_t qr = __aeabi_uidivmod(rest, 10u);
+        *--d = (char)('0' + (uint32_t)(qr >> 32));
+        rest = (uint32_t)qr;
+    }
+    o[5] = '\0';
+    if (x > APP_FREQ_X_MAX)
+        x = APP_FREQ_X_MAX;
+    if ((uint32_t)mhz >= 1000u) {
+        UI_PrintString(s, x, 0, line, 8);
+        return;
+    }
+    o += 3;                          /* the last two digits */
+    UI_PrintStringSmallNormal(o, (uint8_t)(x + (o - s - 1) * 13 + 3), 0, (uint8_t)(line + 1u));
+    *o = '\0';
+    UI_DisplayFrequency(s, x, line, false);
+}
+
+/* ---- API level 3: RX audio capture on PA4 ----
+ * The sequence the PA4 apps proved on the radio (EPIRB 406 first): PA4 has no
+ * DC reference of its own, so the MCU DAC (channel 1, output buffer off,
+ * software trigger) holds it at mid-scale for the whole capture; the ADC reads
+ * channel 4 with the sample time the battery channel 8 was given. One app
+ * runs at a time, so the snapshot lives here instead of in each overlay. */
+#define APP_AFC_ADC_CH_PA4  4u
+#define APP_AFC_SMP4_POS    12u
+#define APP_AFC_SMP8_POS    24u
+#define APP_AFC_DAC_BIAS    ((1u << 0) | (1u << 1) | (1u << 2) | (7u << 3))  /* EN1 BOFF1 TEN1 TSEL1=111 */
+#define APP_AFC_BIAS_CODE   2048u
+
+static struct {
+    uint32_t moder, rcc, dac, dhr, sqr3, smpr3;
+    bool     open;
+} app_afc;
+
+static void app_afc_select_pa4(void)
+{
+    ADC1->SMPR3 = (app_afc.smpr3 & ~(7u << APP_AFC_SMP4_POS)) |
+                  (((app_afc.smpr3 >> APP_AFC_SMP8_POS) & 7u) << APP_AFC_SMP4_POS);
+    ADC1->SQR3  = (app_afc.sqr3 & ~0x1Fu) | APP_AFC_ADC_CH_PA4;
+}
+
+static void app_afc_select_battery(void)
+{
+    ADC1->SQR3  = app_afc.sqr3;
+    ADC1->SMPR3 = app_afc.smpr3;
+}
+
+static void app_af_capture_open(void)
+{
+    if (app_afc.open)
+        return;
+    app_afc.moder = GPIOA->MODER;
+    app_afc.rcc   = RCC->APBENR1;
+    app_afc.dac   = DAC1->CR;
+    app_afc.dhr   = DAC1->DHR12R1;
+    app_afc.sqr3  = ADC1->SQR3;
+    app_afc.smpr3 = ADC1->SMPR3;
+    app_afc.open  = true;
+    GPIOA->MODER  = app_afc.moder | (3u << 8);      /* PA4 analog */
+    RCC->APBENR1  = app_afc.rcc | RCC_APBENR1_DACEN;
+    DAC1->CR      = APP_AFC_DAC_BIAS;
+    DAC1->DHR12R1 = APP_AFC_BIAS_CODE;
+    DAC1->SWTRIGR = 1u;                             /* DHR -> DOR */
+    app_afc_select_pa4();
+}
+
+static uint16_t app_af_capture_sample(void)
+{
+    ADC1->CR2 |= ADC_CR2_SWSTART | ADC_CR2_EXTTRIG;
+    for (uint16_t n = 0; !(ADC1->SR & ADC_SR_EOC) && n < 2000u; n++) {}
+    return (uint16_t)(ADC1->DR & 0x0FFFu);
+}
+
+static void app_af_capture_close(void)
+{
+    if (!app_afc.open)
+        return;
+    app_afc.open = false;
+    app_afc_select_battery();
+    DAC1->CR      = app_afc.dac;
+    DAC1->DHR12R1 = app_afc.dhr;
+    RCC->APBENR1  = app_afc.rcc;
+    GPIOA->MODER  = app_afc.moder;
+}
+
+/* ---- API level 3: 48 MHz cycle clock ----
+ * Re-read the tick until it is stable around the SysTick read. A reload the
+ * interrupt has not served yet leaves the tick one behind: then count it and
+ * take a fresh, post-reload phase.
+ * At every launch the count is set APP_CYC_DIAGNOSTIC_WRAP_S seconds before
+ * its 32-bit wrap, as Linux starts jiffies before theirs: an app that compares
+ * it without a signed difference fails a few seconds after it starts, every
+ * run, instead of once in a while depending on radio uptime. */
+#define APP_CYC_HZ                 48000000u
+#define APP_CYC_DIAGNOSTIC_WRAP_S  10u
+_Static_assert(APP_CYC_DIAGNOSTIC_WRAP_S > 0u &&
+               APP_CYC_DIAGNOSTIC_WRAP_S <= INT32_MAX / APP_CYC_HZ,
+               "the diagnostic wrap must fit the signed deadline window");
+#define APP_CYC_DIAGNOSTIC_START \
+    (0u - APP_CYC_HZ * APP_CYC_DIAGNOSTIC_WRAP_S)
+static uint32_t app_cyc_base;
+
+static uint32_t app_cycles_raw(void)
+{
+    uint32_t tick, val;
+    do {
+        tick = SCHEDULER_GetTick10ms();
+        val  = SysTick->VAL;
+    } while (tick != SCHEDULER_GetTick10ms());
+    if (SCB->ICSR & SCB_ICSR_PENDSTSET_Msk) {
+        val = SysTick->VAL;
+        tick++;
+    }
+    return tick * (SysTick->LOAD + 1u) + (SysTick->LOAD - val);
+}
+
+static uint32_t app_cycles_48mhz(void)
+{
+    return app_cycles_raw() + app_cyc_base;
+}
+
 /* ---- v2 battery / backlight ---- */
 static void app_draw_battery(void)
 {
@@ -516,7 +855,25 @@ static void app_draw_battery(void)
 }
 static void app_battery_sample(void)
 {
-    BATTERY_Sample(false);
+    BATTERY_Sample(false);   /* yields an open capture's ADC by itself */
+}
+
+/* BOARD_ADC_GetBatteryInfo() converts whatever channel the ADC is set to, so
+ * with a capture open it would read the RX audio as the battery voltage. It
+ * calls these two around every conversion: the battery channel 8 for the
+ * read, then PA4 back. Any resident battery read is covered that way, not
+ * only the battery_sample() service. */
+bool APP_AfCaptureYieldAdc(void)
+{
+    if (!app_afc.open)
+        return false;
+    app_afc_select_battery();
+    return true;
+}
+
+void APP_AfCaptureResumeAdc(void)
+{
+    app_afc_select_pa4();
 }
 
 /* ---- v2 TX (beacon) ---- */
@@ -655,6 +1012,68 @@ static void app_config_proxy_resolve(void)
         app_state.cfg_proxy_len     = proxy.target_len;
         return;
     }
+}
+
+/* ---- hand-off (API level 3) ----
+ * handoff() only resolves the target and stages the message; the launch happens
+ * in APP_LaunchOverlay once the running app has returned and its config is
+ * committed, so the overlay is never overwritten under the running code. */
+_Static_assert(APP_HANDOFF_MAX >= 1u && APP_HANDOFF_MAX <= UINT8_MAX,
+               "hand-off lengths are uint8_t: a larger mailbox would wrap the clamp");
+
+/* A header's NUL-padded name against a C string, like strncmp over
+ * APP_NAME_LEN: never reads name past its NUL, nor past APP_NAME_LEN bytes. */
+static bool app_name_is(const char field[APP_NAME_LEN], const char *name)
+{
+    for (uint8_t i = 0; i < APP_NAME_LEN; i++) {
+        if (field[i] != name[i])
+            return false;
+        if (name[i] == '\0')
+            return true;
+    }
+    return true;
+}
+
+static bool app_handoff(const char *name, const void *msg, uint8_t len)
+{
+    /* The last call wins: start from an empty mailbox, which a failed call
+     * leaves as is.  It also drops a message this app has not read. */
+    app_state.handoff_next   = 0;
+    app_state.handoff_len    = 0;
+    app_state.handoff_unread = false;
+    const uint32_t overlay_vma = (uint32_t)PY25Q16_OverlayBuffer();
+    for (uint8_t slot = 0; slot < APP_SLOT_COUNT; slot++) {
+        app_header_t h;
+        if (app_read_validated_header(slot, &h) != APP_OK ||
+            h.link_vma != overlay_vma || !app_name_is(h.name, name))
+            continue;
+        if (len > APP_HANDOFF_MAX)
+            len = APP_HANDOFF_MAX;   /* bounds the copy into handoff_buf */
+        if (len)
+            memcpy(app_state.handoff_buf, msg, len);
+        app_state.handoff_len  = len;
+        app_state.handoff_from = app_state.run_slot;
+        app_state.handoff_next = slot + 1u;
+        return true;
+    }
+    return false;
+}
+
+static int16_t app_handoff_read(void *buf, uint8_t max, char *from)
+{
+    if (!app_state.handoff_unread)
+        return -1;
+    app_state.handoff_unread = false;   /* read once */
+    const uint8_t len = app_state.handoff_len;
+    const uint8_t n = len < max ? len : max;   /* bounds the copy into the app's buf */
+    if (n)
+        memcpy(buf, app_state.handoff_buf, n);
+    if (from) {
+        PY25Q16_ReadBuffer(APP_SLOT_BASE(app_state.handoff_from) +
+                           offsetof(app_header_t, name), from, APP_NAME_LEN);
+        from[APP_NAME_LEN] = '\0';
+    }
+    return len;
 }
 
 uint8_t APP_ValidateSlot(uint8_t slot, app_header_t *out_header)
@@ -872,9 +1291,42 @@ static const app_api_t app_api = {
     .sys_stack_free_now  = STACK_FreeNow,
     .sys_stack_free_min  = STACK_FreeMinimum,
 #endif
+    .append_i32          = app_append_i32,
+    .af_capture_open     = app_af_capture_open,
+    .af_capture_sample   = app_af_capture_sample,
+    .af_capture_close    = app_af_capture_close,
+    .cycles_48mhz        = app_cycles_48mhz,
+    .draw_frequency      = app_draw_frequency,
+    .append_u32          = app_append_u32,
+    /* Outside the block above: the hand-off is a loader service, available
+     * wherever overlay apps are (this whole file), with or without the
+     * system information; inside it, an app would call a NULL pointer. */
+    .handoff             = app_handoff,
+    .handoff_read        = app_handoff_read,
+    .tx_prepare          = RADIO_PrepareTx,
+#ifdef APP_SERIAL
+    .serial_read         = app_serial_read,
+    .serial_write        = app_serial_write,
+    .serial_ctl          = app_serial_ctl,
+#endif
+    .blit_page           = ST7565_BlitScreen,
+    .lcd_feed            = ST7565_Feed,
+    .viewer_update       = app_viewer_update,
+#ifdef ENABLE_FEAT_F4HWN_OVERLAY_BEAM
+    .vfo_stage           = app_vfo_stage,
+#endif
 };
 
-uint8_t APP_LaunchOverlay(uint8_t slot)
+/* Hand-off guards: a chain of apps that hand off to each other for ever (a
+ * bug, or two apps that each start the other) would otherwise only end with a
+ * power cycle, and commit their config to flash on every hop.  A long EXIT
+ * press between two apps ends it; so do APP_HANDOFF_FAST_HOPS hand-offs in a
+ * row from apps that each ran less than APP_HANDOFF_FAST_10MS, faster than
+ * a user reads a screen and presses a key. */
+#define APP_HANDOFF_FAST_10MS 30u   /* 300 ms */
+#define APP_HANDOFF_FAST_HOPS 8u
+
+static uint8_t app_launch(uint8_t slot)
 {
     app_header_t h;
     uint8_t rc = app_read_validated_header(slot, &h);
@@ -968,7 +1420,14 @@ uint8_t APP_LaunchOverlay(uint8_t slot)
     RADIO_SetupRegisters(true);
 
     app_entry_t entry = (app_entry_t)(((uint32_t)ws + h.entry_off) | 1u);
+    app_cyc_base = APP_CYC_DIAGNOSTIC_START - app_cycles_raw();
     entry(&app_api);
+
+    /* A capture the app left open must not keep PA4 and the DAC. */
+    app_af_capture_close();
+#ifdef APP_SERIAL
+    app_serial_release();
+#endif
 
     /* First thing after the app: nothing has drawn over its last screen yet. */
     if (h.flags & APP_FLAG_SAVE_SCREEN)
@@ -1036,6 +1495,51 @@ uint8_t APP_LaunchOverlay(uint8_t slot)
     RXTX_LOG_Resume();
 #endif
     return APP_OK;
+}
+
+bool APP_WaitKeyRelease(void)
+{
+    uint8_t stable = 0;
+    uint8_t exit_left = 100;   /* polls of EXIT down before it counts as held */
+    while (stable < 10u) {
+        const KEY_Code_t key = KEYBOARD_Poll();
+        if (!GPIO_IsPttPressed() && key == KEY_INVALID)
+            stable++;
+        else
+            stable = 0;
+        if (key == KEY_EXIT && exit_left)
+            exit_left--;
+        SYSTEM_DelayMs(10);
+        APP_ModalBacklightTick(true);
+    }
+    return !exit_left;
+}
+
+uint8_t gAppLastSlot;
+
+/* Run the app, then each app it hands off to, in a loop (no recursion, so no
+ * stack growth).  Returns the result of the last app of the chain, which
+ * gAppLastSlot names: the one that ended it, or a hand-off target
+ * that failed to launch.  A runaway-chain guard returns APP_CHAIN_ABORTED. */
+uint8_t APP_LaunchOverlay(uint8_t slot)
+{
+    gAppVfoExit = false;   /* result belongs only to this top-level launch */
+    uint8_t fast_hops = 0;
+    app_state.handoff_unread = false;   /* a menu or shortcut launch carries no message */
+    for (;;) {
+        gAppLastSlot = slot;
+        app_state.handoff_next = 0;
+        const uint32_t started = SCHEDULER_GetTick10ms();
+        const uint8_t rc = app_launch(slot);
+        if (rc != APP_OK || !app_state.handoff_next)
+            return rc;
+        slot = app_state.handoff_next - 1u;
+        fast_hops = SCHEDULER_GetTick10ms() - started < APP_HANDOFF_FAST_10MS ? fast_hops + 1u : 0u;
+        /* The key that ended the sender must not reach the target as a press. */
+        if (APP_WaitKeyRelease() || fast_hops >= APP_HANDOFF_FAST_HOPS)
+            return APP_CHAIN_ABORTED;
+        app_state.handoff_unread = true;   /* until read, or the target's own handoff() */
+    }
 }
 
 uint8_t APP_SlotErase(uint8_t slot)

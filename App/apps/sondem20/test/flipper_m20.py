@@ -47,12 +47,17 @@ def test_frame():
     frame[1] = 0x20
     frame[0x04:0x06] = (0x0509).to_bytes(2, "little")
     put_be(frame, 0x08, 120000, 3)
+    # 8 m/s east, 3 m/s south, 5.2 m/s up, in cm/s (mXXmod)
+    put_be(frame, 0x0B, 800, 2)
+    put_be(frame, 0x0D, -300 & 0xFFFF, 2)
+    put_be(frame, 0x18, 520, 2)
     serial = (1234 << 10) | 29
     frame[0x12:0x15] = serial.to_bytes(3, "little")
     frame[0x15] = 7
-    frame[0x16] = 0
-    frame[0x24] = 0x00
-    frame[0x25] = 0x10
+    # Humidity: humval 30000, rh_cal 32389, RH sensor NTC 447 (20 C): 45 %RH
+    frame[0x02:0x04] = (30000).to_bytes(2, "little")
+    frame[0x2F:0x31] = (32389).to_bytes(2, "little")
+    frame[0x06:0x08] = (447).to_bytes(2, "little")
     put_be(frame, 0x1C, 48800000, 4)
     put_be(frame, 0x20, 2300000, 4)
     frame[0x43] = 7
@@ -121,7 +126,8 @@ def test_cases():
     assert check_m10(bad_crc[:crc_pos]) != int.from_bytes(bad_crc[crc_pos:crc_pos + 2], "big")
     chips = frame_chips(valid)
     return {
-        "valid": (chips, "206-1-01234, 48.80000N 2.30000E, ALT 1200m, T 24.1C, 256.0hPa"),
+        "valid": (chips, "206-1-01234, 48.8000N 2.3000E, ALT 1200m VS+5.2, T 24.1C RH 45%, "
+                           "HS 9m/s HDG 111"),
         "inverted": ([1 ^ chip for chip in chips], "same frame, inverted RF polarity"),
         "badcrc": (frame_chips(bad_crc), "rejected: FRAME must not increment"),
     }

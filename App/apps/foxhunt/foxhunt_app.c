@@ -105,23 +105,11 @@ _Static_assert(offsetof(struct globals, prevKey) < 32u, "byte fields out of ldrb
 /* ---- tiny formatting ---- */
 static uint8_t slen(const char *s){ uint8_t n=0; while(s[n])n++; return n; }
 static char *put(char *o,const char *s){ while(*s)*o++=*s++; return o; }
-/* Decimal digits of u, no leading zeros, by subtracting the powers of ten. */
-static char *putu(char *o,uint32_t u){
-    uint32_t place[PLACE_LEN/4u];
-    A->asset_read(PLACE,place,sizeof(place));
-    bool lead=true;
-    for(uint8_t i=0;i<PLACE_LEN/4u;i++){
-        uint8_t d=0;
-        while(u>=place[i]){ u-=place[i]; d++; }
-        if(d||i==PLACE_LEN/4u-1u) lead=false;
-        if(!lead) *o++=(char)('0'+d);
-    }
-    return o;
-}
-static char *puti(char *o,int v){
-    if(v<0){ *o++='-'; v=-v; }
-    return putu(o,(uint32_t)v);
-}
+/* The resident formatter (API level 3). One local stub keeps every call a
+ * plain bl: the service lies past the ldr immediate range of the table. The
+ * values printed (dBm, dB, the RX frequency in 10 Hz units) all fit int32. */
+__attribute__((noinline))
+static char *puti(char *o,int v){ return A->append_i32(o,v); }
 static void i2str(char *out,int v){ *puti(out,v)='\0'; }
 
 /* Text from the assets in the caller's buffer (TEXT_MAX bytes). */
@@ -292,7 +280,7 @@ static void draw(void){
 
     /* the RX frequency (10 Hz units) as MHz with 5 decimals: every digit, then
        the point before the last five (f >= 18 MHz: at least 7 digits) */
-    { char *e=putu(str,A->rx_freq());
+    { char *e=puti(str,(int)A->rx_freq());
       e[1]='\0';
       for(uint8_t k=0;k<5u;k++,e--) e[0]=e[-1];
       e[0]='.'; }

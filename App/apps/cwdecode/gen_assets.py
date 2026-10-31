@@ -18,6 +18,7 @@ UI = [
     ("T_WPM", "WPM "),
     ("T_MORSE", "MORSE"),
     ("T_WAIT", "WAITING"),
+    ("T_XTAL", "XTAL "),
 ]
 
 a = Assets("CWDECODE")
@@ -31,11 +32,11 @@ a.const("T_TITLE_CHARS", len(TITLE))
 a.text("T_HELP", "HELP")
 a.text("T_HELP_UNIT_1", "Threshold and RSSI")
 a.text("T_HELP_UNIT_2", "are in dBm")
-a.table("T_HELP_LEFT", [
+# The left column (help lines 1 to 6), then the right one; "" leaves a slot
+# empty.
+a.table("T_HELP_KEYS", [
     "0 SPEAKER", "1 THRESHOLD", "2 WPM", "3 AGC", "4 CAL", "5 CLEAR",
-])
-a.table("T_HELP_RIGHT", [
-    "* FONT", "F+ DECREASE", "UP/DN SCROLL", "", "", "",
+    "6 XTAL", "* FONT", "F+ DECREASE", "UP/DN SCROLL", "", "",
 ])
 
 
@@ -105,9 +106,6 @@ for index, char in {
     morse[index] = ord(char)
 a.raw("MORSE_TREE", morse)
 
-# Decimal places are cached once by the app and avoid divisions in the
-# frequently refreshed signal and frequency formatting paths.
-a.u32("DECIMAL_PLACES", [10 ** exponent for exponent in range(9, -1, -1)])
 
 up = [0x04, 0x06, 0x07, 0x06, 0x04]
 down = [0x10, 0x30, 0x70, 0x30, 0x10]
@@ -125,4 +123,14 @@ a.u8("BMP_SPEAKER", [0x1C, 0x1C, 0x3E, 0x7F, 0x00,
 a.u8("BMP_AGC", [0x3E, 0x7F, 0x43, 0x75, 0x43, 0x7F, 0x63, 0x5D, 0x45, 0x7F,
                  0x63, 0x5D, 0x5D, 0x7F, 0x3E])
 a.raw("BMP_CAL_SCREEN", calibration_screen())
+# BK4829 register / value pairs that configureCwRx writes, in this order,
+# between REG_31 and the audio gain (same values as CW Keyer).
+a.u16("RX_PROFILE", [
+    0x42, 0x6B5A,   # RX level
+    0x2A, 0x7400,   # RX filter 1
+    0x2B, 0x0000,   # RX filter 2
+    0x2F, 0x9890,   # RX filter 3
+    0x54, 0x9009,   # audio 1
+    0x55, 0x31A9,   # audio 2
+])
 a.main()

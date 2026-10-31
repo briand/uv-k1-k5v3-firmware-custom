@@ -16,7 +16,8 @@
 #define LOOP_MS       10u
 #define EDIT_CHARS    11u    /* comment: normal-font characters per pane row   */
 #define EDIT_ROWS     6u     /* rows above the bottom capsules: no scrolling   */
-#define PATH_MAX      2u
+#define PATH_WIDE2    2u     /* "WIDE1-1,WIDE2-1": its second hop on a second line */
+#define PATH_MAX      3u     /* "ARISS", the ISS digipeater alias */
 #define LAT_DIGITS    6u
 #define INDEX_SEP_X   48u
 #define PANE_X        50u
@@ -53,7 +54,7 @@ static struct {
     uint8_t mode, screen, item, preset, active_preset;
     uint8_t pending_key, pending_pos, cycle, held_key;
     uint16_t pending_ticks, held_ticks;
-    bool pending, long_fired, dirty, changed, running, missing, bad;
+    bool pending, long_fired, dirty, changed, running, missing, bad, return_to_tx;
 } g;
 
 void *memcpy(void *dst, const void *src, size_t n)
@@ -70,15 +71,12 @@ void *memset(void *dst, int value, size_t n)
     return dst;
 }
 
+/* The resident formatter (API level 3). One local stub keeps every call a
+ * plain bl: the service lies past the ldr immediate range of the table. */
+__attribute__((noinline))
 static char *put_u8(char *out, uint8_t value)
 {
-    if (value >= 10u) {
-        *out = '0';
-        while (value >= 10u) { (*out)++; value -= 10u; }
-        out++;
-    }
-    *out++ = (char)('0' + value);
-    return out;
+    return g.A->append_i32(out, value);
 }
 
 /* "3/7" */
@@ -174,12 +172,12 @@ static void draw_menu(const char *assets)
 /* The path name, in bold while it is being edited (as the SSID and symbol). */
 static void draw_path(const char *assets, uint8_t path, bool bold)
 {
-    /* The first hop never moves: "DIRECT" or "WIDE1-1" on line 2. The longest
-     * path adds its second hop on the line below, read after the comma of its
-     * own name "WIDE1-1,WIDE2-1". */
+    /* The first hop never moves: "DIRECT", "WIDE1-1" or "ARISS" on line 2.
+     * The two-hop path shows "WIDE1-1" there and adds its second hop on the
+     * line below, read after the comma of its own name "WIDE1-1,WIDE2-1". */
     const char *paths = assets + T_PATHS;
-    pane(paths + (path ? T_PATHS_STRIDE : 0u), 2u, bold);
-    if (path == PATH_MAX) pane(paths + PATH_MAX * T_PATHS_STRIDE + 8u, 3u, bold);
+    pane(paths + (path == PATH_WIDE2 ? 1u : path) * T_PATHS_STRIDE, 2u, bold);
+    if (path == PATH_WIDE2) pane(paths + PATH_WIDE2 * T_PATHS_STRIDE + 8u, 3u, bold);
 }
 
 /* The comment in rows of the normal font. */
@@ -405,6 +403,7 @@ static void index_key(uint8_t key)
     if (key == APP_KEY_MENU) open_editor();
     else if (key == APP_KEY_EXIT) {
         if (g.changed) g.A->cfg_save(g.profile, APRS_PROFILE_LEN);
+        if (g.return_to_tx) g.A->handoff(APRS_TX_APP_NAME, NULL, 0u);
         g.running = false;
     } else g.item = step(g.item, g.A->nav_dir(key), MENU_COUNT);
 }
@@ -470,7 +469,7 @@ static void preset_key(uint8_t key)
 
 static void short_key(uint8_t key)
 {
-    if (g.missing) { if (key == APP_KEY_EXIT) g.running = false; return; }
+    if (g.missing) { if (key == APP_KEY_EXIT) index_key(key); return; }
     if (g.screen == SCREEN_INDEX) index_key(key);
     else if (g.screen == SCREEN_PRESET) preset_key(key);
     else edit_key(key);
@@ -482,10 +481,13 @@ void app_main(const app_api_t *api)
 {
     uint8_t block[APRS_PROFILE_LEN], backup[APRS_PROFILE_LEN];
     char custom[APRS_COMMENT_MAX];
+    uint8_t request = 0u;
     uint32_t magic;
     g.A = api; g.profile = block; g.backup = backup; g.custom = custom;
     g.held_key = APP_KEY_INVALID; g.pending_key = APP_KEY_INVALID;
     g.running = true; g.dirty = true;
+    const int16_t handoff_len = api->handoff_read(&request, sizeof request, NULL);
+    g.return_to_tx = handoff_len >= 1 && request == APRS_HANDOFF_EDIT_RETURN;
     api->cfg_load(block, sizeof(block));
     memcpy(&magic, block, sizeof(magic));
     g.missing = magic != APRS_PROFILE_MAGIC ||

@@ -655,7 +655,11 @@ void MR_PrintCacheStats(void)
     bool K5VIEWER_IsLocked(void) 
     {
         if (gUART_LockK5Viewer > 0) {
-            gUART_LockK5Viewer--;
+#if defined(ENABLE_USB) && defined(ENABLE_FEAT_F4HWN_OVERLAY_APPS)
+            // Released by the overlay loader when the app returns
+            if (gUART_LockK5Viewer != K5VIEWER_LOCK_HELD)
+#endif
+                gUART_LockK5Viewer--;
             return true;
         }
         

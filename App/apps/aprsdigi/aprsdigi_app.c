@@ -22,34 +22,9 @@
 #include "../app_api.h"
 #include "aprsdigi_assets.h"
 
-static inline volatile uint32_t *hw(uint32_t a){
-    volatile uint32_t *p=(volatile uint32_t *)a;
-    __asm__("" : "+l"(p));
-    return p;
-}
-
-#define SYST_LOAD   (*(volatile uint32_t *)0xE000E014u)
-#define SYST_VAL    (*(volatile uint32_t *)0xE000E018u)
-#define ADC_SR      (hw(0x40012400u)[0x00/4])
-#define ADC_CR2     (hw(0x40012400u)[0x08/4])
-#define ADC_SMPR3   (hw(0x40012400u)[0x14/4])
-#define ADC_SQR3    (hw(0x40012400u)[0x38/4])
-#define ADC_DR      (hw(0x40012400u)[0x50/4])
-#define GPIOA_MODER (*(volatile uint32_t *)0x50000000u)
-#define DAC_CR      (hw(0x40007400u)[0x00/4])
-#define DAC_SWTRIGR (hw(0x40007400u)[0x04/4])
-#define DAC_DHR12R1 (hw(0x40007400u)[0x08/4])
-#define RCC_APBENR1 (*(volatile uint32_t *)0x4002103Cu)
-
-#define RCC_DACEN      (1u << 29)
-#define DAC_CR_BIAS    ((1u << 0) | (1u << 1) | (1u << 2) | (7u << 3))
+/* PA4 audio capture and the 48 MHz cycle clock are resident (API level 3);
+ * the capture holds PA4 at mid-scale (ADC code 2048). */
 #define BIAS_CODE      2048u
-#define ADC_SR_EOC     (1u << 1)
-#define ADC_CR2_START  ((1u << 22) | (1u << 20))
-#define SMP8_POS       24u
-#define SMP4_POS       12u
-#define ADC_CH_PA4     4u
-
 #define FS             9600u
 #define CYC_PER_SAMPLE (48000000u / FS)
 #define CYC_PER_BIT    (48000000u / 1200u)
@@ -126,8 +101,7 @@ static struct {
     uint8_t mode;
     const app_api_t *A;
     uint8_t *pendingBuf;
-    uint32_t pendingAt, freeAt, lastHash, lastAt, tPrev, tCyc, next;
-    uint32_t savedSqr3, savedSmpr3;
+    uint32_t pendingAt, freeAt, lastHash, lastAt, next;
     dupe_t seen[DUPE_SLOTS];
 } g;
 
@@ -140,34 +114,9 @@ void *memcpy(void *d,const void *s,size_t n){
 
 static void inc(uint16_t *v){ if(*v<9999u) (*v)++; }
 
-static void clkStart(void){ g.tPrev=SYST_VAL; g.tCyc=0; }
-static uint32_t clkCyc(void){
-    uint32_t v=SYST_VAL;
-    g.tCyc+=(v<=g.tPrev)?g.tPrev-v:g.tPrev+(SYST_LOAD+1u-v);
-    g.tPrev=v;
-    return g.tCyc;
-}
-
-static void biasOn(uint32_t moder,uint32_t rcc){
-    GPIOA_MODER=moder|(3u<<8);
-    RCC_APBENR1=rcc|RCC_DACEN;
-    DAC_CR=DAC_CR_BIAS;
-    DAC_DHR12R1=BIAS_CODE;
-    DAC_SWTRIGR=1u;
-}
-static void biasOff(uint32_t dac,uint32_t dhr,uint32_t rcc,uint32_t moder){
-    DAC_CR=dac; DAC_DHR12R1=dhr; RCC_APBENR1=rcc; GPIOA_MODER=moder;
-}
-static void adcSelPA4(void){
-    ADC_SMPR3=(g.savedSmpr3&~(7u<<SMP4_POS))|(((g.savedSmpr3>>SMP8_POS)&7u)<<SMP4_POS);
-    ADC_SQR3=(g.savedSqr3&~0x1Fu)|ADC_CH_PA4;
-}
-static void adcRestore(void){ ADC_SQR3=g.savedSqr3; ADC_SMPR3=g.savedSmpr3; }
-static uint16_t adcRead(void){
-    ADC_CR2|=ADC_CR2_START;
-    for(uint16_t n=0;!(ADC_SR&ADC_SR_EOC)&&n<2000u;n++){}
-    return (uint16_t)(ADC_DR&0x0FFFu);
-}
+/* The resident cycle clock, for the TX bit timing (the receiver holds the
+ * service in a register). */
+static uint32_t clkCyc(void){ return g.A->cycles_48mhz(); }
 
 __attribute__((noinline))
 static uint16_t crcByte(uint16_t c,uint8_t v){
@@ -386,7 +335,7 @@ static void send(void){
     A->bk_write(REG_51,0);
     A->tx_tone(1200);
     g.space=false; setTone();
-    clkStart(); g.next=CYC_PER_BIT;
+    g.next=clkCyc()+CYC_PER_BIT;
     for(uint8_t i=0;i<TXDELAY_FLAGS;i++) sendByte(0x7Eu,false);
     g.ones=0;
     for(uint16_t i=0;i<g.pendingLen;i++) sendByte(g.pendingBuf[i],true);
@@ -401,20 +350,11 @@ static void send(void){
     inc(&g.digi);
 }
 
-static const uint16_t p10[]={10000u,1000u,100u,10u,1u};
-static char *putu(char *o,uint16_t v){
-    bool lead=false;
-    for(uint8_t i=0;i<4u;i++){
-        uint8_t n=0; while(v>=p10[i+1u]){ v-=p10[i+1u]; n++; }
-        if(n||lead||i==3u){ *o++=(char)('0'+n); lead=true; }
-    }
-    return o;
-}
-static char *puti(char *o,int16_t v){
-    uint16_t u=(uint16_t)v;
-    if(v<0){ *o++='-'; u=(uint16_t)(-v); }
-    return putu(o,u);
-}
+/* The resident formatter (API level 3). One local stub keeps every call a
+ * plain bl: the service lies past the ldr immediate range of the table. */
+__attribute__((noinline))
+static char *puti(char *o,int32_t v){ return g.A->append_i32(o,v); }
+#define putu puti
 static char *text(uint16_t off,char *s){ g.A->asset_read(off,s,TEXT_MAX); return s; }
 static void field(uint8_t x,uint8_t line,uint16_t label,uint16_t value,char *s){
     char *o=s; text(label,s); while(*o) o++;
@@ -422,21 +362,6 @@ static void field(uint8_t x,uint8_t line,uint16_t label,uint16_t value,char *s){
     g.A->print_normal(s,x,0,line);
     g.A->print_bold(v,(uint8_t)(x+(uint8_t)(v-s)*7u),0,line);
 }
-static uint8_t sub32(uint32_t *v,uint32_t d){
-    uint8_t n=0; while(*v>=d){ *v-=d; n++; } return n;
-}
-static void drawFreq(uint32_t f,char *s){
-    uint16_t mhz=0;
-    while(f>=100000u){ f-=100000u; mhz++; }
-    char *o=putu(s,mhz); *o++='.';
-    for(uint8_t i=0;i<5u;i++) *o++=(char)('0'+sub32(&f,p10[i]));
-    *o='\0';
-    uint8_t n=(uint8_t)(o-s),big=(uint8_t)(n-3u);
-    g.A->print_normal(s+n-2u,(uint8_t)(big*13u+3u),0,5);
-    s[n-2u]='\0';
-    g.A->display_freq(s,0,4,false);
-}
-
 static void draw(void){
     const app_api_t *A=g.A;
     char s[TEXT_MAX+5u];
@@ -460,7 +385,7 @@ static void draw(void){
     field(65,2,T_DROP,g.drops,s);
     uint8_t *b=A->fb[0];
     for(uint8_t x=0;x<128u;x+=2u){ b[384u+x]|=0x80u; b[385u+x]&=0x7Fu; }
-    drawFreq(A->rx_freq(),s);
+    g.A->draw_frequency(A->rx_freq(),0,4);   /* the main screen's big digits, lines 4-5 */
     if(g.rx){
         char *o=puti(s,g.rssi);
         A->asset_read(T_DBM,o,T_DBM_LEN);
@@ -490,11 +415,9 @@ static void house(void){
         }else g.freeAt=0;
     }
 
-    adcRestore();
-    A->battery_sample();
+    A->battery_sample();         /* yields the capture's ADC itself */
     if(++g.refresh>=REFRESH_SLOTS){ g.refresh=0; draw(); }
     A->backlight_update();
-    adcSelPA4();
 }
 
 __attribute__((noinline))
@@ -508,15 +431,18 @@ reset:
     sl[1].wa=1; sl[1].wb=1;
     sl[2].wa=3; sl[2].wb=2;
     g.resetRx=false;
-    adcSelPA4(); clkStart();
-    uint32_t next=0;
+    /* The two per-sample services, held in registers: their table slots lie
+     * past the ldr immediate range. */
+    uint32_t (*const clk)(void)=g.A->cycles_48mhz;
+    uint16_t (*const sample)(void)=g.A->af_capture_sample;
+    uint32_t next=clk();
     uint16_t cnt=0;
     uint8_t busyFor=0;
     while(g.running){
-        while((int32_t)(clkCyc()-next)<0){}
+        while((int32_t)(clk()-next)<0){}
         next+=CYC_PER_SAMPLE;
         int32_t a,b;
-        front(&d,adcRead(),&a,&b);
+        front(&d,sample(),&a,&b);
         for(uint8_t k=0;k<NSL;k++) slice(&sl[k],a,b);
         if(++cnt<HOUSE_EVERY) continue;
         cnt=0;
@@ -526,9 +452,8 @@ reset:
         busyFor=0;
         house();
         if(g.resetRx) goto reset;
-        next=clkCyc();
+        next=clk();
     }
-    adcRestore();
 }
 
 static bool makeOwn(const app_api_t *A){
@@ -553,10 +478,7 @@ void app_main(const app_api_t *api){
     g.A=api; g.pendingBuf=pending; g.prevKey=APP_KEY_INVALID;
     api->cfg_load(&g.mode,1u);
     g.mode=(uint8_t)(g.mode==1u);
-    g.savedSqr3=ADC_SQR3; g.savedSmpr3=ADC_SMPR3;
-    const uint32_t savedModer=GPIOA_MODER,savedDac=DAC_CR;
-    const uint32_t savedRcc=RCC_APBENR1,savedDhr=DAC_DHR12R1;
-    biasOn(savedModer,savedRcc);
+    api->af_capture_open();      /* PA4 bias and ADC channel 4, restored by close */
     api->set_af(APP_AF_FM);
     api->delay_ms(50);
     api->backlight_on();
@@ -571,7 +493,7 @@ void app_main(const app_api_t *api){
     }else{
         g.state=ST_WAIT; draw(); listen();
     }
-    biasOff(savedDac,savedDhr,savedRcc,savedModer);
+    api->af_capture_close();
     api->set_af(APP_AF_MUTE);
     api->audio_path(false);
     api->cfg_save(&g.mode,1u);

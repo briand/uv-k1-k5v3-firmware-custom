@@ -5,6 +5,16 @@ also uses the BK4829 USB baseband output as a product detector, with the
 receiver internally tuned 700 Hz below the displayed carrier frequency. This
 makes incoming CW audible without changing the RSSI-based decoding path.
 
+The same crystal correction as CW Keyer (`XTAL`, BK4829 `REG_3B` steps of
+0.1923 ppm, +14 steps = +2.69 ppm by default) is added to the `REG_3B` value
+found on entry and restored on exit. Without it, a radio whose synthesizer
+runs high hears an incoming carrier below 700 Hz: about 300 Hz on 2 m for a
+radio measured +400 Hz high at 144 MHz, and in the wrong sideband on 70 cm
+(+1.2 kHz). With the correction, set the same frequency on both radios: a
+carrier sent by CW Keyer on 144.05000 is heard at 700 Hz on 144.05000. Use
+the same value as CW Keyer on the same radio; decoding itself, from the RSSI,
+does not depend on it.
+
 The adaptive detection threshold starts 4 dB above the calibrated quiet-channel
 level. This margin remains adjustable and is saved with the app configuration.
 
@@ -27,12 +37,16 @@ level. This margin remains adjustable and is saved with the app configuration.
 - The speaker icon, shared with Foxhunt, means that receive audio is enabled.
   The `F` icon temporarily replaces it while reverse adjustment is armed.
 - The `AGC` icon means that automatic receiver gain is enabled.
-- The upper capsule row shows detection `THR` on the left, the adaptive `WPM`
-  speed estimate in the centre, and `RSSI` on the right. Their frames reserve
-  the maximum value widths and therefore remain fixed. The dBm suffix is
-  omitted from the main screen and documented in the lower-right corner of
-  the help page. The bottom row shows the current `MORSE` symbol on the left
-  and the RX frequency on the right, using Beacon's normal-font format.
+- Three capsule rows sit below the decoded text, in two equal columns as on
+  CW Keyer: detection `THR` on the left and the adaptive `WPM` speed estimate
+  on the right, then `RSSI` on the left and the `XTAL` crystal correction (in
+  ppm) on the right. Their frames reserve the maximum value widths and
+  therefore remain fixed. The dBm suffix is omitted from the main screen and
+  documented in the lower-right corner of the help page. The bottom row shows
+  the current `MORSE` symbol on the left and the RX frequency on the right,
+  using Beacon's normal-font format.
+- The decoded text shows four rows in the normal font and five in the compact
+  font.
 
 ## Controls
 
@@ -44,6 +58,8 @@ level. This margin remains adjustable and is saved with the app configuration.
 - `3`: enable or disable AGC, then repeat quiet-channel calibration.
 - `4`: repeat quiet-channel calibration.
 - `5`: clear the decoded history.
+- `6`: raise the crystal correction by one BK4829 `REG_3B` step (0.19 ppm);
+  `F` then `6` lowers it (-50 to +50 steps).
 - `MENU`: open the help page.
 - `EXIT`: leave the app from the decoder, or return to the decoder from help.
   `MENU` also returns from help.
@@ -60,8 +76,8 @@ units ends the sequence (about 1.2 seconds at 15 WPM), but does not create an
 empty line. The pending space or line break is inserted only when the next
 keyed carrier starts. Automatic following advances by one complete text row;
 manual history scrolling remains pixel-smooth, and a new keyed carrier resumes
-automatic following on the active line. The font, threshold margin, AGC mode
-and speaker state are saved. To protect mark timing, decoded text is redrawn during the longer
+automatic following on the active line. The font, threshold margin, AGC mode,
+speaker state and crystal correction are saved. To protect mark timing, decoded text is redrawn during the longer
 inter-word silence; the `MORSE` capsule continues to show each symbol between
 full redraws. Timing is relearned on every launch. Letters A-Z, digits 0-9 and
 the `+`, `=` and `/` symbols are supported; malformed or unsupported patterns

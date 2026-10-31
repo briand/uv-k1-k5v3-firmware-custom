@@ -37,7 +37,7 @@ UI = [
 ]
 
 MENU = ["Call", "SSID", "Lat", "Lon", "Path", "Symbol", "Comm."]
-PATHS = ["DIRECT", "WIDE1-1", "WIDE1-1,WIDE2-1"]
+PATHS = ["DIRECT", "WIDE1-1", "WIDE1-1,WIDE2-1", "ARISS"]   # APRS TX path order
 PRESETS = [
     ("PORTABLE", "Portable, UV-K5/K1 F4HWN firmware (github.com/armel)"),
     ("MOBILE", "Mobile, UV-K5/K1 F4HWN firmware (github.com/armel)"),

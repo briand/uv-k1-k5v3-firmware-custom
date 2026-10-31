@@ -9,7 +9,7 @@ ASCII characters, of which the editor uses 64 (what fits on screen without scrol
 digits. An empty callsign displays `AUTO` and makes APRS TX use the boot-message
 callsign. APRS Edit declares the mutable APRS TX asset block in its own asset
 prefix. The resident loader validates and stages the update, then writes APRS
-TX's asset and CRC when APRS Edit exits. The application API remains at level 2.
+TX's asset and CRC when APRS Edit exits. The application requires API level 3.
 
 ## Index
 
@@ -27,12 +27,15 @@ in the font used to edit it.
 |---|---|
 | `UP` / `DOWN` | Select a field; hold to repeat |
 | `MENU` | Open the selected editor |
-| `EXIT` | Save the profile if it changed and return to the overlay-app index |
+| `EXIT` | Save the profile if it changed. Return to APRS TX when the editor was opened from TX, otherwise return to the overlay-app index |
 
 `MENU` locks the selected entry in the left pane and edits its draft directly
 in the right pane. `MENU` then validates that field and returns to navigation;
 `EXIT` discards that field's draft. The comment and preset selector use the
-same right pane. A changed profile is saved when the app exits.
+same right pane. A changed profile is saved when the app exits. APRS TX 1.7
+opens APRS Edit 1.2 with a one-byte hand-off request; after the save, the loader
+commits the proxy update and relaunches TX, which rebuilds its frame from the
+updated profile.
 
 ## Fields
 
@@ -43,7 +46,10 @@ same right pane. A changed profile is saved when the app exits.
 - `SSID`: number keys set 0-9; `UP`/`DOWN` covers the complete 0-15 range.
 - `LATITUDE` / `LONGITUDE`: number keys replace and advance, `UP`/`DOWN` moves the digit
   cursor, and `*` toggles N/S or E/W. Invalid coordinates cannot be validated.
-- `PATH`: `UP`/`DOWN` selects `DIRECT`, `WIDE1-1` or `WIDE1-1,WIDE2-1`.
+- `PATH`: `UP`/`DOWN` selects `DIRECT`, `WIDE1-1`, `WIDE1-1,WIDE2-1` or
+  `ARISS` (the ISS digipeater, 145.825 MHz). APRS Edit 1.2 and APRS TX 1.7 share
+  the `APC7` profile marker: paired with an older APRS TX it shows
+  `TX/FW MISMATCH` / `UPDATE REQUIRED` instead of saving a path it would reject.
 - `SYMBOL`: `UP`/`DOWN` cycles through the 48 APRS table/code pairs with their
   20 × 20 pixel preview and table position; a number key jumps to symbol
   1, 6, 11 ... 46.
@@ -54,7 +60,7 @@ same right pane. A changed profile is saved when the app exits.
   `PTT` opens `CUSTOM` and four predefined messages. The custom draft remains
   available after previewing a template.
 
-APRS Edit 1.0 and APRS TX 1.4 both require Fusion firmware v6.2.0 or later,
+APRS Edit 1.0 and APRS TX 1.4 both require Labs firmware v6.2.0 or later,
 which introduces the configuration proxy: earlier firmware refuses to launch
 them (`NOT SUPPORTED`). Install APRS TX 1.4 before launching APRS Edit 1.0. If
 a compatible APRS TX cannot be reached, the editor remains read-only and

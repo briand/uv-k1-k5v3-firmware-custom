@@ -233,9 +233,16 @@ class Slicer:
         self.dm.found("".join("%02d" % v for v in info[1:6]))
 
 
+# Decision weights (1300 Hz : 2100 Hz). The former 2:3, 1:1, 3:2 suit this
+# model, but ADC samples captured on a UV-K1 (ATIS DSC RX shares this front end)
+# put the right decisions around 4:3: 5:4, 4:3 and 7:5 keep 99.5 to 100 % of
+# the bits right, 2:3, 1:1 and 3:2 fall to about 60, 70 and 84 %. On the radio
+# ATIS RX went from 7 sequences in 40 to 39 (issue #705). The model cannot
+# tell the two sets apart in the STD path; with these weights the flat RAW path
+# no longer decodes, and the app does not use it.
 class Demod:
     def __init__(self, fs=FS_ADC, att=5, dec=10, pll=3, ctr=36864,
-                 slicers=((2, 3), (1, 1), (3, 2))):
+                 slicers=((5, 4), (4, 3), (7, 5))):
         self.ctr, self.att, self.dec, self.pll = ctr, att, dec, pll
         # 2nd-order band-pass (RBJ, constant 0 dB peak) centred on
         # sqrt(1300*2100) = 1652 Hz, Q = 0.9: coefficients in Q14
@@ -315,8 +322,9 @@ def main():
             waves[key] = flipper_wave(b) if src == "flipper" else sine_wave(b, twist_db=twist)
         return waves[key]
 
+    # the app reads the radio's standard FM audio (STD), not the flat RAW path
     cases = []
-    for mode in ("raw", "std"):
+    for mode in ("std",):
         for name in ("pc8075", "mmsi", "badecc"):
             cases.append(("flipper", 0.0, mode, name, 0, 0, 0))
         for noise in (1500, 3000, 4500, 6000):
@@ -341,7 +349,7 @@ def main():
         print("%-7s %5.1f %-4s %-7s %6d %6d %7d | %d/3" % (src, tw, mode, name, noise, off, ppm, ok))
     # noise only: nothing may come out (60 s of open squelch per path)
     rnd = random.Random(7)
-    for mode in ("raw", "std"):
+    for mode in ("std",):
         x = [rnd.gauss(0, 6000) for _ in range(60 * FS_SIM)]
         x = rc_hp(biquad_lp(x, 5000), 30) if mode == "raw" else biquad_lp(deemph(rc_hp(x, 300)), 3000)
         adc = [min(4095, max(0, int(round(BIAS + LSB_PER_HZ * x[i * 10])))) for i in range(len(x) // 10)]

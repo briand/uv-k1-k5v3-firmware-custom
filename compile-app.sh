@@ -3,8 +3,8 @@
 # Build overlay-app blobs (.app), the counterpart of compile-firmware.sh.
 #
 # Usage:
-#   ./compile-app.sh                # build every app
-#   ./compile-app.sh All            # build every app
+#   ./compile-app.sh                # build every non-test app
+#   ./compile-app.sh All            # build every non-test app
 #   ./compile-app.sh breakout       # build one app
 #   ./compile-app.sh fm foxhunt     # build several apps
 #
@@ -20,6 +20,7 @@ APPS_DIR=App/apps
 OUT_DIR=build/Apps
 OVERLAY_MAX=4096
 APP_VMA=${APP_VMA:-0x20000280}      # pinned overlay VMA (Core/py32f071xb.ld)
+ALL_EXCLUDED_APPS=(handoffa handoffb vfotest) # API test apps remain explicit targets
 
 cd "$(dirname "$0")"
 
@@ -37,7 +38,14 @@ fi
 
 # --- select targets ---
 if [ "$#" -eq 0 ] || [[ "${1:-}" == [Aa][Ll][Ll] ]]; then
-    TARGETS=("${ALL_APPS[@]}")
+    TARGETS=()
+    for app in "${ALL_APPS[@]}"; do
+        excluded=0
+        for test_app in "${ALL_EXCLUDED_APPS[@]}"; do
+            [ "$app" = "$test_app" ] && excluded=1
+        done
+        [ "$excluded" -eq 0 ] && TARGETS+=("$app")
+    done
 else
     TARGETS=()
     for want in "$@"; do

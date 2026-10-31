@@ -343,6 +343,7 @@ extern volatile bool         gTxTimeoutReached;
     #endif
     #ifdef ENABLE_FEAT_F4HWN_K5VIEWER
         extern volatile uint8_t  gUART_LockK5Viewer; // lock the K5Viewer stream if Chirp is used
+        #define K5VIEWER_LOCK_HELD 0xFFu              // held, no countdown: an overlay app owns the USB port
         extern bool gUSB_K5ViewerEnabled;
 
         bool K5VIEWER_IsLocked(void);

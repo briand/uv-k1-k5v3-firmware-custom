@@ -21,6 +21,9 @@
     #include "app/fm.h"
 #endif
 #include "board.h"
+#ifdef ENABLE_FEAT_F4HWN_OVERLAY_APPS
+    #include "apps/app_overlay.h"
+#endif
 #include "py32f071_ll_bus.h"
 #include "py32f071_ll_gpio.h"
 #include "py32f071_ll_rcc.h"
@@ -177,6 +180,11 @@ void BOARD_ADC_Init(void)
 
 void BOARD_ADC_GetBatteryInfo(uint16_t *pVoltage, uint16_t *pCurrent)
 {
+#ifdef ENABLE_FEAT_F4HWN_OVERLAY_APPS
+    /* An overlay app may hold the ADC on PA4 (RX audio capture): the battery
+     * channel back for this conversion, whoever asks for it. */
+    const bool capture = APP_AfCaptureYieldAdc();
+#endif
     LL_ADC_REG_StartConversionSWStart(ADC1);
     while (!LL_ADC_IsActiveFlag_EOS(ADC1))
         ;
@@ -184,6 +192,10 @@ void BOARD_ADC_GetBatteryInfo(uint16_t *pVoltage, uint16_t *pCurrent)
 
     *pVoltage = LL_ADC_REG_ReadConversionData12(ADC1);
     *pCurrent = 0;
+#ifdef ENABLE_FEAT_F4HWN_OVERLAY_APPS
+    if (capture)
+        APP_AfCaptureResumeAdc();
+#endif
 }
 
 void BOARD_Init(void)

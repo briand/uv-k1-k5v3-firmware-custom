@@ -19,36 +19,38 @@ enum { ST_SRCH = 0, ST_DATA = 1, ST_DONE = 2 };
 
 #define RAW_HDR 0x99994C99u /* "10011001100110010100110010011001" */
 
-static uint16_t checkM10(const uint8_t *msg, uint8_t len)
+/* Words throughout, the byte ranges kept by masks: no uxtb per step. */
+static uint16_t checkM10(const uint8_t *msg, unsigned len)
 {
-    uint16_t c = 0;
-    for (uint8_t i = 0; i < len; i++) {
-        uint8_t b = msg[i];
-        b = (uint8_t)((b >> 1) | (b << 7));
-        b ^= (uint8_t)((b >> 2) & 0xFFu);
-        uint8_t t6 = (uint8_t)((c ^ (c >> 2) ^ (c >> 4)) & 1u);
-        uint8_t t7 = (uint8_t)(((c >> 1) ^ (c >> 3) ^ (c >> 5)) & 1u);
-        uint8_t t = (uint8_t)((c & 0x3Fu) | (t6 << 6) | (t7 << 7));
-        uint8_t s = (uint8_t)((c >> 7) & 0xFFu);
-        s ^= (uint8_t)((s >> 2) & 0xFFu);
-        c = (uint16_t)(((c & 0xFFu) << 8) | (uint8_t)(b ^ t ^ s));
+    unsigned c = 0;
+    for (unsigned i = 0; i < len; i++) {
+        unsigned b = msg[i];
+        b = ((b >> 1) | (b << 7)) & 0xFFu;
+        b ^= b >> 2;
+        unsigned t6 = (c ^ (c >> 2) ^ (c >> 4)) & 1u;
+        unsigned t7 = ((c >> 1) ^ (c >> 3) ^ (c >> 5)) & 1u;
+        unsigned t = (c & 0x3Fu) | (t6 << 6) | (t7 << 7);
+        unsigned s = (c >> 7) & 0xFFu;
+        s ^= s >> 2;
+        c = ((c & 0xFFu) << 8) | (b ^ t ^ s);
     }
-    return c;
+    return (uint16_t)c;
 }
 
-static uint32_t be(const uint8_t *p, uint8_t n)
+static uint32_t be(const uint8_t *p, unsigned n)
 {
     uint32_t v = 0;
     while (n--) v = (v << 8) | *p++;
     return v;
 }
 
-static int32_t u1e6ToArcSec(const uint8_t *p)
+/* 1e-6 degree to centi-arcseconds: x 0.36 = 9 / 25 (u 9 < 2^32 up to 180 deg). */
+static int32_t u1e6ToCas(const uint8_t *p)
 {
     int32_t v = (int32_t)be(p, 4);
     int32_t neg = v < 0;
     uint32_t u = (uint32_t)(neg ? -v : v);
-    uint32_t as = (u / 1000000u) * 3600u + ((u % 1000000u) * 3600u) / 1000000u;
+    uint32_t as = u * 9u / 25u;
     return neg ? -(int32_t)as : (int32_t)as;
 }
 
@@ -61,12 +63,12 @@ static int16_t softOf(int32_t integ)
 }
 
 /* Rawheader soft match, either polarity. Radio AF weak → ~60% ratio. */
-static bool hdrOk(const int16_t *ch, uint8_t base)
+static bool hdrOk(const int16_t *ch, unsigned base)
 {
     int32_t s = 0;
     uint32_t e = 0;
-    for (uint8_t i = 0; i < 32u; i++) {
-        int32_t c = ch[(uint8_t)(base + i) & CHIP_MSK];
+    for (unsigned i = 0; i < 32u; i++) {
+        int32_t c = ch[(base + i) & CHIP_MSK];
         e += (uint32_t)(c >= 0 ? c : -c);
         if ((RAW_HDR >> (31u - i)) & 1u) s += c;
         else s -= c;
@@ -77,13 +79,13 @@ static bool hdrOk(const int16_t *ch, uint8_t base)
 
 /* Softin 32 chips → 16-bit word; *prev_out = last Manchester bit.
  * Inverted polarity only flips the first bit (prev starts at 0). */
-static uint16_t softWord(const int16_t *ch, uint8_t base, uint8_t *prev_out)
+static uint16_t softWord(const int16_t *ch, unsigned base, uint8_t *prev_out)
 {
     uint16_t w = 0;
-    uint8_t prev = 0, i;
-    for (i = 0; i < 16u; i++) {
-        int32_t s1 = ch[(uint8_t)(base + i * 2u) & CHIP_MSK];
-        int32_t s2 = ch[(uint8_t)(base + i * 2u + 1u) & CHIP_MSK];
+    uint8_t prev = 0;
+    for (unsigned i = 0; i < 16u; i++) {
+        int32_t s1 = ch[(base + i * 2u) & CHIP_MSK];
+        int32_t s2 = ch[(base + i * 2u + 1u) & CHIP_MSK];
         uint8_t man = (s2 >= s1) ? 1u : 0u;
         w = (uint16_t)((w << 1) | (prev == man ? 1u : 0u));
         prev = man;
@@ -142,7 +144,7 @@ static void emitChip(decm20_t *d, int16_t soft)
 void decm20_init(decm20_t *d)
 {
     uint8_t *p = (uint8_t *)d;
-    for (uint16_t i = 0; i < sizeof *d; i++) p[i] = 0;
+    for (unsigned i = 0; i < sizeof *d; i++) p[i] = 0;
     d->meanQ8 = -1;
     d->ph = SPB_Q8 / 2;
 }
@@ -198,6 +200,36 @@ static char *dig(char *o, uint32_t v, uint32_t div)
     return o;
 }
 
+static uint32_t isqrt32(uint32_t n)
+{
+    uint32_t root = 0, bit = 1u << 30;
+    while (bit > n) bit >>= 2;
+    while (bit) {
+        if (n >= root + bit) { n -= root + bit; root = (root >> 1) + bit; }
+        else root >>= 1;
+        bit >>= 2;
+    }
+    return root;
+}
+
+/* Compass bearing of the (east, north) vector, whole degrees 0..359: the
+ * octant folded, then atan(t) ~ 45 t + 15.6 t (1 - t) degrees for
+ * t = min / max in [0, 1] (within 0.3 degree before rounding). */
+static uint16_t bearing(int32_t e, int32_t n)
+{
+    uint32_t ae = (uint32_t)(e < 0 ? -e : e), an = (uint32_t)(n < 0 ? -n : n);
+    uint32_t mn = ae < an ? ae : an, mx = ae < an ? an : ae;
+    uint32_t t, a;
+    if (!mx) return 0;
+    t = (mn << 12) / mx;                                        /* Q12 */
+    a = (450u * t + ((156u * t * (4096u - t)) >> 12) + 2048u) >> 12;  /* 0.1 deg */
+    if (ae > an) a = 900u - a;           /* from north, within the quadrant */
+    if (n < 0) a = 1800u - a;
+    if (e < 0) a = 3600u - a;
+    a = (a + 5u) / 10u;
+    return (uint16_t)(a >= 360u ? 0u : a);
+}
+
 bool decm20_parse(decm20_t *d, sonde_info_t *out)
 {
     const uint8_t *f = d->frm;
@@ -218,19 +250,34 @@ bool decm20_parse(decm20_t *d, sonde_info_t *out)
         *o = 0;
     }
     out->flags = SONDE_HAS_ID | SONDE_HAS_ALT;
-    out->latS = u1e6ToArcSec(f + 0x1C);
-    out->lonS = u1e6ToArcSec(f + 0x20);
+    out->latS = u1e6ToCas(f + 0x1C);
+    out->lonS = u1e6ToCas(f + 0x20);
     if (out->latS || out->lonS) out->flags |= SONDE_HAS_POS;
+    /* GPS velocity east / north / up, int16 big-endian in cm/s
+     * (mXXmod pos_GPSvE / vN / vU): only with a position, as M10 and RS41 do,
+     * so a frame sent before the first fix shows no speed or heading. */
+    if (out->flags & SONDE_HAS_POS) {
+        int32_t ve = (int16_t)be(f + 0x0B, 2), vn = (int16_t)be(f + 0x0D, 2);
+        out->vs_dm = (int16_t)((int16_t)be(f + 0x18, 2) / 10);
+        out->hs_ms = (uint16_t)((isqrt32((uint32_t)ve * (uint32_t)ve +
+                                         (uint32_t)vn * (uint32_t)vn) + 50u) / 100u);
+        out->hdg = bearing(ve, vn);
+        out->flags |= SONDE_HAS_VEL;
+    }
     v = be(f + 0x08, 3);
     if (v & 0x800000u) v |= 0xFF000000u;
     out->alt_m = (int32_t)v / 100;
     out->tRaw = (uint16_t)(f[0x04] | (f[0x05] << 8));
-    /* hPa = (f[0x25] f[0x24] p0) / 4096, p0 = f[0x16] from FW 7 (DF9DQ) */
-    v = ((uint32_t)f[0x25] << 16) | ((uint32_t)f[0x24] << 8) |
-        (f[pc - 1u] >= 7u ? f[0x16] : 0u);
-    if (v && v <= 0xA00000u) {
-        out->press_h10 = (uint16_t)((v * 10u) >> 12);
-        out->flags |= SONDE_HAS_PRESS;
+    /* Humidity (m20mod get_RH): x = 6.5 (rh_cal + 80000) / (humval + 80000)
+     * / k, k from the RH sensor NTC (0x06, LE). Here the ratio, Q11 (13 x
+     * 145535 << 10 fits 32 bits); the app divides by k (its NTC table) and
+     * applies the cubic. humval (0x02, LE) from 48000 up is no reading. */
+    v = f[0x02] | ((uint32_t)f[0x03] << 8);
+    if (v < 48000u) {
+        out->rhQ11 = (uint16_t)((13u * ((f[0x2F] | ((uint32_t)f[0x30] << 8)) + 80000u) << 10) /
+                                (v + 80000u));
+        out->tuRaw = (uint16_t)(f[0x06] | (f[0x07] << 8));
+        out->flags |= SONDE_HAS_RH;
     }
     return true;
 }

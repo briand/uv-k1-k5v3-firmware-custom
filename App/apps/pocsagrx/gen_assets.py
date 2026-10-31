@@ -14,13 +14,18 @@ sys.path.insert(0, os.path.join(HERE, ".."))
 from app_assets import Assets
 
 TITLE = "POCSAG RX"                         # the version is in the .app header
+# key 4: a page without text, in one centred capsule (NOTEXT_X): same length
+NOTEXT = ("Tone Only", "Text Lost")
+assert len(NOTEXT[0]) == len(NOTEXT[1])
 
 UI = [
     ("T_TITLE",  TITLE),
     ("T_DBM",    "dBm  func "),             # "-89dBm  func 3  last 02m15"
     ("T_LAST",   "  last "),                # 30 characters at most (a tiny row holds 32)
-    ("T_SYN",    "syn "),                   # until a first page, or key 3:
-    ("T_OK",     " ok"),                    # "syn 5 ok 32 32 0 31 32"
+    ("T_PRE",    "pre "),                   # until a first page, or key 3:
+                                            # "pre 512 1200:0/0 512:3/96"
+    ("T_TONE",   NOTEXT[0]),                # key 4: an address alone
+    ("T_LOST",   NOTEXT[1]),                # key 4: characters came, none was read
 ]
 
 a = Assets("POCSAGRX")
@@ -31,6 +36,7 @@ for name, s in UI:
     ui_size += len(s) + 1 + pad
 a.const("UI_SIZE", ui_size)
 a.const("T_TITLE_CHARS", len(TITLE))
+a.const("NOTEXT_CHARS", len(NOTEXT[0]))
 
 # The status bar from x = 59 (SPK_X), in one asset_read, as APRS RX: the speaker
 # icon (bit 0 of the index), 3 blank columns, then the scroll marks at x = 72,
@@ -43,5 +49,9 @@ for i in range(8):
     tail += [(u if i & 2 else 0) | (d if i & 4 else 0) for u, d in zip(UP, DN)]
 a.u8("BMP_TAIL", tail)
 a.const("TAIL_W", len(tail) // 8)
+# Key 4 on: an outlined bell (a tone-only pager only rings), read to x = 45-52
+# (TONE_X): centred between the title capsule (x <= 38) and the speaker icon
+# (x >= 59).
+a.u8("BMP_TONE", [0x20, 0x3c, 0x22, 0x61, 0x61, 0x22, 0x3c, 0x20])
 if __name__ == "__main__":
     a.main()

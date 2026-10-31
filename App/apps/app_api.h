@@ -35,6 +35,7 @@
 #ifndef APPS_APP_API_H
 #define APPS_APP_API_H
 
+#include <stddef.h>   /* offsetof */
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -43,9 +44,28 @@
  *   1  v6.0.0 baseline: every service up to and including beam_draw
  *   2  ticks_ms, rand32, asset_read (+ app_header_t asset_size / asset_crc),
  *      idivmod, uidivmod (the resident division helpers), Labs system info,
- *      current and minimum-since-boot free stack/RAM margin */
+ *      current and minimum-since-boot free stack/RAM margin
+ *   3  append_i32 / append_u32 (resident decimal formatters), af_capture_open /
+ *      sample / close (RX audio on PA4), cycles_48mhz, draw_frequency,
+ *      handoff / handoff_read, tx_prepare; the Labs system information slots
+ *      become part of the layout in every build, so level 3 services have one
+ *      offset; serial_read / serial_write / serial_ctl (the USB-C serial
+ *      port, K-plug reserved; APP_CAP_SERIAL); blit_page, lcd_feed,
+ *      viewer_update (the LCD without the K5Viewer side effect), vfo_stage
+ *      (deferred update of the current VFO) */
 #define APP_ABI_MAJOR  1u
-#define APP_API_LEVEL  2u
+#define APP_API_LEVEL  3u
+
+/* App name length in app_header_t, the name handoff() takes (API level 3). */
+#define APP_NAME_LEN    16
+
+/* Largest message handoff() carries from one app to the next (API level 3):
+ * raw bytes, not NUL-terminated.  32 covers a position, a symbol and a short
+ * ID.  It can be raised in a later release (one byte of resident RAM, i.e. of
+ * stack margin, per byte; len stays uint8_t, 255 at most); an older firmware
+ * then clamps, so receivers must check the length handoff_read() returns.  It
+ * must never be lowered. */
+#define APP_HANDOFF_MAX 32u
 
 /* Minimum API level of an app that ships read-only assets (pack_app.py). */
 #define APP_API_ASSETS 2u
@@ -263,8 +283,14 @@ typedef struct app_api {
     uint64_t (*idivmod)(int32_t n, int32_t d);
     uint64_t (*uidivmod)(uint32_t n, uint32_t d);
 
-#ifdef ENABLE_FEAT_F4HWN_OVERLAY_INFO
-    /* ---- API level 2: zero-code Labs system information ---- */
+    /* ---- API level 2: zero-code Labs system information ----
+     * Valid only with APP_CAP_SYSINFO (the loader sets them only with
+     * ENABLE_FEAT_F4HWN_OVERLAY_INFO, NULL otherwise).  The fields themselves
+     * are in the layout of every build, not under that #ifdef: apps are built
+     * apart from the firmware and mostly without the define, so an #ifdef here
+     * would put every later service at one offset in the app (276) and another
+     * in a Labs firmware (328), and the app would call the wrong address.
+     * Costs nothing in Labs, the only edition with overlay apps. */
     const char *sys_edition;
     const char *sys_version;
     const char *sys_build_date;
@@ -280,13 +306,175 @@ typedef struct app_api {
     /* ---- API level 2: stack watermark diagnostics ---- */
     uint32_t (*sys_stack_free_now)(void);
     uint32_t (*sys_stack_free_min)(void);
-#endif
+
+    /* ---- API level 3: number formatting ---- */
+    /* Signed decimal of v at dst, no leading zeros, '-' when negative, over the
+     * whole int32 range. Not NUL-terminated: returns the end, so calls chain
+     * as o = append_i32(o, v). Writes at most 11 characters. */
+    char *(*append_i32)(char *dst, int32_t v);
+
+    /* ---- API level 3: RX audio capture on PA4 ----
+     * The RX audio reaches PA4 (the voice DAC pin), AC-coupled: open snapshots
+     * GPIOA_MODER, RCC_APBENR1, DAC_CR, DAC_DHR12R1, ADC_SQR3 and ADC_SMPR3,
+     * holds PA4 at mid-scale with the MCU DAC (channel 1, output buffer off)
+     * and selects ADC channel 4 with the battery channel's sample time. While
+     * the capture is open, battery_sample() switches the ADC to the battery
+     * and back by itself. close restores all six registers; the loader also
+     * closes a capture the app left open. open and close may be repeated. */
+    void     (*af_capture_open)(void);
+    uint16_t (*af_capture_sample)(void);   /* one bounded 12-bit conversion  */
+    void     (*af_capture_close)(void);
+
+    /* Per-application-run count of 48 MHz core cycles: the 10 ms tick and the
+     * SysTick phase, read race-free. It wraps every ~89.5 s; its origin is
+     * deliberately rebased before entry so the first wrap occurs ~10 s after
+     * launch and exposes unsafe direct comparisons early. Never order readings
+     * with < or >. Use app_cycles_before() / app_cycles_reached() for deadlines
+     * less than 2^31 cycles (~44.7 s) away, or unsigned subtraction to measure
+     * an elapsed interval shorter than one full wrap. */
+    uint32_t (*cycles_48mhz)(void);
+
+    /* ---- API level 3: the frequency as the main screen draws it ----
+     * f in 10 Hz units, from column x. Below 1 GHz: the big digits up to the
+     * kHz ("144.800") on lines line and line + 1, the last two digits in the
+     * small font on line + 1 right after them (big digits 13 px, the point
+     * 3 px: 95 px in all). From 1 GHz: the whole string in the normal font on
+     * line (80 px). Nothing clips, so x is held at 33 at most. */
+    void (*draw_frequency)(uint32_t f_10hz, uint8_t x, uint8_t line);
+
+    /* Unsigned decimal of u at dst, no leading zeros, over the whole uint32
+     * range. Not NUL-terminated: returns the end. Writes at most 10 chars. */
+    char *(*append_u32)(char *dst, uint32_t u);
+
+    /* ---- API level 3: hand-off to another app ----
+     * Only one app runs at a time, so an app asks the loader to launch the
+     * next one after it returns.  handoff() names the installed app to launch
+     * and stages up to APP_HANDOFF_MAX bytes for it, in RAM only.  name is a
+     * C string, e.g. handoff("APRS TX", ...), compared with the header name
+     * over APP_NAME_LEN bytes at most.  The calling app then returns as usual:
+     * the loader commits its config, waits for every key to be released, then
+     * launches the target instead of going back to the menu, and the target's
+     * APP_FLAG_EXIT_TO_MAIN decides where the chain ends.  true means a
+     * compatible target (valid header, this firmware's overlay VMA) was found
+     * and the launch is scheduled, not that it will succeed: a CRC failure is
+     * reported by the menu under the target's name.  The last call wins: no
+     * compatible app with that name returns false and leaves nothing pending,
+     * which also cancels an earlier call.  Copies min(len, APP_HANDOFF_MAX)
+     * bytes from msg; a longer len is clamped.  len 0 (msg may then be NULL)
+     * is a hand-off without payload: the target still learns its sender.
+     * A chain that never ends is cut back to the menu: a long EXIT press
+     * between two apps, or 8 hand-offs in a row from apps that each ran less
+     * than 300 ms. */
+    bool    (*handoff)(const char *name, const void *msg, uint8_t len);
+    /* The message handed to this app and its sender's name.  Returns -1 when
+     * the app was launched from the menu or a shortcut (buf and from are then
+     * untouched), else the message length (0 to APP_HANDOFF_MAX), of which
+     * min(length, max) bytes are copied into buf: a return above max means
+     * the message was cut.  buf may be NULL when max is 0.  from, unless NULL,
+     * receives the sender's name as a C string: give it char[APP_NAME_LEN + 1].
+     * Read once, -1 afterwards: call it at launch, before handoff(), which
+     * replaces the message. */
+    int16_t (*handoff_read)(void *buf, uint8_t max, char *from);
+
+    /* tx_set_params without the FM waits and with PA_ENABLE left off, for a
+     * caller that keys the PA itself (tx_set_params leaves an unshaped
+     * carrier burst). On an older level 3 table, check api_size first. */
+    void    (*tx_prepare)(void);
+
+    /* ---- API level 3: serial ports (APP_CAP_SERIAL) ----
+     * port: APP_SERIAL_USB, the USB-C CDC port (a PC or a phone in OTG: the
+     * radio is a USB device, never a host).  APP_SERIAL_KPLUG, the K-plug
+     * UART, is reserved and not implemented yet: serial_ctl returns 0 (no
+     * APP_SERIAL_OK), serial_read 0 and serial_write false.
+     * From the app's first serial call until it returns, the resident command
+     * parser and K5Viewer leave the USB port alone; when the app returns, the
+     * loader drops the bytes it left unread.
+     * serial_read copies up to len received bytes, returns their count (0 when
+     * nothing waits).  The port receives into a 256-byte ring: poll it before
+     * 256 bytes can arrive (a few ms while a host streams).  A lapped ring is
+     * reported by serial_ctl (APP_SERIAL_LOST) and read on from the newest
+     * byte.
+     * serial_write sends len bytes and returns once the host has taken them;
+     * false when no host has the port open (DTR clear) or the host did not
+     * take the data within 50 ms: the unsent rest is then dropped, and the
+     * next write starts clean.  It needs interrupts enabled (the transfer
+     * completes in the USB interrupt).
+     * serial_ctl returns the port state: APP_SERIAL_* bits, the events since
+     * the previous serial_ctl.  baud is for the K-plug, ignored for USB.
+     * Planned for the K-plug (3.3 V TTL, the programming cable's lines; RX
+     * shares its contact with a speaker-mic's PTT): a 256-byte DMA ring that
+     * cannot report a lap, writes at the baud rate unconditionally, the baud
+     * rate set by serial_ctl (0 = unchanged) and 38400 bauds restored when
+     * the app returns. */
+    uint16_t (*serial_read)(uint8_t port, void *buf, uint16_t len);
+    bool     (*serial_write)(uint8_t port, const void *buf, uint16_t len);
+    uint8_t  (*serial_ctl)(uint8_t port, uint32_t baud);
+
+    /* ---- API level 3: the LCD without the K5Viewer side effect ----
+     * blit_page: one LCD page, 0 the status line, 1-7 a frame buffer line, 8
+     * the 7 of them (blit_status and blit_full are 0 and 8, but blit_full and
+     * blit_line also send a blocking K5Viewer frame).
+     * lcd_feed: the screen a few bytes at a time, for an app that sends it
+     * between its audio samples (a whole-screen blit, an 11 ms burst on the
+     * LCD SPI, is heard as a flutter while the speaker is on). 0 starts a
+     * frame; n > 0 sends its next n bytes (10.7 us each, 1048 in all: per
+     * page, 3 command bytes then 128 data bytes, from the status line), each
+     * one done before it returns. True while bytes remain. The status line
+     * and the frame buffer are read as the bytes go: change them only once a
+     * frame is out. Any blit may follow; lcd_feed(0) then starts over.
+     * viewer_update: a K5Viewer frame of the status line and the frame buffer,
+     * for an app that does not use blit_full; nothing when no viewer is
+     * connected. Blocking: short on USB, up to ~0.3 s for a full frame on the
+     * K-plug at 38400 bauds. */
+    void     (*blit_page)(uint8_t page);
+    bool     (*lcd_feed)(unsigned n);
+    void     (*viewer_update)(void);
+
+    /* ---- API level 3: set the VFO on exit (builds with the BEAM bridge) ----
+     * Stage a VFO setting: the loader applies it to the current VFO after
+     * app_main() returns (frequency, offset, codes, modulation, bandwidth,
+     * power, step), before it launches a hand-off target or returns to the
+     * main screen, where it then goes. The VFO is saved as a keypad entry
+     * saves it. One staging per run, shared with beam_save: false when one is
+     * already pending or the frequency is out of the radio's range. Only the
+     * frequency is checked: the other fields are taken as they are, as with
+     * beam_save, so start from beam_get and change what is needed. NULL on a
+     * build without the BEAM bridge. */
+    bool     (*vfo_stage)(const app_beam_channel_t *ch);
 } app_api_t;
 
-#ifdef ENABLE_FEAT_F4HWN_OVERLAY_INFO
-_Static_assert(sizeof(app_api_t) == 328u,
-               "Labs system information must add exactly 52 API bytes");
-#endif
+/* Serial ports and serial_ctl state bits (API level 3). */
+enum { APP_SERIAL_USB = 0, APP_SERIAL_KPLUG = 1 };
+#define APP_SERIAL_OK      0x01u  /* the port exists in this build            */
+#define APP_SERIAL_HOST    0x02u  /* USB: a host has the port open (DTR)      */
+#define APP_SERIAL_LOST    0x04u  /* event: received bytes overwritten unread */
+#define APP_SERIAL_TIMEOUT 0x08u  /* event: a write timed out, data dropped   */
+#define APP_SERIAL_ENUM    0x10u  /* event: USB (re-)enumerated by a host     */
+
+/* Unconditional, for the same reason: these offsets are what the apps and
+ * the firmware must agree on, whatever the build options. */
+_Static_assert(offsetof(app_api_t, sys_edition) == 276u &&
+               offsetof(app_api_t, append_i32) == 328u,
+               "the level 2 API prefix must stay 328 bytes");
+_Static_assert(offsetof(app_api_t, handoff) == 356u &&
+               offsetof(app_api_t, tx_prepare) == 364u &&
+               offsetof(app_api_t, serial_read) == 368u &&
+               offsetof(app_api_t, blit_page) == 380u &&
+               offsetof(app_api_t, vfo_stage) == 392u &&
+               sizeof(app_api_t) == 396u,
+               "app_api_t is append-only: every edition shares this layout");
+
+/* Wrap-safe modular ordering for deadlines less than half a cycle-counter
+ * period away (~44.7 s at 48 MHz). Unused helpers emit no application code. */
+static inline bool app_cycles_before(uint32_t now, uint32_t deadline)
+{
+    return (int32_t)(now - deadline) < 0;
+}
+
+static inline bool app_cycles_reached(uint32_t now, uint32_t deadline)
+{
+    return !app_cycles_before(now, deadline);
+}
 
 /* BK4819 AF modes for set_af (mirror driver/bk4819.h values). */
 enum { APP_AF_MUTE = 0, APP_AF_FM = 1, APP_AF_AM = 7 };

@@ -77,6 +77,10 @@ static void build_frame(uint8_t *f)
     f[0] = 0x45; f[1] = 0x20;
     f[0x04] = 0x09; f[0x05] = 0x05; /* tRaw ≈ mid range */
     put_be24(f + 0x08, 120000);     /* alt 1200 m */
+    /* 8 m/s east, 3 m/s south, 5.2 m/s up, in cm/s big-endian */
+    f[0x0B] = 0x03; f[0x0C] = 0x20; /*  800 */
+    f[0x0D] = 0xFE; f[0x0E] = 0xD4; /* -300 */
+    f[0x18] = 0x02; f[0x19] = 0x08; /*  520 */
     {
         /* ym=29 → 206, n=1, b=0, sn=1234 → "206-1-01234" */
         uint32_t sn24 = ((uint32_t)1234 << 10) | 29u;
@@ -85,8 +89,10 @@ static void build_frame(uint8_t *f)
         f[0x14] = (uint8_t)(sn24 >> 16);
     }
     f[0x15] = 7;
-    f[0x16] = 0;                    /* pressure LSB (used if fw>=7) */
-    f[0x24] = 0x00; f[0x25] = 0x10; /* → ~16 hPa raw /4096 → check HAS_PRESS */
+    /* Humidity: humval 30000, rh_cal 32389, RH NTC ADC 447 (20 C): 45 %RH */
+    f[0x02] = 0x30; f[0x03] = 0x75;
+    f[0x2F] = 0x85; f[0x30] = 0x7E;
+    f[0x06] = 0xBF; f[0x07] = 0x01;
     put_be32(f + 0x1C, 48800000);   /* 48.8 N */
     put_be32(f + 0x20, 2300000);    /* 2.3 E */
     f[0x43] = 7;                    /* fwVer at flen-2 */
@@ -122,12 +128,46 @@ int main(void)
             fprintf(stderr, "parse: pos/alt flags=%u alt=%ld\n",
                     out.flags, (long)out.alt_m);
             fail++;
-        } else if (out.latS != 175680 || out.lonS != 8280) {
+        } else if (!(out.flags & SONDE_HAS_RH) || out.rhQ11 != 13601 || out.tuRaw != 447) {
+            fprintf(stderr, "parse: rh flags=%u q=%u tu=%u\n",
+                    out.flags, out.rhQ11, out.tuRaw);
+            fail++;
+        } else if (out.latS != 17568000 || out.lonS != 828000) {   /* centi-arcseconds */
             fprintf(stderr, "parse: lat=%ld lon=%ld\n",
                     (long)out.latS, (long)out.lonS);
             fail++;
+        } else if (!(out.flags & SONDE_HAS_VEL) || out.vs_dm != 52 ||
+                   out.hs_ms != 9 || out.hdg != 111) {
+            /* 8.5 m/s towards 110.6 degrees, climbing 5.2 m/s */
+            fprintf(stderr, "parse: vs=%d hs=%u hdg=%u\n",
+                    out.vs_dm, out.hs_ms, out.hdg);
+            fail++;
         } else
             printf("  ✅ parse fields\n");
+    }
+
+    /* ---- no fix yet: lat = lon = 0, no position, so no velocity ---- */
+    {
+        uint8_t g[M20_FRAME_LEN];
+        decm20_t d;
+        sonde_info_t out;
+        memcpy(g, f, sizeof g);
+        memset(g + 0x1C, 0, 8);
+        {
+            uint16_t cs = mk_check(g, 0x44);
+            g[0x44] = (uint8_t)(cs >> 8);
+            g[0x45] = (uint8_t)(cs & 0xFF);
+        }
+        memset(&d, 0, sizeof d);
+        decm20_init(&d);
+        memcpy(d.frm, g, M20_FRAME_LEN);
+        d.state = 2;
+        memset(&out, 0, sizeof out);
+        if (!decm20_parse(&d, &out) || (out.flags & (SONDE_HAS_POS | SONDE_HAS_VEL))) {
+            fprintf(stderr, "no fix: flags=%u\n", out.flags);
+            fail++;
+        } else
+            printf("  ✅ no fix: no position, no velocity\n");
     }
 
     /* ---- softin path ---- */

@@ -641,7 +641,8 @@ void ACTION_Handle(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 /* Open the overlay app holding a shortcut; double beep when none is installed. */
 static void ACTION_LaunchApp(uint8_t shortcut)
 {
-    if (APP_LaunchOverlayShortcut(shortcut) != APP_OK)
+    const uint8_t rc = APP_LaunchOverlayShortcut(shortcut);
+    if (rc != APP_OK && rc != APP_CHAIN_ABORTED)
         gBeepToPlay = BEEP_500HZ_60MS_DOUBLE_BEEP_OPTIONAL;
 }
 #endif

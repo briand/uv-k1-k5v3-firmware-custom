@@ -181,6 +181,7 @@ bool     RADIO_HasFilterChoice(const VFO_Info_t *pVfo);  // false for CW and USB
 static inline bool RADIO_HasFilterChoice(const VFO_Info_t *pVfo) { (void)pVfo; return true; }
 #endif
 void     RADIO_SetTxParameters(void);
+void     RADIO_PrepareTx(void);   /* same setup, no FM waits, PA left off */
 void     RADIO_SetupAGC(bool listeningAM, bool disable);
 void     RADIO_SetModulation(ModulationMode_t modulation);
 void     RADIO_SetVfoState(VfoState_t State);

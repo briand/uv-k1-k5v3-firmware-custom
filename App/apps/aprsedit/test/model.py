@@ -26,7 +26,7 @@ def profile(text, pos=None, hemi=0, ssid=7, path=1, symbol=5, callsign=""):
     if len(call) > 6 or any(not (48 <= c <= 57 or 65 <= c <= 90) for c in call):
         raise ValueError("invalid APRS callsign")
     pos = pos or [4, 8, 5, 0, 9, 0, 0, 0, 2, 1, 6, 2, 5]
-    return struct.pack("<IBBBB", 0x36435041, len(raw), path << 4 | ssid,
+    return struct.pack("<IBBBB", 0x37435041, len(raw), path << 4 | ssid,
                        symbol, hemi) + bytes(pos) + raw.ljust(89, b" ") + \
         bytes([len(call)]) + call.ljust(6, b" ")
 
@@ -35,6 +35,7 @@ def main():
     blob, defs = assets()
     preset_names = [b"CUSTOM", b"PORTABLE", b"MOBILE", b"QRP", b"TEST"]
     menu_names = [b"Call", b"SSID", b"Lat", b"Lon", b"Path", b"Symbol", b"Comm."]
+    path_names = [b"DIRECT", b"WIDE1-1", b"WIDE1-1,WIDE2-1", b"ARISS"]
     presets = [
         b"Portable, UV-K5/K1 F4HWN firmware (github.com/armel)",
         b"Mobile, UV-K5/K1 F4HWN firmware (github.com/armel)",
@@ -52,7 +53,7 @@ def main():
         offset == 0,
         length == 117,
         reserved == 0,
-        target_magic == 0x36435041,
+        target_magic == 0x37435041,
         defs["PROFILE_LEN"] == 117,
         defs["SYM_COUNT"] == 48,
         defs["SYM_CODES"] + defs["SYM_CODES_LEN"] == defs["UI_SIZE"],
@@ -65,6 +66,10 @@ def main():
         all(blob[defs["T_MENU"] + i * defs["T_MENU_STRIDE"]:
                  defs["T_MENU"] + i * defs["T_MENU_STRIDE"] + len(name)] == name
             for i, name in enumerate(menu_names)),
+        defs["T_PATHS_LEN"] == len(path_names) * defs["T_PATHS_STRIDE"],
+        all(blob[defs["T_PATHS"] + i * defs["T_PATHS_STRIDE"]:
+                 defs["T_PATHS"] + i * defs["T_PATHS_STRIDE"] + len(name)] == name
+            for i, name in enumerate(path_names)),
         all(blob[defs["T_PRESET_NAMES"] + i * defs["T_PRESET_NAMES_STRIDE"]:
                  defs["T_PRESET_NAMES"] + i * defs["T_PRESET_NAMES_STRIDE"] + len(name)] == name
             for i, name in enumerate(preset_names)),
@@ -81,6 +86,7 @@ def main():
         len(profile("Portable, UV-K5/K1 F4HWN firmware (github.com/armel)")) == length,
         profile("X" * 89)[4] == 89,
         profile("X")[5:8] == bytes([0x17, 5, 0]),
+        profile("X", path=3)[5] == 0x37,
         profile("X", callsign="F4HWN")[110:117] == b"\x05F4HWN ",
         profile("X")[110:117] == b"\x00      ",
     ]

@@ -6,7 +6,7 @@
 # 2-byte sp-relative add instead of a literal-pool load and a pool word.
 # The frame parts are AX.25-encoded here (addresses shifted left, SSID bytes):
 # the app adds the source (profile or boot-message callsign + SSID), the path (the first 0,
-# 1 or 2 entries of WIDE, end-of-address bit set by the app), the position and
+# 1 or 2 entries of WIDE, or ARISS alone; end-of-address bit set by the app), the position and
 # the FCS. APRS Edit updates the mutable profile prefix. Edit the station
 # defaults below, then rebuild;
 # test/tx_model.py checks the resulting frame.
@@ -29,7 +29,8 @@ SSID = 7                                   # F4HWN-7 (0-15, 0 = no SSID)
 DEST = "APZK5"                             # APZ = experimental software
 PATH = 1                                   # index in PATHS below
 WIDE = ["WIDE1-1", "WIDE2-1"]              # path n = the first n entries
-PATHS = ["DIRECT", "WIDE1-1", "WIDE1-1,2-1"]   # shown on the radio, per path
+ARISS = "ARISS"                            # last path: the ISS digipeater alias
+PATHS = ["DIRECT", "WIDE1-1", "WIDE1-1,2-1", ARISS]   # shown on the radio, per path
 LAT, LON = "4850.90N", "00216.25E"         # default position: DDMM.hhN, DDDMM.hhE
 SYMBOL = "/["                              # table, code: '[' = person
 COMMENT = "Portable, UV-K5/K1 F4HWN firmware (github.com/armel)"
@@ -43,6 +44,7 @@ UI = [
     ("T_TX",     TX_CAPS),
     ("T_DENIED", "TX denied"),
     ("T_NOCALL", "No callsign"),
+    ("T_NOEDIT", "No APRS Edit"),
     ("T_LVL",    "lvl "),
     ("T_TW",     "  tw "),
     ("T_SENT",   "  sent "),
@@ -59,8 +61,8 @@ def addr(call, last=False):
 
 if not 0 <= SSID <= 15:
     sys.exit("SSID must be 0-15")
-if len(WIDE) != 2 or len(PATHS) != len(WIDE) + 1 or not 0 <= PATH < len(PATHS):
-    sys.exit("PATHS lists DIRECT then 1 and 2 WIDE entries (frame buffer); PATH indexes it")
+if len(WIDE) != 2 or len(PATHS) != len(WIDE) + 2 or not 0 <= PATH < len(PATHS):
+    sys.exit("PATHS lists DIRECT, 1 and 2 WIDE entries (frame buffer), then ARISS; PATH indexes it")
 if any(len(s) > 18 - 5 for s in PATHS):
     sys.exit("a PATHS name does not fit the line after 'PATH '")
 if not (re.fullmatch(r"\d{4}\.\d{2}[NS]", LAT) and re.fullmatch(r"\d{5}\.\d{2}[EW]", LON)):
@@ -88,7 +90,7 @@ a.const("UI_SIZE", ui_size)                 # the UI block read by draw()
 a.const("T_TITLE_CHARS", len(TITLE))
 a.const("T_TX_CHARS", len(TX_CAPS))
 a.raw("F_DEST", addr(DEST))
-a.raw("F_WIDE", b"".join(addr(h) for h in WIDE))
+a.raw("F_PATH", b"".join(addr(h) for h in WIDE + [ARISS]))
 a.raw("SYM_CODES", "".join(CODES).encode("ascii"))
 a.raw("SYM_BITMAPS", BITMAPS)
 a.const("SYM_COUNT", len(CODES))

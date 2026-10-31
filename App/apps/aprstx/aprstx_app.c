@@ -21,7 +21,7 @@
  *
  * The source is the profile callsign, or the boot-message callsign when the
  * profile leaves it empty, with an SSID;
- * destination, the WIDE path entries, symbol and comment are AX.25-encoded in
+ * destination, the path entries (WIDEs, ARISS), symbol and comment are AX.25-encoded in
  * gen_assets.py (assets). APRS Edit owns the callsign, position, SSID, path,
  * symbol and comment stored in the mutable profile asset. The frame is built at launch,
  * FCS included.
@@ -37,9 +37,10 @@
  *   1 px per loop · 1 / F then 1 tone level up / down (deviation, REG_70 gain
  *   10-127) · 2 / F then 2 twist up / down: 2200 Hz gain = level x (8 + tw) / 8,
  *   tw -4..+8 (-6..+6 dB), for a receiver's de-emphasis · 3 beacon interval
- *   (off, 1, 5, 15, 30, 60 min), F then 3 beacon off · * scroll view / compact
- *   view · EXIT quit. F as FoxHunt's: the next key goes down, an icon in the
- *   status bar while armed. Level, twist, view and interval are saved on exit.
+ *   (off, 1, 5, 15, 30, 60 min), F then 3 beacon off · 0 open APRS Edit, whose
+ *   top-level EXIT saves and returns here · * scroll view / compact view · EXIT
+ *   quit. F as FoxHunt's: the next key goes down, an icon in the status bar
+ *   while armed. Level, twist, view and interval are saved on exit.
  *
  * Beacon: while an interval is set, the time left before the next frame counts
  * down in a status-bar capsule ("4:32") and the frame is sent when it reaches
@@ -79,8 +80,10 @@
 #define TAIL_FLAGS  3u
 #define CALL_MAX    APRS_CALL_MAX
 #define INFO_LEN    (1u + 8u + 1u + 9u + 1u + APRS_COMMENT_MAX) /* !lat/lon[comment */
-#define PATH_MAX    2u     /* WIDE entries: 0 = DIRECT                        */
-#define FRAME_MAX   (7u + 7u + PATH_MAX * 7u + 2u + INFO_LEN + 2u)
+#define PATH_HOPS   2u     /* WIDE entries: 0 = DIRECT                        */
+#define PATH_ARISS  3u     /* "ARISS" alone, stored after the WIDE entries     */
+#define PATH_MAX    PATH_ARISS
+#define FRAME_MAX   (7u + 7u + PATH_HOPS * 7u + 2u + INFO_LEN + 2u)
 
 /* position: 13 digits DDMMhh DDDMMhh, hemispheres bit 0 south, bit 1 west */
 #define POS_DIGITS  APRS_POS_DIGITS
@@ -99,7 +102,7 @@
 #define REFRESH_LOOPS 125u /* a redraw every 5 s without a key (battery)       */
 #define BEACON_LOOPS 20u   /* every 0.8 s while the beacon counts down: no second skipped */
 
-enum { ST_IDLE = 0, ST_TX, ST_DENIED, ST_NOCALL };
+enum { ST_IDLE = 0, ST_TX, ST_DENIED, ST_NOCALL, ST_NOEDIT };
 
 /* The app state in one struct: a function loads one base address instead of one
  * literal-pool word per global. Bytes, then the halfword, then words, so every
@@ -139,20 +142,13 @@ void *memcpy(void *d, const void *s, size_t n) {
 static char *put(char *o,const char *s){ while(*s)*o++=*s++; return o; }
 /* Formatting by repeated subtraction: no division. Values printed stay below 100000. */
 static uint8_t sub(uint32_t *v,uint32_t d){ uint8_t q=0; while(*v>=d){ *v-=d; q++; } return q; }
-static const uint16_t P10[]={10000u,1000u,100u,10u,1u};
 /* Beacon intervals in minutes, cycled by key 3; index 0 is off. */
 static const uint8_t IV_MIN[]={0u,1u,5u,15u,30u,60u};
 #define IV_COUNT    (sizeof IV_MIN)
-static char *puti(char *o,int32_t v){
-    uint32_t u;
-    if(v<0){*o++='-';u=(uint32_t)(-v);} else u=(uint32_t)v;
-    bool lead=false;
-    for(uint8_t i=0;i<5;i++){
-        uint8_t c=sub(&u,P10[i]);
-        if(c||lead||i==4u){ *o++=(char)('0'+c); lead=true; }
-    }
-    return o;
-}
+/* The resident formatter (API level 3). One local stub keeps every call a
+ * plain bl: the service lies past the ldr immediate range of the table. */
+__attribute__((noinline))
+static char *puti(char *o,int32_t v){ return g.A->append_i32(o,v); }
 /* A tiny row holds 32 characters (4 px each): print_tiny does not clip, so
  * every row built below stays within that. */
 static void tiny(uint8_t y,char *end){ *end='\0'; g.A->print_tiny(str,0,y,false,true); }
@@ -197,27 +193,6 @@ static char *brk(char *o){
     emit(o);
     return str;
 }
-/* The frequency (10 Hz units) drawn as the main screen draws it (ui/main.c,
- * ENABLE_BIG_FREQ): the big digits up to the kHz on lines 4-5, the last two
- * digits in the small font on line 5 right after them (from 1 GHz, the whole
- * string in the big font). The group is aligned left to reserve the rightmost
- * 20 columns for the APRS symbol. Big digits are 13 px (drawn from +2), the
- * point 3 px. No division. */
-static void drawFreq(uint32_t f){
-    const app_api_t *A=g.A;
-    uint16_t m=0;
-    while(f>=100000u){ f-=100000u; m++; }
-    char *o=puti(str,m);
-    *o++='.';
-    for(uint8_t i=0;i<5u;i++) *o++=(char)('0'+sub(&f,P10[i]));
-    *o='\0';
-    uint8_t n=(uint8_t)(o-str), big=(uint8_t)(n-3u);    /* digits before "00" */
-    if(m>=1000u){ A->print_string(str,0,0,4,8); return; }
-    A->print_normal(str+n-2u,(uint8_t)(big*13u+3u),0,5);     /* "00"      */
-    str[n-2u]='\0';
-    A->display_freq(str,0,4,false);                          /* "144.800" */
-}
-
 #define SYM_X 108u
 _Static_assert(SYM_X+SYM_W<=128u,"APRS symbol must fit on screen");
 static void drawSymbol(uint8_t x,uint8_t sym){
@@ -271,8 +246,10 @@ static void build(void){
     A->asset_read(F_DEST,f,F_DEST_LEN);
     for(uint8_t i=0;i<6u;i++) f[7+i]=(uint8_t)((i<n?call[i]:' ')<<1);
     f[13]=(uint8_t)(0x60u|(g.ssid<<1)|(g.path?0u:1u));        /* end bit if DIRECT */
-    uint8_t k=(uint8_t)(14u+g.path*7u);                        /* the first path WIDEs */
-    if(g.path){ A->asset_read(F_WIDE,f+14,(uint16_t)(k-14u)); f[k-1]|=1u; }
+    uint8_t hops=g.path, at=0;
+    if(hops==PATH_ARISS){ hops=1u; at=PATH_HOPS*7u; }          /* ISS digipeater alias */
+    uint8_t k=(uint8_t)(14u+hops*7u);                          /* the first path WIDEs */
+    if(hops){ A->asset_read((uint16_t)(F_PATH+at),f+14,(uint16_t)(k-14u)); f[k-1]|=1u; }
     f[k++]=0x03; f[k++]=0xF0;                                  /* UI frame, no layer 3 */
     uint8_t sym[2];
     A->asset_read((uint16_t)(SYM_CODES+g.sym*2u),sym,2);
@@ -423,12 +400,13 @@ static void draw(void){
          * whatever the shift brought there (the big digits start at y = 33: one
          * blank px between) */
     for(uint8_t x=0;x<128u;x++) b[384u+x]=(uint8_t)((b[384u+x]&0x7Fu)|((~x&1u)<<7));
-    drawFreq(A->tx_freq());
+    g.A->draw_frequency(A->tx_freq(),0,4);   /* the main screen's big digits, lines 4-5 */
     drawSymbol(SYM_X,g.sym);
 
         /* bottom line: "lvl 66  tw +0  sent 3", or why nothing was sent */
-    if(g.status==ST_DENIED||g.status==ST_NOCALL)
-        o=put(str,g.status==ST_DENIED?s+T_DENIED:s+T_NOCALL);
+    if(g.status==ST_DENIED||g.status==ST_NOCALL||g.status==ST_NOEDIT)
+        o=put(str,g.status==ST_DENIED?s+T_DENIED:
+                  g.status==ST_NOCALL?s+T_NOCALL:s+T_NOEDIT);
     else {
         o=put(str,s+T_LVL); o=puti(o,g.lvl);
         o=put(o,s+T_TW); if(g.tw>0) *o++='+'; o=puti(o,g.tw);
@@ -489,6 +467,11 @@ static void handleKeys(void){
     g.fArm=false;
     if(key==APP_KEY_EXIT) g.running=false;
     else if(key==APP_KEY_MENU||key==APP_KEY_PTT) send();
+    else if(key==APP_KEY_0){
+        const uint8_t request=APRS_HANDOFF_EDIT_RETURN;
+        if(A->handoff(APRS_EDIT_APP_NAME,&request,sizeof request)) g.running=false;
+        else g.status=ST_NOEDIT;
+    }
     else if(key==APP_KEY_1){
         if(back){ if(g.lvl>=LVL_MIN+LVL_STEP) g.lvl=(uint8_t)(g.lvl-LVL_STEP); }
         else if(g.lvl<=LVL_MAX-LVL_STEP) g.lvl=(uint8_t)(g.lvl+LVL_STEP);

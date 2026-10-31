@@ -56,20 +56,12 @@ static struct globals g;
 
 _Static_assert(offsetof(struct globals, inBox) + 4u <= 32u, "byte fields out of ldrb range");
 
-/* Decimal digits of v (< 10000), no leading zeros, by subtracting the places:
- * no division is linked. */
+/* The resident formatter (API level 3). One local stub keeps every call a
+ * plain bl: the service lies past the ldr immediate range of the table. */
+__attribute__((noinline))
 static char *putu(char *o, uint16_t v)
 {
-    uint16_t place[PLACE_LEN / 2u];
-    A->asset_read(PLACE, place, sizeof(place));
-    bool lead = true;
-    for (uint8_t i = 0; i < PLACE_LEN / 2u; i++) {
-        uint8_t d = 0;
-        while (v >= place[i]) { v -= place[i]; d++; }
-        if (d || i == PLACE_LEN / 2u - 1u) lead = false;
-        if (!lead) *o++ = (char)('0' + d);
-    }
-    return o;
+    return A->append_u32(o, v);
 }
 
 /* Texts, band names and the F icon are read-only assets (gen_assets.py).
@@ -314,6 +306,18 @@ static void onShort(uint8_t key)
 }
 static void onLong(uint8_t key){ g.fArm=false; func(key); }   /* long band / MR / scan / quit */
 
+/* Do not let the key that closed this modal app reach the resident UI. */
+static void waitKeyRelease(void)
+{
+    uint8_t stable=0;
+    while(stable<2u){
+        if(A->get_key()==APP_KEY_INVALID) stable++;
+        else stable=0;
+        A->delay_ms(10);
+        A->backlight_update();
+    }
+}
+
 __attribute__((section(".text.entry"),used))
 void app_main(const app_api_t *api)
 {
@@ -337,12 +341,15 @@ void app_main(const app_api_t *api)
     uint16_t heldMs=0;
     bool     firedLong=false;
     bool     dirty=true;                               /* redraw only on change */
+    bool     ignoreEntryKey=true;                      /* long 0 is still down */
 
     while(g.running){
         uint8_t key=A->get_key();
         bool rep=(key==APP_KEY_UP||key==APP_KEY_DOWN);
 
-        if(key==APP_KEY_SAVER){
+        if(ignoreEntryKey){
+            if(key==APP_KEY_INVALID) ignoreEntryKey=false;
+        } else if(key==APP_KEY_SAVER){
             held=APP_KEY_INVALID; heldMs=0; firedLong=false;
             A->delay_ms(10); A->backlight_update();
             continue;
@@ -386,6 +393,7 @@ void app_main(const app_api_t *api)
     }
 
     /* push our state back to the resident FM and persist (config + 48 channels) */
+    waitKeyRelease();
     if(!g.st.is_mr) g.st.sel_freq=g.st.freq_playing;
     A->fm_state(&g.st,true);
     A->fm_commit();

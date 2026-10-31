@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Flipper Zero test transmitter for the POCSAG RX app: write Sub-GHz RAW files
-(.sub) that play a POCSAG transmission (1200 bauds) on 433.650 MHz, the bench
+(.sub) that play a POCSAG transmission on 433.650 MHz, the bench
 channel of the APRS RX and ATIS RX files. Tune the radio to 433.650 MHz FM,
 launch POCSAG RX, press Send.
 
@@ -10,9 +10,11 @@ lower frequency), which is what the Flipper's CC1101 does (preset
 tone to imitate, the RAW durations are the runs of equal bits. Each run is
 rounded from exact bit-edge times so the timing error never accumulates.
 
-  flipper_pocsag.py <out_dir> [--freq 433650000] [--baud 1200]
+  flipper_pocsag.py <out_dir> [--freq 433650000] [--baud 1200] [--names alpha,two]
     -> pocsag_alpha.sub, _numeric, _two, _long, _same, _inverted, _biterr, _gap
-One transmission per file (about 1.5 s).
+       (1200 bauds); pocsag512_alpha.sub, ... at 512 bauds, pocsag2400_... at
+       2400 (not decoded: the app shows the preamble's rate only)
+One transmission per file (about 1.5 s at 1200 bauds, 3.5 s at 512).
 """
 import argparse, os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -81,13 +83,18 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("out", nargs="?", default=".")
     ap.add_argument("--freq", type=int, default=433650000)
-    ap.add_argument("--baud", type=int, default=1200)
+    ap.add_argument("--baud", type=int, default=1200, choices=(512, 1200, 2400))
+    ap.add_argument("--names", default="", help="comma-separated test names (default: all)")
     a = ap.parse_args()
     if not 433050000 <= a.freq <= 434790000:
         sys.exit("refusing %d Hz: keep the bench files in the 433 MHz SRD band" % a.freq)
     os.makedirs(a.out, exist_ok=True)
+    names = [n for n in a.names.split(",") if n]
+    prefix = "pocsag" if a.baud == 1200 else "pocsag%d" % a.baud
     for name, (b, pages) in test_bits().items():
-        p = os.path.join(a.out, "pocsag_%s.sub" % name)
+        if names and name not in names:
+            continue
+        p = os.path.join(a.out, "%s_%s.sub" % (prefix, name))
         d = write_sub(p, b, a.freq, a.baud)
         print("%-28s %5.0f ms %4d runs  %s" % (p, sum(abs(x) for x in d) / 1000, len(d),
                                               " | ".join("%d: %s" % (r, t) for r, f, t in pages)))

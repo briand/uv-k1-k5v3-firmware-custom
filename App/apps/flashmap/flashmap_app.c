@@ -171,17 +171,12 @@ static char *put_hex6(char *out, uint32_t address)
     return out;
 }
 
+/* The resident formatter (API level 3). One local stub keeps every call a
+ * plain bl: the service lies past the ldr immediate range of the table. */
+__attribute__((noinline))
 static char *put_u32(char *out, uint32_t value)
 {
-    char reverse[10];
-    uint8_t count = 0u;
-    do {
-        const uint64_t qr = A->uidivmod(value, 10u);
-        reverse[count++] = (char)('0' + (uint8_t)(qr >> 32));
-        value = (uint32_t)qr;
-    } while (value != 0u);
-    while (count != 0u)
-        *out++ = reverse[--count];
+    out = A->append_u32(out, value);
     *out = '\0';
     return out;
 }

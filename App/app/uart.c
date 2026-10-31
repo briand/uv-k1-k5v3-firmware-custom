@@ -202,7 +202,7 @@ typedef union
 #if defined(ENABLE_USB)
     static uint32_t VCP_Timestamp;
     static UART_Command_t VCP_Command;
-    static uint16_t VCP_ReadIndex;
+    uint16_t VCP_ReadIndex;   /* also read by overlay apps (app_overlay.c) */
 #endif
 
 // static bool     bIsEncrypted = true;
