@@ -76,9 +76,14 @@ static const CW_SettingLimits_t s_cw_settings_limits[CW_SETTINGS_SIZE] = {
     { 0, 1, 0 },                                                         // CW_FARNSWORTH_AUTO
     { 0, CW_ROGER_TYPE_COUNT - 1, CW_ROGER_TYPE_NORMAL },                // CW_ROGER_TYPE
     { 0, CW_DISPLAY_COUNT - 1, CW_DISPLAY_1S },                          // CW_DISPLAY_DURATION
+    { 0, 1, 0 },                                                         // CW_PRACTICE_NOISE
+    { 0, CW_PRACTICE_NOISE_LEVEL_MAX, CW_PRACTICE_NOISE_LEVEL_DEFAULT }, // CW_PRACTICE_NOISE_LEVEL
+    { CW_QSO_EASY, CW_QSO_DIFFICULTIES - 1, CW_QSO_EASY },               // CW_QSO_DIFFICULTY
+    { 1, CW_QSO_PILE_MAX, CW_QSO_PILE_DEFAULT },                         // CW_QSO_PILE
+    { CW_CALL_LEN_MIN, CW_CALL_LEN_MAX, CW_CALL_LEN_DEFAULT },           // CW_CALL_LEN
 };
 
-_Static_assert(offsetof(EEPROM_Config_t, CW_DISPLAY_DURATION) - offsetof(EEPROM_Config_t, CW_SETTINGS)
+_Static_assert(offsetof(EEPROM_Config_t, CW_CALL_LEN) - offsetof(EEPROM_Config_t, CW_SETTINGS)
                == CW_SETTINGS_SIZE - 1, "CW settings fields don't match CW_SETTINGS_SIZE");
 #endif
 
@@ -349,7 +354,10 @@ gEeprom.FreqChannel[1]   = IS_FREQ_CHANNEL(Data16[5]) ? Data16[5] : (FREQ_CHANNE
         } __attribute__((packed)) fmCfg;
         PY25Q16_ReadBuffer(0x00A020, &fmCfg, 4);
 
-        // Blank flash reads as all 0xFF (band 3, 64-76M); default to 87.5-108M instead.
+        // Never saved, the record is erased flash, whose band bits read as band 3
+        // (64-76 MHz): start on band 0 (87.5-108 MHz, US and European broadcast)
+        // instead. A saved record always holds a tunable frequency, so a 0xFFFF one
+        // is unset, and a band someone chose is kept.
         gEeprom.FM_Band = (fmCfg.selFreq == 0xFFFF) ? 0 : fmCfg.band;
         //gEeprom.FM_Space = fmCfg.space;
 

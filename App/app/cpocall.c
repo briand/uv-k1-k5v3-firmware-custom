@@ -18,6 +18,7 @@
 
 #include <string.h>
 
+#include "app/cpo.h"
 #include "app/cpocall.h"
 #include "app/cwkeyer.h"
 #include "app/cwmacro.h"
@@ -26,6 +27,9 @@
 #include "external/printf/printf.h"
 #include "misc.h"
 #include "settings.h"
+#ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
+#include "app/cwsynth.h"
+#endif
 #ifdef ENABLE_FLASHLIGHT
 #include "driver/gpio.h"
 #include "py32f071_ll_gpio.h"
@@ -41,7 +45,7 @@
 #define CPO_CALL_MAX_TRIES 3
 // Keeps "999/999" inside the space the score gets on the WPM line
 #define CPO_CALL_SCORE_MAX 999
-// How long the line naming a spacing change stays up
+// How long the line naming a step auto spacing took stays up
 #define CPO_CALL_NOTICE_10MS 150
 // Auto spacing: calls in a row copied on the first listen before the gaps narrow a step
 #define CPO_CALL_AUTO_STREAK 5
@@ -53,12 +57,6 @@ typedef enum {
 	CPO_STEP_NEXT,       // new callsign (played in copy mode)
 	CPO_STEP_ACK,        // copy mode: "dit dit", then NEXT
 } CPO_CallStep_t;
-
-// What the notice line names
-typedef enum {
-	CPO_NOTICE_SPACING = 0,   // the effective speed, or that the spacing is off
-	CPO_NOTICE_AUTO,          // auto spacing on or off
-} CPO_CallNotice_t;
 
 CPO_CallMode_t gCW_CpoCallMode = CPO_CALL_MODE_OFF;
 char gCW_CpoCall[CPO_CALL_MAX_LEN + 1];
@@ -75,7 +73,6 @@ static uint16_t s_wait_10ms = 0;   // counts down only while the operator is idl
 static bool s_paused = false;      // operator has paused since s_step was set
 static bool s_clean = false;       // copy mode: no miss, ? or replay on this call yet
 static uint8_t s_streak = 0;       // copy mode: calls in a row copied clean
-static CPO_CallNotice_t s_notice = CPO_NOTICE_SPACING;
 static uint8_t s_notice_10ms = 0;  // counts down while the notice line is up
 static uint32_t s_rng_state = 0;
 
@@ -92,6 +89,11 @@ static uint32_t Rand(void)
 	return s_rng_state;
 }
 
+uint32_t CPO_Call_Rand(void)
+{
+	return Rand();
+}
+
 static char RandLetter(uint8_t count)
 {
 	return 'A' + (char)(Rand() % count);
@@ -102,17 +104,12 @@ bool CPO_Call_IsCopyMode(void)
 	return gCW_CpoCallMode == CPO_CALL_MODE_COPY;
 }
 
-static void NewCall(void)
+// A call of any length the drills use, 4 to 6 characters
+static int8_t Generate(char *out)
 {
-	char *p = gCW_CpoCall;
+	char *p = out;
 	uint8_t suffix_len;
-
-	// Fold in the time the operator finished the last call so the sequence
-	// doesn't repeat from session to session. xorshift must never sit at zero.
-	s_rng_state ^= millis();
-	if (s_rng_state == 0) {
-		s_rng_state = 0x2545F491;
-	}
+	int8_t dx = -1;
 
 	if (Rand() % 3 != 0) {
 		// US: 1x2, 1x3, 2x1, 2x2 or 2x3
@@ -135,6 +132,7 @@ static void NewCall(void)
 	} else {
 		const uint8_t i = (Rand() % ((sizeof(DX_PREFIXES) - 1) / 2)) * 2;
 
+		dx = i / 2;
 		*p++ = DX_PREFIXES[i];
 		if (DX_PREFIXES[i + 1] != ' ') {
 			*p++ = DX_PREFIXES[i + 1];
@@ -147,10 +145,75 @@ static void NewCall(void)
 		*p++ = RandLetter(26);
 	}
 	*p = '\0';
+	return dx;
+}
+
+int8_t CPO_Call_Generate(char out[CPO_CALL_MAX_LEN + 1])
+{
+	const uint8_t max = gEeprom.CW_CALL_LEN;
+	int8_t dx;
+
+	// Fold in the time the operator finished the last call so the sequence
+	// doesn't repeat from session to session. xorshift must never sit at zero.
+	s_rng_state ^= millis();
+	if (s_rng_state == 0) {
+		s_rng_state = 0x2545F491;
+	}
+
+	// At the longest setting a quarter of the calls go portable, on a call short
+	// enough to take it: a DX call /P, a US call / another call area
+	const bool portable = max >= CPO_CALL_MAX_LEN && Rand() % 4 == 0;
+
+	// Calls that don't fit are drawn again, so the mix of the ones that do stays as is
+	do {
+		dx = Generate(out);
+	} while (strlen(out) > (portable ? max - 2u : max));
+	if (portable) {
+		char *end = out + strlen(out);
+		*end++ = '/';
+		if (dx < 0) {
+			const char *home = out;   // the area digit, a US call's only one
+			while (*home < '0' || *home > '9') {
+				home++;
+			}
+			*end = '0' + (char)((*home - '0' + 1 + Rand() % 9) % 10);
+		} else {
+			*end = 'P';
+		}
+		end[1] = '\0';
+	}
+	return dx;
+}
+
+// With practice tones on the DAC (under band noise) the drill's station sends on its
+// own voice there, apart from the sidetone, so the operator can key over it;
+// otherwise the keyer plays it
+static void Play(const char *text, uint8_t eff_wpm)
+{
+#ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
+	if (CPO_SynthOn()) {
+		CWSYNTH_Send(CWSYNTH_STATION, text, gEeprom.CW_KEY_WPM, eff_wpm);
+		return;
+	}
+#endif
+	CW_StartTextPlayback(text, false, eff_wpm);
+}
+
+static bool Playing(void)
+{
+#ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
+	if (CWSYNTH_IsSending(CWSYNTH_STATION)) {
+		return true;
+	}
+#endif
+	return gCW_PlaybackActive;
 }
 
 static void StopPlayback(void)
 {
+#ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
+	CWSYNTH_Cancel(CWSYNTH_STATION);
+#endif
 	if (!gCW_PlaybackActive) {
 		return;
 	}
@@ -158,16 +221,12 @@ static void StopPlayback(void)
 	// on when it lands mid-element
 	CW_StopPlayback();
 	BK4819_SetScrambleFrequencyControlWord(0);
+#ifdef ENABLE_FEAT_NR7Y_CPO_SYNTH
+	CPO_Sidetone(false, false);   // the same for a sidetone on the DAC
+#endif
 #ifdef ENABLE_FLASHLIGHT
 	GPIO_ResetOutputPin(GPIO_PIN_FLASHLIGHT);
 #endif
-}
-
-static void ShowNotice(CPO_CallNotice_t notice)
-{
-	s_notice = notice;
-	s_notice_10ms = CPO_CALL_NOTICE_10MS;
-	gUpdateDisplay = true;
 }
 
 // The effective speed in use, counting off as the keyer speed
@@ -177,9 +236,16 @@ static uint8_t SpacingWPM(void)
 	return eff_wpm ? eff_wpm : gEeprom.CW_KEY_WPM;
 }
 
-// One step of effective speed. Reaching the keyer speed is stored as off, so
-// raising the keyer speed later doesn't bring the spacing back.
-static void StepSpacing(bool narrower)
+// Reaching the keyer speed is stored as off, so raising the keyer speed later doesn't
+// bring the spacing back
+void CPO_Call_SetSpacing(uint8_t eff_wpm)
+{
+	gEeprom.CW_FARNSWORTH_WPM = (eff_wpm >= gEeprom.CW_KEY_WPM) ? 0 : eff_wpm;
+	s_streak = 0;
+}
+
+// A step auto spacing takes, named on the notice line
+static void AutoStep(bool narrower)
 {
 	uint8_t eff_wpm = SpacingWPM();
 
@@ -188,9 +254,9 @@ static void StepSpacing(bool narrower)
 	} else if (eff_wpm > CW_FARNSWORTH_WPM_MIN) {
 		eff_wpm--;
 	}
-	gEeprom.CW_FARNSWORTH_WPM = (eff_wpm >= gEeprom.CW_KEY_WPM) ? 0 : eff_wpm;
-	s_streak = 0;
-	ShowNotice(CPO_NOTICE_SPACING);
+	CPO_Call_SetSpacing(eff_wpm);
+	s_notice_10ms = CPO_CALL_NOTICE_10MS;
+	gUpdateDisplay = true;
 }
 
 // Copy mode, a call copied: a run of them copied on the first listen narrows the
@@ -202,7 +268,7 @@ static void CountCopy(void)
 	} else if (++s_streak >= CPO_CALL_AUTO_STREAK) {
 		s_streak = 0;
 		if (gEeprom.CW_FARNSWORTH_AUTO && CPO_Call_EffectiveWPM() != 0) {
-			StepSpacing(true);
+			AutoStep(true);
 		}
 	}
 }
@@ -220,7 +286,7 @@ static void Begin(CPO_CallStep_t step, bool play)
 {
 	s_step = CPO_STEP_NONE;
 	if (step == CPO_STEP_NEXT) {
-		NewCall();
+		CPO_Call_Generate(gCW_CpoCall);
 		s_tries = 0;
 		s_known = 0;
 		s_revealed = false;
@@ -230,7 +296,7 @@ static void Begin(CPO_CallStep_t step, bool play)
 	s_pos = 0;
 	CW_ClearTxDisplay();
 	if (play && CPO_Call_IsCopyMode()) {
-		CW_StartTextPlayback(gCW_CpoCall, false, CPO_Call_EffectiveWPM());
+		Play(gCW_CpoCall, CPO_Call_EffectiveWPM());
 	}
 	gUpdateDisplay = true;
 }
@@ -249,17 +315,11 @@ void CPO_Call_SetMode(CPO_CallMode_t mode)
 	}
 }
 
-void CPO_Call_NextMode(void)
-{
-	CPO_Call_SetMode(gCW_CpoCallMode == CPO_CALL_MODE_COPY
-		? CPO_CALL_MODE_OFF
-		: (CPO_CallMode_t)(gCW_CpoCallMode + 1));
-}
-
 void CPO_Call_Restart(void)
 {
 	// After a hit or a reveal the next callsign is already on its way
-	if (gCW_CpoCallMode == CPO_CALL_MODE_OFF || s_step == CPO_STEP_NEXT || s_step == CPO_STEP_ACK) {
+	if ((gCW_CpoCallMode != CPO_CALL_MODE_SEND && !CPO_Call_IsCopyMode())
+		|| s_step == CPO_STEP_NEXT || s_step == CPO_STEP_ACK) {
 		return;
 	}
 	StopPlayback();
@@ -273,26 +333,15 @@ uint8_t CPO_Call_EffectiveWPM(void)
 	return (eff_wpm != 0 && eff_wpm < gEeprom.CW_KEY_WPM) ? eff_wpm : 0;
 }
 
-void CPO_Call_StepSpacing(bool narrower)
+void CPO_Call_SetAutoSpacing(bool on)
 {
-	if (CPO_Call_IsCopyMode()) {
-		StepSpacing(narrower);
-	}
-}
-
-void CPO_Call_ToggleAutoSpacing(void)
-{
-	if (!CPO_Call_IsCopyMode()) {
-		return;
-	}
-	gEeprom.CW_FARNSWORTH_AUTO = !gEeprom.CW_FARNSWORTH_AUTO;
+	gEeprom.CW_FARNSWORTH_AUTO = on;
 	s_streak = 0;
-	ShowNotice(CPO_NOTICE_AUTO);
 }
 
 void CPO_Call_OnChar(char ch)
 {
-	if (gCW_CpoCallMode == CPO_CALL_MODE_OFF) {
+	if (gCW_CpoCallMode != CPO_CALL_MODE_SEND && !CPO_Call_IsCopyMode()) {
 		return;
 	}
 
@@ -329,7 +378,7 @@ void CPO_Call_OnChar(char ch)
 			Schedule(CPO_STEP_NEXT, CPO_CALL_REVEAL_10MS);
 			s_streak = 0;
 			if (gEeprom.CW_FARNSWORTH_AUTO) {
-				StepSpacing(false);
+				AutoStep(false);
 			}
 		} else {
 			Schedule(CPO_STEP_RETRY, CPO_CALL_RESULT_10MS);
@@ -358,7 +407,7 @@ void CPO_Call_Tick10ms(void)
 
 	// Steps wait for the operator to stop keying and for playback to finish, so
 	// the drill never plays over them or scores the tail of a missed word
-	if (s_step == CPO_STEP_NONE || gCW_PlaybackActive || !CW_KeyerIsIdle()) {
+	if (s_step == CPO_STEP_NONE || Playing() || !CW_KeyerIsIdle()) {
 		return;
 	}
 	s_paused = true;
@@ -367,7 +416,7 @@ void CPO_Call_Tick10ms(void)
 		return;
 	}
 	if (s_step == CPO_STEP_ACK) {
-		CW_StartTextPlayback("EE", false, 0);
+		Play("EE", 0);
 		Schedule(CPO_STEP_NEXT, CPO_CALL_RESULT_10MS);
 		return;
 	}
@@ -391,9 +440,7 @@ bool CPO_Call_GetNotice(char out[CPO_CALL_NOTICE_SIZE])
 	if (s_notice_10ms == 0) {
 		return false;
 	}
-	if (s_notice == CPO_NOTICE_AUTO) {
-		strcpy(out, gEeprom.CW_FARNSWORTH_AUTO ? "Auto spacing on" : "Auto spacing off");
-	} else if (CPO_Call_EffectiveWPM() != 0) {
+	if (CPO_Call_EffectiveWPM() != 0) {
 		sprintf_(out, "Spacing %u WPM", CPO_Call_EffectiveWPM());
 	} else {
 		strcpy(out, "Farnsworth off");

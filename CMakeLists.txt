@@ -123,6 +123,10 @@ target_link_libraries(${EXE_NAME} ${TOOLCHAIN_LINK_LIBRARIES})
 
 if(ENABLE_LTO)
     target_compile_options(${EXE_NAME} PRIVATE -flto=auto)
+    # The multiboot RAM-stub check (cmake/check_mb_ramfunc.cmake) inspects
+    # mb_flash's own object, so it stays out of LTO
+    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/App/driver/mb_flash.c
+        PROPERTIES COMPILE_OPTIONS -fno-lto)
 endif()
 
 # Generate map file
