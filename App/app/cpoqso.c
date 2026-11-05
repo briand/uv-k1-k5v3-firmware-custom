@@ -862,7 +862,7 @@ static void Arrive(void)
 	} while (CallTaken(st) && --tries);
 
 	int16_t wpm = gEeprom.CW_KEY_WPM + (int16_t)Rnd(d->wpm_down + d->wpm_up + 1u) - d->wpm_down;
-	st->wpm = (wpm < 10) ? 10 : (wpm > 45) ? 45 : (uint8_t)wpm;
+	st->wpm = (wpm < CW_KEY_WPM_MIN) ? CW_KEY_WPM_MIN : (wpm > CW_KEY_WPM_MAX) ? CW_KEY_WPM_MAX : (uint8_t)wpm;
 	st->eff = 0;
 	if (Chance(d->spacing_pct)) {
 		Spaced(st);
@@ -964,7 +964,7 @@ static void Round(uint8_t mask, uint8_t times, bool careful)
 		if (st->on && st != s_st && ((mask & BIT(st)) || st->lid) && (asked || Wait(st))) {
 			if (asked && Chance(CAREFUL_PCT)) {
 				if (Rnd(2)) {
-					st->wpm = (st->wpm > 12) ? st->wpm - 2 - Rnd(2) : 10;
+					st->wpm = (st->wpm > CW_KEY_WPM_MIN + 2) ? st->wpm - 2 - Rnd(2) : CW_KEY_WPM_MIN;
 				} else {
 					Spaced(st);
 				}
@@ -1279,7 +1279,8 @@ static void Hear(void)
 	if (o.qrs || o.qrq) {
 		// they change speed and say it again
 		for (CPO_QsoStation_t *st = s_pile; st < s_pile + PILE_MAX; st++) {
-			st->wpm = o.qrs ? ((st->wpm > 15) ? st->wpm - 5 : 10) : ((st->wpm < 40) ? st->wpm + 5 : 45);
+			st->wpm = o.qrs ? ((st->wpm > CW_KEY_WPM_MIN + 5) ? st->wpm - 5 : CW_KEY_WPM_MIN)
+			                : ((st->wpm < CW_KEY_WPM_MAX - 5) ? st->wpm + 5 : CW_KEY_WPM_MAX);
 		}
 		o.ask = true;
 	}
