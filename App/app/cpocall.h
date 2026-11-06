@@ -14,7 +14,7 @@
  *     limitations under the License.
  */
 
-// Callsign drill for code practice. F cycles off -> send -> copy:
+// Callsign drill for code practice. F picks off, send or copy:
 //   send: a random callsign is shown and the operator keys it
 //   copy: the callsign is played on the sidetone and the operator keys back what
 //         they heard; a hit is answered with "dit dit", a miss replays the call,
@@ -23,9 +23,10 @@
 // Every character is scored as it is decoded.
 //
 // Copy mode can play with Farnsworth spacing: characters at the keyer speed,
-// with the gaps between them stretched to a slower effective speed (8 widens, 2
-// narrows). Auto spacing (0) narrows the gaps a step after a run of calls copied on
-// the first listen and widens them a step when a call has to be revealed.
+// with the gaps between them stretched to a slower effective speed (practice's
+// Spacng). Auto spacing (AutoSp) narrows the gaps a step after a run of calls copied
+// on the first listen and widens them a step when a call has to be revealed. The
+// calls are no longer than practice's CallLn.
 
 #ifndef APP_CPOCALL_H
 #define APP_CPOCALL_H
@@ -33,14 +34,18 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define CPO_CALL_MAX_LEN 6
+#define CPO_CALL_MAX_LEN 7   // CW_CALL_LEN_MAX: a portable call such as K7ABC/P
 #define CPO_CALL_LINE_SIZE (CPO_CALL_MAX_LEN + 2)   // notes plus '?' plus NUL
-#define CPO_CALL_NOTICE_SIZE 17                     // "Auto spacing off" plus NUL
+#define CPO_CALL_NOTICE_SIZE 15                     // "Spacing 12 WPM" plus NUL
 
 typedef enum {
 	CPO_CALL_MODE_OFF = 0,
 	CPO_CALL_MODE_SEND,
 	CPO_CALL_MODE_COPY,
+#ifdef ENABLE_FEAT_NR7Y_CPO_QSO
+	CPO_CALL_MODE_QSO,      // the QSO drill (cpoqso.c), after copy in F's list
+#endif
+	CPO_CALL_MODE_COUNT,
 } CPO_CallMode_t;
 
 typedef enum {
@@ -52,8 +57,14 @@ typedef enum {
 // Switch mode; resets the score and starts on a new callsign
 void CPO_Call_SetMode(CPO_CallMode_t mode);
 
-// F key: off -> send -> copy -> off
-void CPO_Call_NextMode(void);
+// A random callsign like the drill's: US, or DX from a list of common prefixes, no
+// longer than CW_CALL_LEN. At CW_CALL_LEN_MAX some are portable: a DX call /P, a US
+// call / another call area. Returns the DX prefix's index in that list, or -1 for a
+// US call, whose call area is its last digit.
+int8_t CPO_Call_Generate(char out[CPO_CALL_MAX_LEN + 1]);
+
+// The drill's random numbers (xorshift32), reseeded with each new callsign
+uint32_t CPO_Call_Rand(void);
 
 // 5 key: clear the line and restart the current callsign unscored (replayed in copy)
 void CPO_Call_Restart(void);
@@ -66,14 +77,14 @@ bool CPO_Call_IsCopyMode(void);
 // speed passes it again.
 uint8_t CPO_Call_EffectiveWPM(void);
 
-// 2 and 8 keys, copy mode only: effective speed one step up (narrower gaps) or
-// down (wider). Stepping up to the keyer speed turns the spacing off.
-void CPO_Call_StepSpacing(bool narrower);
+// Copy mode's effective speed, CW_FARNSWORTH_WPM_MIN up to the keyer speed, which
+// turns the spacing off
+void CPO_Call_SetSpacing(uint8_t eff_wpm);
 
-// 0 key, copy mode only: auto spacing on/off
-void CPO_Call_ToggleAutoSpacing(void);
+// Auto spacing on or off, starting its count of clean copies over
+void CPO_Call_SetAutoSpacing(bool on);
 
-// The line shown for a moment after the spacing changes, e.g. "Spacing 12 WPM";
+// The line shown for a moment after auto spacing takes a step, e.g. "Spacing 12 WPM";
 // false while there is none
 bool CPO_Call_GetNotice(char out[CPO_CALL_NOTICE_SIZE]);
 

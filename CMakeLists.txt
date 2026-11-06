@@ -123,6 +123,9 @@ target_link_libraries(${EXE_NAME} ${TOOLCHAIN_LINK_LIBRARIES})
 
 if(ENABLE_LTO)
     target_compile_options(${EXE_NAME} PRIVATE -flto=auto)
+    # The multiboot overlay gate (cmake/check_mb_ramfunc.cmake) checks the restore
+    # stub's relocations in mb_flash.c's own object file, which LTO doesn't produce
+    set_source_files_properties(App/driver/mb_flash.c PROPERTIES COMPILE_OPTIONS -fno-lto)
 endif()
 
 # Generate map file

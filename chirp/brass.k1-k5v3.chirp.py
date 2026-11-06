@@ -783,6 +783,15 @@ FM_BAND_LIST = [
 
 FM_TUNING_MODE_LIST = ["Frequency (VFO)", "Channel (MR)"]
 
+
+def fm_band_of(mem):
+    """The FM band the firmware runs on. A record never saved is erased flash,
+    whose band bits read as 3 (64-76 MHz); the firmware takes band 0 for it,
+    known by its 0xFFFF frequency, which a saved record never holds."""
+    if int(mem.fm_selected_frequency) == 0xFFFF:
+        return 0
+    return int(mem.fm_band) & 0x03
+
 # Widest range any band can reach, used when validating stored channels. A
 # channel is kept as long as *some* band could tune it: validating against only
 # the currently selected band would silently erase a perfectly good channel list
@@ -1001,6 +1010,21 @@ _NR7Y_CW_HANG_10MS_MIN = 1
 _NR7Y_CW_HANG_10MS_MAX = 200
 _NR7Y_CW_HANG_10MS_DEFAULT = 30
 
+# Code practice band noise level (shown 1-16), QSO drill difficulty and pile-up
+# size; mirror CW_PRACTICE_NOISE_LEVEL_*, CW_QSO_* and CW_QSO_PILE_* in
+# App/settings.h
+_NR7Y_CW_NOISE_LEVEL_MAX = 15
+_NR7Y_CW_NOISE_LEVEL_DEFAULT = 15
+_NR7Y_CW_QSO_DIFFICULTIES = ["Easy", "Medium", "Hard"]
+_NR7Y_CW_QSO_PILE_MAX = 4
+_NR7Y_CW_QSO_PILE_DEFAULT = 2
+
+# Practice callsigns' greatest length, 4-7, mirrors CW_CALL_LEN_* in App/settings.h.
+# 6 (the default) is no limit, and 7 adds portable calls.
+_NR7Y_CW_CALL_LEN_MIN = 4
+_NR7Y_CW_CALL_LEN_MAX = 7
+_NR7Y_CW_CALL_LEN_DEFAULT = 6
+
 # CW settings, one byte each from _NR7Y_CW_SETTINGS_ADDR: name -> (offset, min,
 # max, default), the same as s_cw_settings_limits in App/settings.c. A byte out
 # of range reads as the default.
@@ -1018,8 +1042,13 @@ _NR7Y_CW_FIELDS = {
                         _NR7Y_CW_HANG_10MS_DEFAULT),
     "farnsworth_wpm":  (9, 0, _NR7Y_CW_FARNSWORTH_WPM_MAX, 0),
     "farnsworth_auto": (10, 0, 1, 0),
+    "noise":           (11, 0, 1, 0),
+    "noise_level":     (12, 0, _NR7Y_CW_NOISE_LEVEL_MAX, _NR7Y_CW_NOISE_LEVEL_DEFAULT),
+    "qso_difficulty":  (13, 0, len(_NR7Y_CW_QSO_DIFFICULTIES) - 1, 0),
+    "qso_pile":        (14, 1, _NR7Y_CW_QSO_PILE_MAX, _NR7Y_CW_QSO_PILE_DEFAULT),
+    "call_len":        (15, _NR7Y_CW_CALL_LEN_MIN, _NR7Y_CW_CALL_LEN_MAX, _NR7Y_CW_CALL_LEN_DEFAULT),
 }
-_NR7Y_CW_SETTINGS_SIZE = 11
+_NR7Y_CW_SETTINGS_SIZE = 16
 
 
 def _nr7y_unpack_v1_cw_settings(old):
@@ -2328,7 +2357,7 @@ class UVK5RadioEgzumer(chirp_common.CloneModeRadio):
                     0, min(int(element.value) - 1, FM_CHANNELS_MAX - 1))
 
             elif elname == "fm_selected_frequency":
-                band_lo, band_hi = FM_BAND_LIMITS[int(_mem.fm_band) & 0x03]
+                band_lo, band_hi = FM_BAND_LIMITS[fm_band_of(_mem)]
                 try:
                     val2 = int(round(float(str(element.value).strip()) * 10))
                 except Exception:
@@ -3280,7 +3309,7 @@ class UVK5RadioEgzumer(chirp_common.CloneModeRadio):
 
         # int() matters: list_def hands back the bitwise object untouched when
         # the value is already in range, and that is not hashable.
-        tmpfmband = int(list_def(int(_mem.fm_band), FM_BAND_LIST, 0))
+        tmpfmband = int(list_def(fm_band_of(_mem), FM_BAND_LIST, 0))
         band_lo, band_hi = FM_BAND_LIMITS[tmpfmband]
         val = RadioSettingValueList(FM_BAND_LIST, FM_BAND_LIST[tmpfmband])
         rs = RadioSetting("fm_band", "Band", val)
@@ -4375,7 +4404,8 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
             rs_fw.set_doc("Effective speed of the copy practice drills: characters "
                           "play at the keyer speed with the gaps between them "
                           "stretched to this speed (Farnsworth). Off, or at or above "
-                          "the keyer speed, keeps normal spacing.")
+                          "the keyer speed, keeps normal spacing. Spacng in the "
+                          "practice menu.")
             cw.append(rs_fw)
         except Exception as e:
             LOG.error("CW Farnsworth speed: %s", e)
@@ -4387,10 +4417,72 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
                                                        auto_opts[self._cw_get("farnsworth_auto")]))
             rs_fa.set_doc("Narrow the copy practice spacing a step after 5 calls in a "
                           "row copied on the first listen, and widen it a step when a "
-                          "call has to be revealed.")
+                          "call has to be revealed. AutoSp in the practice menu.")
             cw.append(rs_fa)
         except Exception as e:
             LOG.error("CW Farnsworth auto: %s", e)
+
+        # Code practice band noise
+        try:
+            noise_opts = ["OFF", "ON"]
+            rs_pn = RadioSetting("cw_practice_noise", "Code Practice Band Noise",
+                                 RadioSettingValueList(noise_opts,
+                                                       noise_opts[self._cw_get("noise")]))
+            rs_pn.set_doc("Play live receive audio from the VFO's frequency under the "
+                          "code practice sidetone and drills, as band noise. Tune a "
+                          "quiet frequency first. Noise in the practice menu.")
+            cw.append(rs_pn)
+        except Exception as e:
+            LOG.error("CW practice noise: %s", e)
+
+        try:
+            rs_pl = RadioSetting("cw_practice_noise_level", "Code Practice Noise Level",
+                                 RadioSettingValueInteger(
+                                     1, _NR7Y_CW_NOISE_LEVEL_MAX + 1,
+                                     self._cw_get("noise_level") + 1))
+            rs_pl.set_doc("How loud the band noise plays, 1-16, about 2 dB a step "
+                          "(NLevel in the practice menu)")
+            cw.append(rs_pl)
+        except Exception as e:
+            LOG.error("CW practice noise level: %s", e)
+
+        try:
+            rs_qd = RadioSetting("cw_qso_difficulty", "QSO Drill Difficulty",
+                                 RadioSettingValueList(
+                                     _NR7Y_CW_QSO_DIFFICULTIES,
+                                     _NR7Y_CW_QSO_DIFFICULTIES[self._cw_get("qso_difficulty")]))
+            rs_qd.set_doc("How the QSO drill's stations come on: Easy is strong, at "
+                          "your speed, on a paddle; Medium and Hard bring other "
+                          "speeds, weak and fading signals, bugs and straight keys, "
+                          "chirp, and impatient tail-enders (Diffic in the practice "
+                          "menu)")
+            cw.append(rs_qd)
+        except Exception as e:
+            LOG.error("CW QSO difficulty: %s", e)
+
+        try:
+            rs_qp = RadioSetting("cw_qso_pile", "QSO Drill Pile-up",
+                                 RadioSettingValueInteger(1, _NR7Y_CW_QSO_PILE_MAX,
+                                                          self._cw_get("qso_pile")))
+            rs_qp.set_doc("The most stations that call you at once in the QSO drill, "
+                          "1-4; how many come depends on how active you are (Pileup "
+                          "in the practice menu)")
+            cw.append(rs_qp)
+        except Exception as e:
+            LOG.error("CW QSO pile-up: %s", e)
+
+        try:
+            rs_cl = RadioSetting("cw_call_len", "Practice Callsign Length",
+                                 RadioSettingValueInteger(_NR7Y_CW_CALL_LEN_MIN,
+                                                          _NR7Y_CW_CALL_LEN_MAX,
+                                                          self._cw_get("call_len")))
+            rs_cl.set_doc("The longest callsign the send, copy and QSO drills use, "
+                          "4-7. They run 4-6 characters, so 6 is no limit; 7 adds "
+                          "portable calls such as K7ABC/P and W1AB/7 (CallLn in the "
+                          "practice menu)")
+            cw.append(rs_cl)
+        except Exception as e:
+            LOG.error("CW practice call length: %s", e)
 
         # CW Macros (4 messages)
         macros = RadioSettingGroup("cw_macros", "CW Macros")
@@ -4500,6 +4592,17 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
                              0 if idx == 0 else _NR7Y_CW_FARNSWORTH_WPM_MIN + idx - 1)
             elif name == "cw_farnsworth_auto":
                 self._cw_set("farnsworth_auto", ["OFF", "ON"].index(str(element.value)))
+            elif name == "cw_practice_noise":
+                self._cw_set("noise", ["OFF", "ON"].index(str(element.value)))
+            elif name == "cw_practice_noise_level":
+                self._cw_set("noise_level", int(element.value) - 1)
+            elif name == "cw_qso_difficulty":
+                self._cw_set("qso_difficulty",
+                             _NR7Y_CW_QSO_DIFFICULTIES.index(str(element.value)))
+            elif name == "cw_qso_pile":
+                self._cw_set("qso_pile", element.value)
+            elif name == "cw_call_len":
+                self._cw_set("call_len", element.value)
             elif name.startswith("cw_msg"):
                 # "cw_msg1" → idx 1 … "cw_msg4" → idx 4
                 self._set_cw_msg(int(name[6:]), str(element.value))

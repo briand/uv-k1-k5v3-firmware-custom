@@ -72,9 +72,14 @@ static const CW_SettingLimits_t s_cw_settings_limits[CW_SETTINGS_SIZE] = {
     { CW_HANG_10MS_MIN, CW_HANG_10MS_MAX, CW_HANG_10MS_DEFAULT },        // CW_HANG_10MS
     { 0, CW_KEY_WPM_MAX - 1, 0 },                                        // CW_FARNSWORTH_WPM (1 to MIN-1 read as 0)
     { 0, 1, 0 },                                                         // CW_FARNSWORTH_AUTO
+    { 0, 1, 0 },                                                         // CW_PRACTICE_NOISE
+    { 0, CW_PRACTICE_NOISE_LEVEL_MAX, CW_PRACTICE_NOISE_LEVEL_DEFAULT }, // CW_PRACTICE_NOISE_LEVEL
+    { 0, CW_QSO_DIFFICULTIES - 1, CW_QSO_EASY },                         // CW_QSO_DIFFICULTY
+    { 1, CW_QSO_PILE_MAX, CW_QSO_PILE_DEFAULT },                         // CW_QSO_PILE
+    { CW_CALL_LEN_MIN, CW_CALL_LEN_MAX, CW_CALL_LEN_DEFAULT },           // CW_CALL_LEN
 };
 
-_Static_assert(offsetof(EEPROM_Config_t, CW_FARNSWORTH_AUTO) - offsetof(EEPROM_Config_t, CW_SETTINGS)
+_Static_assert(offsetof(EEPROM_Config_t, CW_CALL_LEN) - offsetof(EEPROM_Config_t, CW_SETTINGS)
                == CW_SETTINGS_SIZE - 1, "CW settings fields don't match CW_SETTINGS_SIZE");
 #endif
 

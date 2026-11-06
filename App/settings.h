@@ -119,11 +119,34 @@ typedef enum CW_IambicMode_t CW_IambicMode_t;
 #define CW_KEY_WPM_DEFAULT        18
 
 // Number of CW settings bytes (EEPROM_Config_t CW_SETTINGS)
-#define CW_SETTINGS_SIZE          11
+#define CW_SETTINGS_SIZE          16
 
 // Copy practice effective speed (Farnsworth): the slowest the gaps between
 // characters can stretch to. It always stays below the keyer speed.
 #define CW_FARNSWORTH_WPM_MIN     5
+
+// Code practice band noise level: the BK4819's AF DAC gain for receive audio,
+// about 2 dB a step, shown as 1-16
+#define CW_PRACTICE_NOISE_LEVEL_MAX     15
+#define CW_PRACTICE_NOISE_LEVEL_DEFAULT 15
+
+// QSO drill difficulty: how the stations it puts on the air speak (see cpoqso.c)
+enum {
+	CW_QSO_EASY = 0,
+	CW_QSO_MEDIUM,
+	CW_QSO_HARD,
+	CW_QSO_DIFFICULTIES,
+};
+
+// QSO drill pile-up: the most stations that call you at once, one per synthesizer voice
+#define CW_QSO_PILE_MAX     4
+#define CW_QSO_PILE_DEFAULT 2
+
+// Practice callsigns' greatest length. The drills' calls run 4 to 6 characters, so 6
+// (the default) is no limit, and 7 adds portable calls such as K7ABC/P and W1AB/7.
+#define CW_CALL_LEN_MIN     4
+#define CW_CALL_LEN_MAX     7
+#define CW_CALL_LEN_DEFAULT 6
 
 #endif
 
@@ -449,6 +472,11 @@ typedef struct {
 			uint8_t CW_HANG_10MS;             // break-in hang time in 10 ms units
 			uint8_t CW_FARNSWORTH_WPM;        // copy practice effective speed, 0 = keyer spacing
 			uint8_t CW_FARNSWORTH_AUTO;       // copy practice narrows and widens the spacing on its own
+			uint8_t CW_PRACTICE_NOISE;        // code practice plays live receive audio under the sidetone
+			uint8_t CW_PRACTICE_NOISE_LEVEL;  // its AF DAC gain, 0-15
+			uint8_t CW_QSO_DIFFICULTY;        // QSO drill, CW_QSO_EASY to CW_QSO_HARD
+			uint8_t CW_QSO_PILE;              // QSO drill, most callers at once, 1 to CW_QSO_PILE_MAX
+			uint8_t CW_CALL_LEN;              // practice callsigns, at most this long, CW_CALL_LEN_MIN to _MAX
 		};
 		uint8_t CW_SETTINGS[CW_SETTINGS_SIZE];
 	};
@@ -538,7 +566,7 @@ void SETTINGS_UpdateChannel(uint16_t channel, const VFO_Info_t *pVFO, bool keep)
 //   +4  EEPROM schema (EEPROM_SCHEMA_*)
 //   +5  reserved (3)
 //   +8  CW settings, CW_SETTINGS_SIZE bytes (v1.x packed them into 8 at 0xA140)
-//   +19 reserved for new gEeprom values (45)
+//   +24 reserved for new gEeprom values (40)
 #define CW_BLOCK_ADDR          0x00A200
 #define CW_BLOCK_SIZE          0x40
 #define CW_BLOCK_HDR_SIZE      8
