@@ -58,6 +58,17 @@ static bool     s_local_sidetone_held;  // ALAM and the sidetone gain own the au
 static bool     s_local_keyed;          // tone on
 static uint32_t s_local_key_up_ms;      // when the tone last went off
 
+// Holdoff to load when keying stops, from the CWdisp setting
+static uint16_t TxDisplayHoldoff(void)
+{
+	switch (gEeprom.CW_DISPLAY_DURATION) {
+		case CW_DISPLAY_5S:       return 5  * CW_DISPLAY_HOLDOFF_UNIT;
+		case CW_DISPLAY_10S:      return 10 * CW_DISPLAY_HOLDOFF_UNIT;
+		case CW_DISPLAY_INFINITE: return CW_TX_DISPLAY_HOLDOFF_INFINITE;
+		default:                  return CW_DISPLAY_HOLDOFF_UNIT;
+	}
+}
+
 static void LocalSidetoneRelease(void)
 {
 	s_local_sidetone_held = false;
@@ -211,7 +222,7 @@ void CW_AppUpdate(void)
 				#endif
 				s_local_sidetone_held = true;
 				s_local_keyed = true;
-				gCW_TxDisplayHoldoff_10ms = 200;
+				gCW_TxDisplayHoldoff_10ms = TxDisplayHoldoff();
 			break;
 
 			case CW_ACTION_NONE:
@@ -229,7 +240,7 @@ void CW_AppUpdate(void)
 				#endif
 				s_local_keyed = false;
 				s_local_key_up_ms = millis();
-				gCW_TxDisplayHoldoff_10ms = 200;
+				gCW_TxDisplayHoldoff_10ms = TxDisplayHoldoff();
 			break;
 
 			default:
@@ -244,7 +255,7 @@ void CW_AppUpdate(void)
 	{
 		case CW_ACTION_CARRIER_ON:
 			gTxTimerCountdown_500ms = 0;
-			gCW_TxDisplayHoldoff_10ms = 200;
+			gCW_TxDisplayHoldoff_10ms = TxDisplayHoldoff();
 			gPttIsPressed = true;
 
 			if (gCW_State == CW_INACTIVE)
@@ -272,13 +283,13 @@ void CW_AppUpdate(void)
 				RADIO_CW_Suspend();
 				gCW_SuspendCounter_1ms = millis();
 			}
-			gCW_TxDisplayHoldoff_10ms = 200;
+			gCW_TxDisplayHoldoff_10ms = TxDisplayHoldoff();
 		break;
 
 		case CW_ACTION_CARRIER_HOLD_ON:
 			gPttIsPressed = true;
 			gTxTimerCountdown_500ms = 0;
-			gCW_TxDisplayHoldoff_10ms = 200;
+			gCW_TxDisplayHoldoff_10ms = TxDisplayHoldoff();
 
 			// if hold arrives while suspended (shouldn't happen), resume once
 			if (gCW_State == CW_SUSPENDED) {
@@ -335,7 +346,7 @@ void CW_AppUpdate(void)
 	{
 		if (millis_since(gCW_SuspendCounter_1ms) >= gEeprom.CW_HANG_10MS * 10u) {
             gCW_SuspendCounter_1ms = 0;
-            gCW_TxDisplayHoldoff_10ms = 200;
+            gCW_TxDisplayHoldoff_10ms = TxDisplayHoldoff();
             gPttIsPressed = false;
 			CW_EndTxNow();
 		}
@@ -355,7 +366,7 @@ void CW_TimeSlice10ms(void)
 	CW_PlaybackIndicatorDeadline();
 
 	// Decrement TX display holdoff timer (runs every 10ms tick regardless of TX state)
-	if (gCW_TxDisplayHoldoff_10ms > 0) {
+	if (gCW_TxDisplayHoldoff_10ms > 0 && gCW_TxDisplayHoldoff_10ms != CW_TX_DISPLAY_HOLDOFF_INFINITE) {
 		if (--gCW_TxDisplayHoldoff_10ms == 0)
 			gUpdateDisplay = true;  // Trigger screen refresh to switch away from CW display
 	}

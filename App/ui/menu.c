@@ -197,6 +197,7 @@ const t_menu_item MenuList[] =
 	{"CWrtyp",      MENU_CW_ROGER_TYPE },
 	{"CWbkin",      MENU_CW_BKIN       },
 	{"CWhang",      MENU_CW_HANG       },
+	{"CWdisp",      MENU_CW_DISPLAY    },
 #endif
 
     // hidden menu items from here on
@@ -714,8 +715,8 @@ const char *const CategoryNames[CAT_COUNT] = {
 #ifdef ENABLE_CW_MODULATOR
 static const uint8_t CatCw[] = {
     MENU_CW_FREQ, MENU_CW_SIDETONE_LEVEL, MENU_CW_KEYER_MODE, MENU_CW_KEY_WPM,
-    MENU_CW_KEY_INPUT, MENU_CW_BKIN, MENU_CW_HANG, MENU_CW_MSG1, MENU_CW_MSG2,
-    MENU_CW_MSG3, MENU_CW_MSG4, MENU_CW_MSG_REPEAT, MENU_CW_ROGER_DITS,
+    MENU_CW_KEY_INPUT, MENU_CW_BKIN, MENU_CW_HANG, MENU_CW_DISPLAY, MENU_CW_MSG1,
+    MENU_CW_MSG2, MENU_CW_MSG3, MENU_CW_MSG4, MENU_CW_MSG_REPEAT, MENU_CW_ROGER_DITS,
     MENU_CW_ROGER_TYPE,
 };
 #endif
@@ -1854,6 +1855,16 @@ void UI_DisplayMenu(void)
 
 		case MENU_CW_HANG:
 			sprintf(String, "Hang\n%d ms", gSubMenuSelection * 10);
+			break;
+
+		case MENU_CW_DISPLAY:
+			// how long the CW decode line stays up after keying stops
+			if (gSubMenuSelection == CW_DISPLAY_INFINITE)
+				strcpy(String, "CW Decode\nInfinite");
+			else
+				sprintf(String, "CW Decode\n%d ms",
+					gSubMenuSelection == CW_DISPLAY_10S ? 10000 :
+					gSubMenuSelection == CW_DISPLAY_5S  ? 5000  : 1000);
 			break;
 
 		case MENU_CW_MSG_REPEAT:

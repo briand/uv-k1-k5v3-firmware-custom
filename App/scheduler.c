@@ -155,7 +155,8 @@ void SysTick_Handler(void)
 
 #ifdef ENABLE_CW_MODULATOR
 	// CW TX display holdoff timer
-	DECREMENT_AND_TRIGGER(gCW_TxDisplayHoldoff_10ms, gUpdateDisplay);
+	if (gCW_TxDisplayHoldoff_10ms != CW_TX_DISPLAY_HOLDOFF_INFINITE)
+		DECREMENT_AND_TRIGGER(gCW_TxDisplayHoldoff_10ms, gUpdateDisplay);
 #endif
 
     DECREMENT(boot_counter_10ms);

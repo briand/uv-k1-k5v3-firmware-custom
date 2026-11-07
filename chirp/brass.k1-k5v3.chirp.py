@@ -1054,6 +1054,9 @@ _NR7Y_CW_ROGER_DITS_DEFAULT = 9
 # Proper roger type, indexed like CW_ROGER_TYPE_* in App/settings.h
 _NR7Y_CW_ROGER_TYPES = ["Normal", "Stuttering", "Skipping"]
 
+# CW decode line display duration, indexed like CW_DISPLAY_* in App/settings.h
+_NR7Y_CW_DISPLAY_OPTS = ["1000 ms", "5000 ms", "10000 ms", "Infinite"]
+
 # Break-in hang time in 10 ms units, mirrors CW_HANG_10MS_* in App/settings.h
 _NR7Y_CW_HANG_10MS_MIN = 1
 _NR7Y_CW_HANG_10MS_MAX = 200
@@ -1077,8 +1080,9 @@ _NR7Y_CW_FIELDS = {
     "farnsworth_wpm":  (9, 0, _NR7Y_CW_FARNSWORTH_WPM_MAX, 0),
     "farnsworth_auto": (10, 0, 1, 0),
     "roger_type":      (11, 0, len(_NR7Y_CW_ROGER_TYPES) - 1, 0),
+    "display":         (12, 0, len(_NR7Y_CW_DISPLAY_OPTS) - 1, 0),
 }
-_NR7Y_CW_SETTINGS_SIZE = 12
+_NR7Y_CW_SETTINGS_SIZE = 13
 
 
 def _nr7y_unpack_v1_cw_settings(old):
@@ -4451,6 +4455,19 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
         except Exception as e:
             LOG.error("CW hang time: %s", e)
 
+        # CW decode display duration
+        try:
+            disp = self._cw_get("display")
+            rs_disp = RadioSetting("cw_display", "CW Decode Display Time (CWdisp)",
+                                   RadioSettingValueList(_NR7Y_CW_DISPLAY_OPTS,
+                                                         _NR7Y_CW_DISPLAY_OPTS[disp]))
+            rs_disp.set_doc("How long the decoded CW text of what you sent stays "
+                            "on screen after keying stops (default 1000 ms). "
+                            "Infinite keeps it until it is cleared or replaced.")
+            cw.append(rs_disp)
+        except Exception as e:
+            LOG.error("CW display time: %s", e)
+
         # Message Repeat Delay
         try:
             rd = self._cw_get("repeat_delay")
@@ -4620,6 +4637,9 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
                              _NR7Y_CW_ROGER_TYPES.index(str(element.value)))
             elif name == "cw_hang_ms":
                 self._cw_set("hang_10ms", int(element.value) // 10)
+            elif name == "cw_display":
+                self._cw_set("display",
+                             _NR7Y_CW_DISPLAY_OPTS.index(str(element.value)))
             elif name == "cw_farnsworth_wpm":
                 idx = _NR7Y_CW_FARNSWORTH_OPTS.index(str(element.value))
                 self._cw_set("farnsworth_wpm",
