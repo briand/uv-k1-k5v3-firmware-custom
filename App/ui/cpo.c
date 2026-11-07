@@ -168,8 +168,9 @@ static void DisplayQso(char *text, uint8_t text_len)
 	if (CPO_Qso_GetHint(line)) {
 		UI_PrintStringSmallNormal(line, 0, 127, 1);
 	}
+	// From the left edge, with its word spaces: no callsign above to line up with
 	if (text_len > 0) {
-		UI_PrintStringCWLarge(text, UI_CW_LARGE_PITCH, 3);
+		UI_PrintStringCWLarge(text, 0, 3);
 	}
 	sprintf_(text, "%u/%u", gCW_CpoQsoLogged, gCW_CpoQsoFailed);
 	UI_PrintStringSmallNormal(text, SCORE_START, SCORE_END, 6);
@@ -185,8 +186,15 @@ void UI_DisplayCPO(void)
 	const bool drill = gCW_CpoCallMode != CPO_CALL_MODE_OFF;
 	// Drills use the frequency-sized font, which a callsign and its copy fit in easily;
 	// plain practice keeps the narrower one so more free-form sending stays in view.
-	// Drill lines start one cell in, so one character fewer fits.
-	const uint8_t tx_len = CW_GetTxDisplayTail(String, drill ? UI_CW_LARGE_MAX_LEN : 17);
+	// The callsign drills' lines start one cell in, so one character fewer fits; the
+	// QSO drill's starts at the left edge. The size counts the terminator.
+#ifdef ENABLE_FEAT_NR7Y_CPO_QSO
+	const uint8_t tx_max = gCW_CpoCallMode == CPO_CALL_MODE_QSO ? UI_CW_LARGE_MAX_LEN + 1
+		: drill ? UI_CW_LARGE_MAX_LEN : 17;
+#else
+	const uint8_t tx_max = drill ? UI_CW_LARGE_MAX_LEN : 17;
+#endif
+	const uint8_t tx_len = CW_GetTxDisplayTail(String, tx_max);
 
 	static const char *const titles[CPO_CALL_MODE_COUNT] = {
 		"Code Practice", "Send Callsigns", "Copy Callsigns",

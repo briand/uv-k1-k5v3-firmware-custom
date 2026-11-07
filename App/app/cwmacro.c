@@ -616,9 +616,11 @@ void CW_AddToTxDisplay(char ch, bool hasSpace)
 #endif
 	
 #ifdef ENABLE_CODE_PRACTICE
-	// The callsign drill scores characters only, and a space would push the keyed
-	// line out of line with the callsign above it
-	if (gCW_CpoActive && gCW_CpoCallMode != CPO_CALL_MODE_OFF)
+	// The callsign drills score characters only, and a space would push the keyed
+	// line out of line with the callsign above it. The QSO drill is conversation and
+	// keeps its word spaces.
+	if (gCW_CpoActive && (gCW_CpoCallMode == CPO_CALL_MODE_SEND
+		|| gCW_CpoCallMode == CPO_CALL_MODE_COPY))
 		hasSpace = false;
 #endif
 
