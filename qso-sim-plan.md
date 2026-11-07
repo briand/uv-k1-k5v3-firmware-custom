@@ -8,7 +8,8 @@ merging, for Andrew to review and comment on.
 ## Where it stands
 
 - It builds and fits in the CW preset, but only with LTO. With `-DENABLE_LTO=OFF`
-  it overflows flash by about 1.9 KB.
+  it overflows flash by about 1.9 KB. LTO is new to this firmware and untested with
+  overlay apps and multiboot; see "LTO: needs testing" below.
 - The new code reserves about **1.8 KB of RAM for good**, used only while code
   practice is open. All of it is file-scope `static` arrays in `.bss`, not stack.
   The linker reserves it at boot and it is never released, though only practice
@@ -239,8 +240,48 @@ risks of a settings overlay app (see below).
 - **Scrubbing `CPO_Qso_Tick10ms` for space.** A pass found nothing worth the churn.
   The code is already tight.
 
+## LTO: needs testing before we rely on it
+
+The CW preset fits only because 56d4553d turns on LTO for CW (`"ENABLE_LTO": true`
+in `CMakePresets.json`). Every other preset still has it off. We're wary of it:
+
+- **History:** Meng Zhuo turned LTO on by default (164a7273, 2026-01-30: "saves ~4K
+  in Flash and ~300 Bytes in RAM"). Armel set it back to off the same day
+  (3f3dab78, "Fix ENABLE_LTO to false by default"), with no reason given. We don't
+  know what he ran into, so we should ask him, or test for it ourselves.
+- **Multiboot already needs special handling:**
+  - `mb_flash.c` is built with `-fno-lto` (added in 56d4553d), because
+    `cmake/check_mb_ramfunc.cmake` checks that object's RAM stub as the overlay
+    safety gate. The gate still passes ("Multiboot RAM stub isolation OK").
+  - Anything else that is reached only by address, a linker-script section or the
+    overlay app API (the sys table in `app_overlay.c`, `.bss.mb_workspace`, the
+    workspace pinned at 0x20000280) is the kind of thing LTO can move, merge or
+    drop.
+- **Warnings to fix if we keep LTO:**
+  - `_ebss` is declared `uint32_t` in `stack_usage.c` (from the 6.2 merge,
+    68d68234) but `uint8_t` in `ui/welcome.c` and `apps/app_overlay.c`. Only LTO
+    sees all three together, so only CW warns (`-Wlto-type-mismatch`). It's
+    harmless, since only the address is used, but should become one shared
+    declaration.
+  - The assembler warns "setting incorrect section attributes for
+    `.data.cwsynth_held`" on LTO's output. That's because the synth's inner loop,
+    `Held()`, is code placed in a `.data` section so startup copies it to RAM. The
+    map shows it does land in RAM (64 B at 0x20000044), so it works, but a
+    dedicated RAM-code section (as `.MBRamFunc` is) would silence the warning.
+- **Testing to do on a CW/LTO build:**
+  - Boot.
+  - Launch and exit every overlay app; check SysInfo's RAM numbers.
+  - Multiboot: switch images and run restore.
+  - Save and reload settings; CHIRP read and write.
+  - Stack-usage readout.
+  - Code practice and the QSO drill: synth, DAC and noise.
+- **If LTO turns out to be unsafe,** CW needs about 1.9 KB of flash from somewhere
+  else: menu Option B, the overlay text assets, or shipping the QSO-without-SYNTH
+  tier in CW.
+
 ## Suggested order
 
+0. LTO testing above, before building more on top of it.
 1. Serial shutdown during practice, plus the flash write guard (small; worth having
    on its own).
 2. The sector cache borrow (#1).
@@ -258,3 +299,19 @@ risks of a settings overlay app (see below).
 - For QSO without the synth: when you key over the station, should its playback
   stop (a break-in) or wait for you to finish? And what pitch offset sounds most
   like "another op" without leaving the tone generator's clean range?
+
+## Other feedback
+
+- First off, this whole simulator and the DAC-generated callers thing is fantastic.
+  I do want to get this feature in a near-term release.
+- The UX still has some rough corners. Button legend really doesn't belong in a menu;
+  lots of overlay apps recently show little button legends at the bottom half of the
+  screen and that might be the way to go with this? I'm not sure. Following the new
+  menu category style of putting the category label up in the top left corner will
+  make it seem more unified, which would happen automatically if we move the entire
+  menu into the main menu system instead of recreating it anyway. 
+- If flashlight is a menu setting, then backlight-held-on should be one too, and
+  similarly a saved/restored setting. Neither would need button shortcuts. I might
+  be arriving at the thinking that there's no need for a button legend if everything
+  aside from WPM is in the menu anyway. Or it's a very abbreveiated legend at the
+  bottom of the screen at all times.
