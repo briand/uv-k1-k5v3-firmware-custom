@@ -1,10 +1,10 @@
-# NR7Y CW mod for F4HWN Fusion
+# Brass - CW firmware for the UV-K1 and UV-K5 V3
 
 ## 📦 [**Download prebuilt firmware to flash → Releases**](https://github.com/briand/uv-k1-k5v3-firmware-custom/releases)
-Pre-built `.uf2`/`.bin` files ready to flash are published every release, you don't need to compile them.
+Pre-built `.uf2`/`.bin` files and the matching CHIRP module are published with every release; you don't need to compile anything.
 
 ## 📖 [**Documentation site →**](https://briand.github.io/cw-firmware-docs/)
-Full menu reference, rework guides now live here.
+Full menu reference, rework guides and release notes for each version live here.
 
 ## ⚠️ Upgrading from v1.x to v2.0: back up with CHIRP first
 
@@ -15,7 +15,7 @@ To carry your channels and settings over:
 
 1. **Before flashing v2.x**, while the radio still runs v1.x, open CHIRP with the CHIRP module from your current v1.x release (for example `nr7y.k1-k5v3.chirp.v1.4.py`), download from the radio and **save the image** (`.img`). This file is your backup; keep it.
 2. Flash v2.0 (see [Flashing the Firmware with UV Studio](#flashing-the-firmware-with-uv-studio)).
-3. On the radio, run **Reset → ALL** and let it restart. This clears the old layout so nothing left over from v1. Calibration is not affected.
+3. On the radio, run **Reset → ALL** and let it restart. This clears the old layout so nothing is left over from v1.x. Calibration is not affected.
 4. In CHIRP, load the CHIRP module attached to the [v2.0 release](https://github.com/briand/uv-k1-k5v3-firmware-custom/releases) (`brass.k1-k5v3.chirp.v2.0.py`; the firmware is named Brass from v2.0), then **open the image you saved in step 1**. The module converts it to the v2.x layout as it loads: channels, settings, CW settings, macros and key assignments. CW and USB channels start at the v2.0 filter defaults: CW narrow, USB wide.
 5. Upload to the radio.
 
@@ -23,7 +23,18 @@ Notes:
 
 - After upgrading, use only the v2.0 CHIRP module with the radio. It refuses to upload to v1.x firmware, and a v1.x module would write CW settings and macros where v2.0 no longer reads them.
 - Without the CHIRP step, a radio that had macros recorded can show up to 12 garbage entries in CHIRP at channels 449-460, where v1.x stored the macros. Delete them, or do the steps above.
-- Multiboot: when v2.0 opens a configuration bank where stock F4HWN v6.2 has saved settings, it keeps that bank's channels, settings and key assignments.
+- Multiboot: when v2.0 opens a configuration bank where stock F4HWN v6.2 or later has saved settings, it keeps that bank's channels, settings and key assignments.
+
+## How Brass differs from the F4HWN text below
+
+Brass is built from its own `CW` preset, not Fusion, so a few things in the F4HWN README below don't apply as written:
+
+- **Flashing:** UV Studio's catalog lists only official F4HWN releases. Load the Brass `.bin` from our Releases page as a local file.
+- **CHIRP:** use the Brass CHIRP module from our Releases page, not the F4HWN driver.
+- **SetCfg** restarts the radio to switch configuration banks. Brass leaves hot switching off to save flash.
+- **Overlay apps** are enabled (`F+7` to launch). Brass uses the same app ABI as F4HWN v6.3.0, so install the app files from that F4HWN release. The CW keyer is suspended while an app runs.
+- **CW Keyer and CW USB overlay apps** apply their own crystal (`XTAL`) correction inside the app. On a radio whose frequency is already trimmed with F_CAL, the two corrections add up.
+- **Building:** `./compile-firmware.sh CW` outputs `build/CW/brass.cw.bin`.
 
 This repository builds on the [F4HWN codebase](https://github.com/armel/uv-k1-k5v3-firmware-custom) by Armel F4HWN, adding a set of features specifically for CW operators.
 
