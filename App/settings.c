@@ -1510,9 +1510,24 @@ void SETTINGS_UpdateChannel(uint16_t channel, const VFO_Info_t *pVFO, bool keep)
     void SETTINGS_WriteCurrentVol(void)
     {
         uint8_t State[8];
+        uint8_t Gain = gEeprom.VOLUME_GAIN;
+
+    #ifdef ENABLE_FEAT_F4HWN
+        // VOLUME_GAIN lives in the calibration sector (shared by every
+        // multiboot slot). Store the user's volume, never the temporary 0
+        // that ACTION_Mute puts in VOLUME_GAIN. Otherwise a save while muted
+        // boots the radio at 0 (VOLUME_GAIN_BACKUP is loaded from this
+        // byte), and the save after unmuting sets bits again, which erases
+        // and rewrites the whole calibration sector. A nonzero gain while
+        // muted means SetVol was used during mute: take that as the new volume.
+        if (!gMute || Gain != 0)
+            gEeprom.VOLUME_GAIN_BACKUP = Gain;
+        Gain = gEeprom.VOLUME_GAIN_BACKUP;
+    #endif
+
         // 0x1F88
         PY25Q16_ReadBuffer(0x010000 + 0x188, State, sizeof(State));
-        State[6] = gEeprom.VOLUME_GAIN;
+        State[6] = Gain;
         PY25Q16_WriteBuffer(0x010000 + 0x188, State, sizeof(State), false);
     }
 #endif

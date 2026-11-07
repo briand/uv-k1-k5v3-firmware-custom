@@ -98,6 +98,9 @@ static void toggle_chan_scanlist(void)
     if(!IS_MR_CHANNEL(gTxVfo->CHANNEL_SAVE)) {
 #ifdef ENABLE_SCAN_RANGES
         CHFRSCANNER_ScanRange();
+#elif defined(ENABLE_CODE_PRACTICE) && defined(ENABLE_CW_MODULATOR)
+        CPO_Enter();
+        gRequestDisplayScreen = DISPLAY_CPO;
 #endif
         return;
     }
