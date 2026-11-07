@@ -533,6 +533,11 @@ int MENU_GetLimits(uint8_t menu_id, int32_t *pMin, int32_t *pMax)
 			*pMax = CW_HANG_10MS_MAX;
 			break;
 
+		case MENU_CW_DISPLAY:
+			*pMin = 0;
+			*pMax = CW_DISPLAY_COUNT - 1;
+			break;
+
 #endif
 #ifdef ENABLE_FEAT_F4HWN
         case MENU_SET_PWR:
@@ -1087,6 +1092,10 @@ void MENU_AcceptSetting(void)
 			gEeprom.CW_HANG_10MS = gSubMenuSelection;
 			break;
 
+		case MENU_CW_DISPLAY:
+			gEeprom.CW_DISPLAY_DURATION = gSubMenuSelection;
+			break;
+
 		case MENU_CW_KEY_INPUT:
 			// Map menu selection (0-10) to bit-mapped value
 			{
@@ -1569,6 +1578,10 @@ void MENU_ShowCurrentSetting(void)
 
 		case MENU_CW_HANG:
 			gSubMenuSelection = gEeprom.CW_HANG_10MS;
+			break;
+
+		case MENU_CW_DISPLAY:
+			gSubMenuSelection = gEeprom.CW_DISPLAY_DURATION;
 			break;
 
 		case MENU_CW_KEY_INPUT:

@@ -75,9 +75,10 @@ static const CW_SettingLimits_t s_cw_settings_limits[CW_SETTINGS_SIZE] = {
     { 0, CW_KEY_WPM_MAX - 1, 0 },                                        // CW_FARNSWORTH_WPM (1 to MIN-1 read as 0)
     { 0, 1, 0 },                                                         // CW_FARNSWORTH_AUTO
     { 0, CW_ROGER_TYPE_COUNT - 1, CW_ROGER_TYPE_NORMAL },                // CW_ROGER_TYPE
+    { 0, CW_DISPLAY_COUNT - 1, CW_DISPLAY_1S },                          // CW_DISPLAY_DURATION
 };
 
-_Static_assert(offsetof(EEPROM_Config_t, CW_ROGER_TYPE) - offsetof(EEPROM_Config_t, CW_SETTINGS)
+_Static_assert(offsetof(EEPROM_Config_t, CW_DISPLAY_DURATION) - offsetof(EEPROM_Config_t, CW_SETTINGS)
                == CW_SETTINGS_SIZE - 1, "CW settings fields don't match CW_SETTINGS_SIZE");
 #endif
 

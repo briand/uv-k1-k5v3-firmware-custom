@@ -51,7 +51,7 @@ def macro_block(text):
 # v1.x packed CW settings: 600 Hz with sidetone code 2, 22 WPM, key input 1
 # with break-in, 4 s repeat, mode B, roger 9 dits, 300 ms hang
 CW_SETTINGS = bytes([0x23, 22, 0x41, 4, 0x01, 9, 0xFF, 30])
-CW_SETTINGS_V2 = bytes([60, 11, 22, 1, 1, 1, 4, 9, 30, 0, 0, 0xFF])  # roger type: v1.x had none
+CW_SETTINGS_V2 = bytes([60, 11, 22, 1, 1, 1, 4, 9, 30, 0, 0, 0xFF, 0xFF])  # roger type, display: v1.x had neither
 CHANNEL_455 = bytes(range(0x10, 0x20))   # a real channel inside macro block 3
 
 
@@ -106,8 +106,9 @@ check(all(r.get_memory(ch + 1).empty for ch in range(448, 454)),
 check(raw(r, 448 * 16, 6 * 16) == b'\xFF' * 96, "legacy macro bytes erased")
 check(raw(r, 0x8000 + 448 * 2, 2) == b'\xFF\xFF', "attributes marked deleted")
 check(raw(r, 455 * 16, 16) == CHANNEL_455, "channel 456 (block 3) untouched")
-check(raw(r, 0xA208, 12) == CW_SETTINGS_V2, "CW settings unpacked to one byte each")
+check(raw(r, 0xA208, 13) == CW_SETTINGS_V2, "CW settings unpacked to one byte each")
 check(r._cw_get("roger_type") == 0, "unset roger type reads as Normal")
+check(r._cw_get("display") == 0, "unset CW display time reads as 1000 ms")
 check(r._cw_get("sidetone") == 11, "sidetone code 2 is level 11")
 check(raw(r, 0xA140, 8) == b'\xFF' * 8, "legacy CW settings cleared")
 check(raw(r, 0xA170, 1) == b'\x02', "legacy schema byte left alone")

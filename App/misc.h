@@ -511,6 +511,7 @@ static inline bool SerialConfigInProgress() { return gSerialConfigCountDown_500m
 	extern volatile bool                  gCW_CrossMode;
     extern volatile uint32_t     gCW_SuspendCounter_1ms;
 	extern volatile uint16_t      gCW_TxDisplayHoldoff_10ms;
+	#define CW_TX_DISPLAY_HOLDOFF_INFINITE UINT16_MAX  // never counts down
 
 	// CW macro/keyer state used by app loop
 	extern bool                  gCW_Recording;

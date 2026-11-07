@@ -105,6 +105,16 @@ typedef enum CW_IambicMode_t CW_IambicMode_t;
 #define CW_ROGER_TYPE_SKIPPING    2  // dit dididit di-daaaah-dit (E S R)
 #define CW_ROGER_TYPE_COUNT       3
 
+// How long the CW decode line stays on screen after keying stops (CWdisp menu).
+// The holdoff counts down in both the SysTick handler and CW_TimeSlice10ms, so
+// CW_DISPLAY_HOLDOFF_UNIT ticks of gCW_TxDisplayHoldoff_10ms last about 1 s.
+#define CW_DISPLAY_1S             0  // the original fixed timeout
+#define CW_DISPLAY_5S             1
+#define CW_DISPLAY_10S            2
+#define CW_DISPLAY_INFINITE       3  // never times out; explicit clears still apply
+#define CW_DISPLAY_COUNT          4
+#define CW_DISPLAY_HOLDOFF_UNIT   200
+
 // Sidetone level (CWvol menu): 0 = off; see CW_ApplySidetoneGain for the gain curve
 #define CW_SIDETONE_LEVEL_MAX     15
 #define CW_SIDETONE_LEVEL_DEFAULT 7
@@ -126,7 +136,7 @@ typedef enum CW_IambicMode_t CW_IambicMode_t;
 #define CW_KEY_WPM_DEFAULT        18
 
 // Number of CW settings bytes (EEPROM_Config_t CW_SETTINGS)
-#define CW_SETTINGS_SIZE          12
+#define CW_SETTINGS_SIZE          13
 
 // Copy practice effective speed (Farnsworth): the slowest the gaps between
 // characters can stretch to. It always stays below the keyer speed.
@@ -459,6 +469,7 @@ typedef struct {
 			uint8_t CW_FARNSWORTH_WPM;        // copy practice effective speed, 0 = keyer spacing
 			uint8_t CW_FARNSWORTH_AUTO;       // copy practice narrows and widens the spacing on its own
 			uint8_t CW_ROGER_TYPE;            // proper roger type, CW_ROGER_TYPE_*
+			uint8_t CW_DISPLAY_DURATION;      // CW decode line timeout, CW_DISPLAY_*
 		};
 		uint8_t CW_SETTINGS[CW_SETTINGS_SIZE];
 	};
@@ -550,7 +561,7 @@ void SETTINGS_UpdateChannel(uint16_t channel, const VFO_Info_t *pVFO, bool keep)
 //   +4  EEPROM schema (EEPROM_SCHEMA_*)
 //   +5  reserved (3)
 //   +8  CW settings, CW_SETTINGS_SIZE bytes (v1.x packed them into 8 at 0xA140)
-//   +20 reserved for new gEeprom values (44)
+//   +21 reserved for new gEeprom values (43)
 #define CW_BLOCK_ADDR          0x00A200
 #define CW_BLOCK_SIZE          0x40
 #define CW_BLOCK_HDR_SIZE      8
